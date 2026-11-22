@@ -28,7 +28,8 @@
 #include "../shared/song.h"
 
 enum { C_NEW = 1, C_OPEN, C_SAVE, C_SAVEAS, C_EXIT, C_UNDO, C_REDO, C_DELETE, C_SELALL, C_TRACK, C_DRUMS, C_UNTRACK, C_INSTR,
-       C_MUTE, C_SOLO, C_PLAY, C_STOP, C_TEMPO, C_ZOOMIN, C_ZOOMOUT, C_RECORD, C_CLICK, C_COUNTIN };
+       C_MUTE, C_SOLO, C_PLAY, C_STOP, C_TEMPO, C_ZOOMIN, C_ZOOMOUT, C_RECORD, C_CLICK, C_COUNTIN, C_STEP, C_STEPLEN };
+                                        /* (C_STEPLEN + n: a sixteenth, an eighth, a quarter, a half) */
 
 #define ROW 8                           /* a key's row on the roll: pixels */
 #define GRID (SONG_PPQ / 4)             /* notes are put and moved on sixteenths */
@@ -71,6 +72,11 @@ static glos_handle lock, thread;
 static int playing, quit, over;         /* over: the thread saw it play out */
 static unsigned long demo_ms;
 static long line = -1;                  /* the tick the playing is at (-1: it isn't) */
+/* (phase F) Step entry: a note at the cursor for each key played, the cursor on by the step's length after it. */
+static int stepping;                    /* on (Edit, Step Entry: F8) */
+static unsigned long step_at;           /* the cursor: a tick */
+static int step_len = 1;                /* 0 a sixteenth, 1 an eighth, 2 a quarter, 3 a half */
+static glos_handle step_out, step_in;   /* the notes heard as they are put; a MIDI keyboard's */
 
 /* a drag on the roll */
 enum { D_NONE, D_MOVE, D_STRETCH };
@@ -218,6 +224,8 @@ static void roll_draw(struct gui_widget *w, struct gfx_surface *s, const struct 
         }
     if (line >= 0)
         gfx_fill(s, X(line), v->area.y, 1, v->area.h, 0xD02020);
+    if (stepping)                               /* step entry's cursor */
+        gfx_fill(s, X(step_at), v->area.y, 2, v->area.h, 0x2060D0);
 #undef X
 }
 
@@ -326,6 +334,12 @@ static int roll_event(struct gui_widget *w, struct gui_ev *e, int x, int y)
     case GUI_EV_PRESS:
         if (drag || x < 0 || y < 0 || key < 0)
             return 1;
+        if (stepping && e->button == 1) {       /* (step entry: the cursor there, on a sixteenth) */
+            step_at = (unsigned long)x / GRID * GRID;
+            say("step at=%lu", step_at);
+            gui_damage(w);
+            return 1;
+        }
         hit = note_at(t, x, key);
         if (e->button == 2) {                   /* the right button: the note there out */
             if (hit >= 0) {
@@ -475,6 +489,7 @@ static void feeder(void *arg)
 
 static void rec_poll(void);
 static void rec_stop(void);
+static void step_note(unsigned key, unsigned force);
 
 static void tick(void *arg)             /* the line along the roll; the end seen */
 {
@@ -668,6 +683,11 @@ static void rec_poll(void)
 static void rec_event(const struct glos_ev *ev)         /* a message of the MIDI keyboard's */
 {
     const struct glos_ev_midi *m = (const struct glos_ev_midi *)ev;
+    if (ev->kind == GLOS_EV_MIDI && stepping && !recording) {  /* (step entry: a key down is a note at the cursor) */
+        if ((m->status & 0xF0) == 0x90 && m->data2)
+            step_note(m->data1 & 0x7F, m->data2);
+        return;
+    }
     if (ev->kind != GLOS_EV_MIDI || !recording)
         return;
     if ((m->status & 0xF0) == 0x90 && m->data2)
@@ -721,6 +741,95 @@ static void rec_start(void)
     click_poll();
     say("recording in=%s click=%d count=%lu", rec_in ? "mpu+keys" : "keys", click_on, count_ms);
     gui_focus(roll);
+}
+
+/* ---- step entry (phase F): Edit, Step Entry (F8). A key of the PC's piano (or a MIDI keyboard's) puts a note
+   at the cursor in the chosen track, as long as the step, heard as it is put, and the cursor moves on by the step;
+   Space a rest; Backspace back a step, what begins there taken away; Ctrl+1 to Ctrl+4 the step (a sixteenth, an
+   eighth, a quarter, a half); a click on the roll the cursor there. Each note one step of the history. */
+
+static unsigned long step_ticks(void)
+{
+    static const unsigned m[4] = { 1, 2, 4, 8 };
+    return (unsigned long)GRID * m[step_len & 3];
+}
+
+static void step_sound(unsigned key, unsigned force)
+{
+    struct glos_midi_msg m[2];
+    if (!step_out || demo)
+        return;
+    memset(m, 0, sizeof m);
+    m[0].time = glos_ticks(), m[0].status = (unsigned char)(0x90 | song->track[cur].channel), m[0].data1 = (unsigned char)key;
+    m[0].data2 = (unsigned char)force;
+    m[1].time = m[0].time + 300, m[1].status = (unsigned char)(0x80 | song->track[cur].channel), m[1].data1 = (unsigned char)key;
+    take();
+    glos_midi_send(step_out, m, 2, NULL, NULL);
+    give();
+}
+
+static void step_note(unsigned key, unsigned force)
+{
+    struct step *st;
+    unsigned long len = step_ticks();
+    if (!stepping || key > 127)
+        return;
+    st = step_begin();
+    if (song_note_add(&song->track[cur], step_at, len, key, force ? force : 100) < 0) {
+        step_end(st, "");
+        return;
+    }
+    step_end(st, GUI_T("Step Note"));
+    step_sound(key, force ? force : 100);
+    say("step note %u at=%lu", key, step_at);
+    step_at += len;
+    size_roll();
+    gui_damage(roll);
+}
+
+static void step_rest(void)
+{
+    step_at += step_ticks();
+    say("step rest at=%lu", step_at);
+    gui_damage(roll);
+}
+
+static void step_back(void)
+{
+    struct song_track *t = &song->track[cur];
+    struct step *st;
+    unsigned long len = step_ticks(), i, gone = 0;
+    step_at = step_at >= len ? step_at - len : 0;
+    st = step_begin();
+    for (i = t->nnotes; i-- > 0;)
+        if (t->notes[i].at == step_at)
+            song_note_remove(t, i), gone++;
+    step_end(st, GUI_T("Step Back"));
+    say("step back at=%lu removed=%lu", step_at, gone);
+    gui_damage(roll);
+}
+
+static void step_toggle(void)
+{
+    stepping = !stepping;
+    if (stepping) {
+        rec_stop();
+        stop_playing();
+        if (!demo) {
+            step_out = glos_midi_out(GLOS_MIDI_PORT_FM);
+            step_in = glos_midi_in(GLOS_MIDI_PORT_MPU);     /* (none: the PC's keys alone) */
+        }
+        say("step on at=%lu len=%lu", step_at, step_ticks());
+        gui_focus(roll);
+    } else {
+        if (step_out)
+            glos_close(step_out);
+        if (step_in)
+            glos_close(step_in);
+        step_out = step_in = 0;
+        say("step off notes=%lu", song->track[cur].nnotes);
+    }
+    gui_damage(roll);
 }
 
 /* ---- files */
@@ -942,6 +1051,11 @@ static void command(struct gui_window *w, int id)
     struct step *st;
     struct song *s;
     unsigned long i, n = 0;
+    if (id >= C_STEPLEN && id < C_STEPLEN + 4) {        /* step entry's step */
+        step_len = id - C_STEPLEN;
+        say("step len=%lu", step_ticks());
+        return;
+    }
     char p[300];
     (void)w;
     switch (id) {
@@ -1052,6 +1166,9 @@ static void command(struct gui_window *w, int id)
     case C_TEMPO:
         pick_tempo();
         break;
+    case C_STEP:
+        step_toggle();
+        break;
     case C_ZOOMIN:
     case C_ZOOMOUT:
         zoom = id == C_ZOOMIN ? (zoom > 2 ? zoom / 2 : 2) : (zoom < 32 ? zoom * 2 : 32);
@@ -1074,6 +1191,12 @@ static void update(struct gui_window *w)
     gui_command_enable(w, C_STOP, heard != NULL || recording);
     gui_command_check(w, C_RECORD, recording);
     gui_command_check(w, C_CLICK, click_on);
+    gui_command_check(w, C_STEP, stepping);
+    {
+        int k;
+        for (k = 0; k < 4; k++)
+            gui_command_check(w, C_STEPLEN + k, step_len == k);
+    }
     gui_command_check(w, C_COUNTIN, count_in);
     gui_command_enable(w, C_CLICK, !recording);
     gui_command_enable(w, C_COUNTIN, !recording);
@@ -1117,6 +1240,25 @@ static int key(struct gui_window *w, struct gui_ev *e)
                                                    the press; the idle's look at the keys ends it) */
         rec_on((unsigned)pc_key(e->key), 100, 1);
         return 1;
+    }
+    if (stepping && !recording) {               /* step entry's keys */
+        if (!e->mods && pc_key(e->key) >= 0) {
+            step_note((unsigned)pc_key(e->key), 100);
+            return 1;
+        }
+        if (!e->mods && e->key == 0x39) {       /* Space: a rest */
+            step_rest();
+            return 1;
+        }
+        if (!e->mods && e->key == 0x0E) {       /* Backspace: back a step */
+            step_back();
+            return 1;
+        }
+        if ((e->mods & GLOS_MOD_CTRL) && e->key >= 0x02 && e->key <= 0x05) {   /* Ctrl+1 to Ctrl+4: the step */
+            step_len = e->key - 0x02;
+            say("step len=%lu", step_ticks());
+            return 1;
+        }
     }
     return 0;
 }
@@ -1166,6 +1308,15 @@ static void build(void)
     gui_command(win, C_PLAY, GUI_T("&Play"), "F5", gui_glyph("play"), GUI_T("Play from the start"));
     gui_command(win, C_STOP, GUI_T("&Stop"), "F6", gui_glyph("stop"), GUI_T("Stop"));
     gui_command(win, C_RECORD, GUI_T("&Record"), "F7", NULL, GUI_T("Record from a MIDI keyboard or the PC's keys"));
+    gui_command(win, C_STEP, GUI_T("Step &Entry"), "F8", NULL, GUI_T("A note at the cursor for each key played"));
+    {
+        static const char *const lens[4] = { GUI_N("Step: a Si&xteenth"), GUI_N("Step: an E&ighth"), GUI_N("Step: a &Quarter"),
+                                             GUI_N("Step: a &Half") };
+        static const char *const keys[4] = { "Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+4" };
+        int k;
+        for (k = 0; k < 4; k++)
+            gui_command(win, C_STEPLEN + k, GUI_T(lens[k]), keys[k], NULL, NULL);
+    }
     gui_command(win, C_CLICK, GUI_T("C&lick While Recording"), NULL, NULL, GUI_T("A click on each beat while recording"));
     gui_command(win, C_COUNTIN, GUI_T("Count &In a Bar"), NULL, NULL, GUI_T("A bar of clicks before recording begins"));
     gui_command(win, C_TEMPO, GUI_T("&Tempo..."), NULL, NULL, NULL);
@@ -1180,6 +1331,13 @@ static void build(void)
     gui_menu_command(m, C_UNDO), gui_menu_command(m, C_REDO);
     gui_menu_sep(m);
     gui_menu_command(m, C_DELETE), gui_menu_command(m, C_SELALL);
+    gui_menu_sep(m);
+    gui_menu_command(m, C_STEP);
+    {
+        int k;
+        for (k = 0; k < 4; k++)
+            gui_menu_command(m, C_STEPLEN + k);
+    }
     m = gui_menu(bar, GUI_T("&Track"));
     gui_menu_command(m, C_TRACK), gui_menu_command(m, C_DRUMS), gui_menu_command(m, C_UNTRACK);
     gui_menu_sep(m);

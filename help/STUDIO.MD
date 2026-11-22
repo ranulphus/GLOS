@@ -33,3 +33,8 @@ away again.
 While recording, a **click** sounds each beat (a wood block, higher on a bar's first beat). **Transport, Click
 While Recording** turns it off; **Transport, Count In a Bar** gives a bar of clicks before the take begins (the
 song, if it has notes, starts after it).
+
+**Edit, Step Entry** (F8) puts notes in without playing in time: each key you press (on the PC's piano rows or a
+MIDI keyboard) puts its note at the blue cursor, as long as the step, and moves the cursor on. **Space** leaves
+a rest, **Backspace** goes back a step and takes away what begins there, **Ctrl+1** to **Ctrl+4** make the step a
+sixteenth, an eighth, a quarter or a half, and a click on the roll moves the cursor.

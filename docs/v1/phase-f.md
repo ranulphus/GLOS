@@ -1637,3 +1637,16 @@ does not.
   its entries, their bytes, every folder's list and a walk; the same image spoiled (no sectors a cluster)
   refused; and every damaged copy the test makes of it read without harm.
 - **Not yet:** images written to from Files; a hard disk's image (its partition table).
+
+## MIDI Studio: step entry (2026-11-22)
+
+The notes' "step entry at a cursor (a note a key press, the cursor moving on)": **Edit, Step Entry** (F8). A
+key of the PC's piano (or a MIDI keyboard's key down, by the MPU-401's input) puts a note at the cursor in the
+chosen track, as long as the step, heard on the FM synth as it is put, and the cursor moves on by the step;
+**Space** a rest; **Backspace** back a step, the notes that begin there taken away; **Ctrl+1** to **Ctrl+4** (and
+the Edit menu) the step: a sixteenth, an eighth (as it starts), a quarter, a half; a click on the roll the
+cursor there, on a sixteenth. The cursor is a blue line on the roll. Each note is a step of the history, and
+so is a step back. Recording stops step entry and step entry stops recording.
+
+- **Tests:** `studio-step` (host and the emulated desktops): C, D, a rest and E put; E taken back; undone.
+- **Not yet:** velocity from the PC's keys; a chord at one step (keys held together).
