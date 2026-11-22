@@ -14,6 +14,12 @@ struct webget *webget_start(const char *url, const char *certs, unsigned long li
     return calloc(1, sizeof(struct webget));
 }
 
+struct webget *webget_post(const char *url, const char *certs, unsigned long limit, const char *body, unsigned long len)
+{
+    (void)url, (void)certs, (void)limit, (void)body, (void)len;
+    return calloc(1, sizeof(struct webget));
+}
+
 int webget_state(struct webget *g, unsigned long *got, unsigned long *total)
 {
     (void)g;

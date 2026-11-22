@@ -9310,6 +9310,28 @@ class HttpsServer:
                     self.end_headers()
                 self.close_connection = True
 
+            def do_POST(self):                  # (phase F: the Web Reader's forms) the body echoed; or a 303 to the page
+                n = int(self.headers.get("Content-Length", "0") or 0)
+                got = self.rfile.read(n).decode("latin-1") if n else ""
+                if self.path == "/echo" and self.headers.get("Content-Type", "") == "application/x-www-form-urlencoded":
+                    body = ("<title>Posted</title><p>%s</p>" % got.replace("&", "&amp;").replace("<", "&lt;")).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    self.wfile.write(body)
+                elif self.path == "/post-redirect":
+                    self.send_response(303)
+                    self.send_header("Location", "/page.html")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                else:
+                    self.send_response(404)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                self.close_connection = True
+
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         ctx.load_cert_chain(os.path.join(pki, cert + ".pem"), os.path.join(pki, cert + ".key"))
@@ -9522,6 +9544,16 @@ def https_case(profile, card):
                 notes.append("%s: %s" % (name, " | ".join(o.strip().split("\n"))[-400:]))
         rc, o, e = agent.ssh("C:\\TEST\\WEB.EXE -dump https://test.glos:%d/nothing -resolve test.glos:10.0.2.2" % good, timeout=600)
         checks["web-not-found"] = rc == 1 and "WEB dump failed: HTTP 404" in (o + e)
+        # (phase F) a form sent by POST: its body echoed; and one whose answer is a 303, the page then asked by GET
+        rc, o, e = agent.ssh("C:\\TEST\\WEB.EXE -dump https://test.glos:%d/echo -post q=hello+there "
+                             "-resolve test.glos:10.0.2.2" % good, timeout=600)
+        o = (o + e).replace("\r", "")
+        checks["web-post"] = rc == 0 and "WEB dump TITLE: Posted" in o and "WEB dump P0: q=hello+there" in o
+        if not checks["web-post"]:
+            notes.append("web-post: %s" % " | ".join(o.strip().split("\n"))[-300:])
+        rc, o, e = agent.ssh("C:\\TEST\\WEB.EXE -dump https://test.glos:%d/post-redirect -post a=1 "
+                             "-resolve test.glos:10.0.2.2" % good, timeout=600)
+        checks["web-post-303"] = rc == 0 and "WEB dump H1: Served over TLS" in (o + e)
         # Chat's connection and IRC, against IRC servers on the host
         import socket
         irc = {"tls": IrcServer(pki, "good"), "plain": IrcServer(), "name": IrcServer(pki, "name")}

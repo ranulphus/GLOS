@@ -1,7 +1,7 @@
 # The Web Reader's forms (apps/web; phase F): a page of two forms, their fields' words links to their dialogs.
 # The first, sent by GET: its text field's word (its placeholder) followed, the dialog filled in and sent: the
-# address the form names, with its hidden field and the words typed as the query. The second, sent by POST,
-# refused with its reason (the HTTP client asks by GET alone).
+# address the form names, with its hidden field and the words typed as the query. The second, sent by POST: its
+# body made of its field (a file's address is read as it is: the POST itself is the https suite's, by WEB -dump).
 run WEB.EXE C:\WEB\FORM.HTM
 wait "A Form - Web Reader"
 said WEB loaded file:///C:/WEB/FORM.HTM title=A Form blocks=4 links=4
@@ -20,10 +20,12 @@ key tab
 key tab
 key tab
 key enter
-said WEB form 1 post refused
-wait "Form Not Sent"
+said WEB form 1 fields=1
+wait "Fill In the Form"
+type y z
 key enter
-gone "Form Not Sent"
+said WEB form 1 sent post file:///C:/WEB/RESULT.HTM body x=y+z
+said WEB loaded file:///C:/WEB/RESULT.HTM title=Found blocks=1 links=0
 key alt+f4
 gone "A Form - Web Reader"
 expect WEB end

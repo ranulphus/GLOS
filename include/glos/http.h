@@ -1,4 +1,4 @@
-/* HTTP/1.1 GETs for GLOS apps (M10 step C; sdk/http, DJGPP), over TLS
+/* HTTP/1.1 GETs (and, phase F, POSTs) for GLOS apps (M10 step C; sdk/http, DJGPP), over TLS
  * (glos/tls.h) for https: URLs. Redirects followed (5 at most, https to http
  * refused), bodies by length, chunked or to the close. One connection a
  * request ("Connection: close"); no compression asked for. */
@@ -32,6 +32,12 @@ struct http_get {
     const char *accept;                 /* in: what is wanted (Accept); 0: anything */
     char type[96];                      /* out: what the body is, as its sender says (Content-Type: "text/html;
                                            charset=utf-8"), or "" */
+    /* (phase F: a form's) in: a POST's body, post_len bytes, of post_type (0: a form's, "application/x-www-form-
+       urlencoded"); 0: a GET. A redirect 301, 302 or 303 is followed by a GET, as browsers do; 307 or 308 sends
+       the body again. */
+    const char *post;
+    unsigned long post_len;
+    const char *post_type;
 };
 
 int http_get(struct http_get *g);       /* 0: a 2xx response's body given; -1 and why ("HTTP 404" for another status) */

@@ -31,7 +31,6 @@ Type in **Address** (Ctrl+L) and press Enter:
   the page; those from the web come once the page is there, a moment later. A picture that can't be had is
   shown by its words in brackets. A link that leads to a picture shows it alone.
 - A form's fields are shown as words in brackets, links: Enter on one opens the form, to type in and **Send**.
-  Forms that send what is typed by POST (rather than in the address) can't be sent yet.
 - Files are not saved from here: use `FETCH address` at the
   [command line](COMMAND.MD) to fetch a file.
 - Connections to https sites are checked as a browser checks them. The PC's clock must be right for that: see

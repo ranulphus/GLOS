@@ -782,13 +782,14 @@ static void form_done(struct gui_widget *b, int what)
 }
 
 static void go(const char *url, int push);
+static void go_post(const char *url, const char *body);
 
 static void form_fill(int k)
 {
     struct wform *f;
     struct gui_window *dlg;
     struct gui_widget *box, *form, *row;
-    char url[1100], esc[400], label[64];
+    char url[1600], esc[400], label[64], pairs[900];
     int i, which[8], n, sent_button = 0;
     size_t at;
     if (k < 0 || k >= nforms || k >= FORMS) {
@@ -796,10 +797,9 @@ static void form_fill(int k)
         return;
     }
     f = &forms[k];
-    if (strcmp(f->method, "get")) {
+    if (strcmp(f->method, "get") && strcmp(f->method, "post")) {
         say("form %d %s refused", k, f->method);
-        gui_message(win, GUI_T("Form Not Sent"), GUI_T("This form sends what is typed in a way the Web Reader can't use yet "
-                                                     "(POST): it can be filled in only in another browser."), GUI_MB_OK);
+        gui_message(win, GUI_T("Form Not Sent"), GUI_T("This form is sent in a way the Web Reader does not know."), GUI_MB_OK);
         return;
     }
     dlg = gui_window(GUI_T("Fill In the Form"), 420, 0, GUI_W_DIALOG);
@@ -828,8 +828,7 @@ static void form_fill(int k)
         say("form left");
         return;
     }
-    at = strcspn(f->action, "?#");              /* (GET: the form's words are the query, in place of the address's) */
-    snprintf(url, sizeof url, "%.*s?", (int)(at < 600 ? at : 600), f->action);
+    pairs[0] = 0;
     for (i = 0; i < f->n; i++) {
         const char *v = f->f[i].value;
         int j, pressed = !strcmp(f->f[i].kind, "submit") || !strcmp(f->f[i].kind, "image");
@@ -840,15 +839,22 @@ static void form_fill(int k)
         for (j = 0; j < n; j++)
             if (which[j] == i)
                 v = ff_got[j];
-        if (strlen(url) + strlen(f->f[i].name) + 3 * strlen(v) + 3 >= sizeof url)
+        if (strlen(pairs) + 3 * strlen(f->f[i].name) + 3 * strlen(v) + 3 >= sizeof pairs)
             break;
         url_escape(f->f[i].name, esc, sizeof esc);
-        strcat(url, url[strlen(url) - 1] == '?' ? "" : "&");
-        strcat(url, esc);
-        strcat(url, "=");
+        strcat(pairs, pairs[0] ? "&" : "");
+        strcat(pairs, esc);
+        strcat(pairs, "=");
         url_escape(v, esc, sizeof esc);
-        strcat(url, esc);
+        strcat(pairs, esc);
     }
+    if (!strcmp(f->method, "post")) {           /* POST: the pairs are the body, sent to the form's address */
+        say("form %d sent post %s body %s", k, f->action, pairs);
+        go_post(f->action, pairs);
+        return;
+    }
+    at = strcspn(f->action, "?#");              /* GET: they are the query, in place of the address's */
+    snprintf(url, sizeof url, "%.*s?%s", (int)(at < 600 ? at : 600), f->action, pairs);
     say("form %d sent %s", k, url);
     go(url, 1);
 }
@@ -929,6 +935,27 @@ static void go(const char *url, int push)
         gui_set_text(status, t);
         say("refused %s", url);
     }
+}
+
+/* A form sent by POST: to a web server, its body with it (webget_post); a file's address is read as it is. */
+static void go_post(const char *url, const char *body)
+{
+    char certs[300], t[1100];
+    if (!starts(url, "http:") && !starts(url, "https:")) {
+        go(url, 1);
+        return;
+    }
+    stop();
+    gui_path_join(certs, sizeof certs, glos_home(), TLS_CERTS);
+    if (!(getting = webget_post(url, certs, PAGE_MAX, body, strlen(body)))) {
+        show_failure(url, "no memory");
+        return;
+    }
+    snprintf(getting_url, sizeof getting_url, "%s", url);
+    getting_push = 1;
+    snprintf(t, sizeof t, GUI_T("Sending the form to %.900s..."), url);
+    gui_set_text(status, t);
+    say("posting %s", url);
 }
 
 /* What was typed in the address: a whole address; a DOS path; a site's name; or words to search for. */
@@ -1218,6 +1245,8 @@ static void build(void)
 }
 
 /* ---- WEB -dump URL: a page fetched and read with no window, a line a block (on GLOS: the host has no network) */
+static const char *dump_post;          /* (WEB -dump -post BODY: the page asked for by POST, BODY its form's) */
+
 #ifdef __DJGPP__
 
 static struct { char *b; unsigned long n, room; } dumped;
@@ -1281,6 +1310,8 @@ static int dump(const char *url, const char *resolve)
     memset(&h, 0, sizeof h);
     h.url = url, h.anchors = have ? &anchors : NULL, h.resolve = resolve, h.body = dump_body;
     h.agent = "GLOS-Web-Reader/1.0", h.accept = "text/html, text/plain;q=0.9, */*;q=0.5";
+    if (dump_post)
+        h.post = dump_post, h.post_len = strlen(dump_post);
     r = http_get(&h);
     if (r != 0 && dumped.n <= PAGE_MAX) {
         printf("WEB dump failed: %s\n", h.why);
@@ -1313,6 +1344,8 @@ int main(int argc, char **argv)
             dumping = 1;
         else if (!strcmp(argv[i], "-resolve") && i + 1 < argc)
             resolve = argv[++i];
+        else if (!strcmp(argv[i], "-post") && i + 1 < argc)
+            dump_post = argv[++i];
         else if (!strcmp(argv[i], "-marks") && i + 1 < argc)
             snprintf(marks_file, sizeof marks_file, "%s", argv[++i]);
         else if (argv[i][0] != '-')

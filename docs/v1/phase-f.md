@@ -1597,3 +1597,15 @@ figure: the figures are pictures only.
 
 - **Tests:** `ski-figures` (host and the emulated desktops): the demonstration held at step 240 on mountain 7,
   each figure there in turn (pictures); `ski` (the menu's new name); `ski_test`'s round trip keeps the figure.
+
+## The Web Reader: forms sent by POST (2026-11-22)
+
+The forms' "Not yet: POST". GLOS's HTTP client (sdk/http, `glos/http.h`) takes a body: `post`, `post_len` and
+`post_type` (a form's kind unless said), sent with its Content-Type and Content-Length; a redirect 301, 302 or
+303 after it is followed by a GET, as browsers do, and 307 or 308 sends the body again. The Web Reader's fetcher
+has `webget_post`; a POST form's pairs go as the body to its address, and the page that comes is shown and kept
+in the history by its address (Back or Reload to it asks for it again by GET). A file's address is read as it
+is. `WEB -dump URL -post BODY` asks by POST (the suite's).
+
+- **Tests:** the https suite's `web-post` (a form's body echoed by the suite's server, over TLS) and
+  `web-post-303` (a POST answered by a 303: the page then asked by GET); `web-form`'s second form sent by POST.

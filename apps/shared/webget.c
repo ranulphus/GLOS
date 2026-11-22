@@ -14,6 +14,8 @@
 
 struct webget {
     char url[1024], certs[260];
+    char *post;                         /* a POST's body (malloc'd), or 0 */
+    unsigned long post_len;
     unsigned long limit;
     glos_handle thread, lock;
     int state;                          /* 0 on its way, 1 here, -1 failed */
@@ -66,6 +68,7 @@ static void run(void *arg)
     memset(&h, 0, sizeof h);
     h.url = g->url, h.timeout_ms = 30000, h.body = body, h.progress = progress, h.arg = g;
     h.agent = "GLOS-Web-Reader/1.0", h.accept = "text/html, text/plain;q=0.9, image/*;q=0.8, */*;q=0.5";
+    h.post = g->post, h.post_len = g->post_len;
     if (!strncmp(g->url, "https:", 6)) {
         have = tls_anchors_load(&anchors, g->certs) == 0;
         h.anchors = &anchors;
@@ -92,28 +95,42 @@ static void run(void *arg)
     if (unwanted) {                             /* (nobody waits for it) */
         glos_close(g->lock);
         free(g->bytes);
+        free(g->post);
         free(g);
     }
 }
 
-struct webget *webget_start(const char *url, const char *certs, unsigned long limit)
+static struct webget *start(const char *url, const char *certs, unsigned long limit, const char *post, unsigned long len)
 {
     struct webget *g = calloc(1, sizeof *g);
-    if (!g || strlen(url) >= sizeof g->url) {
+    if (!g || strlen(url) >= sizeof g->url || (post && !(g->post = malloc(len + 1)))) {
         free(g);
         return NULL;
     }
+    if (post)
+        memcpy(g->post, post, len), g->post[len] = 0, g->post_len = len;
     strcpy(g->url, url);
     snprintf(g->certs, sizeof g->certs, "%s", certs ? certs : "");
     g->limit = limit;
     if (!(g->lock = glos_lock()) || !(g->thread = glos_thread(run, g, 128 * 1024, 0))) {
         if (g->lock)
             glos_close(g->lock);
+        free(g->post);
         free(g);
         return NULL;
     }
     glos_detach(g->thread);
     return g;
+}
+
+struct webget *webget_start(const char *url, const char *certs, unsigned long limit)
+{
+    return start(url, certs, limit, NULL, 0);
+}
+
+struct webget *webget_post(const char *url, const char *certs, unsigned long limit, const char *body, unsigned long len)
+{
+    return start(url, certs, limit, body ? body : "", body ? len : 0);
 }
 
 int webget_state(struct webget *g, unsigned long *got, unsigned long *total)
@@ -151,6 +168,7 @@ void webget_free(struct webget *g)
     if (over) {
         glos_close(g->lock);
         free(g->bytes);
+        free(g->post);
         free(g);
     }
 }

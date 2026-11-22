@@ -10,6 +10,8 @@ struct webget;
 /* An http: or https: URL begun to be fetched. certs: the trust anchors' file (CERTS.DAT's path); limit: the most
    bytes kept (a larger body is cut there). NULL: no memory, no thread. */
 struct webget *webget_start(const char *url, const char *certs, unsigned long limit);
+/* (phase F) The same by POST: a form's body (len bytes, a form's kind: name=value&...), copied. */
+struct webget *webget_post(const char *url, const char *certs, unsigned long limit, const char *body, unsigned long len);
 
 /* How it is: 0 on its way (*got bytes so far of *total, 0 if not known), 1 here, -1 failed (webget_why). */
 int webget_state(struct webget *g, unsigned long *got, unsigned long *total);

@@ -273,9 +273,9 @@ static int resolve_ref(const struct url *base, const char *ref, char *out, size_
 int http_get(struct http_get *g)
 {
     static struct conn c;
-    char url[512], req[1500], l[1024], location[512], port[8];
+    char url[512], req[1500], l[1024], location[512], port[8], more[160];
     struct url u;
-    int hops, was_https = 0;
+    int hops, was_https = 0, posting = g->post != 0;
     snprintf(url, sizeof url, "%s", g->url);
     g->why[0] = g->tls[0] = 0;
     g->status = 0;
@@ -297,10 +297,15 @@ int http_get(struct http_get *g)
             port[0] = 0;
         else
             snprintf(port, sizeof port, ":%u", u.port);
-        snprintf(req, sizeof req, "GET %s HTTP/1.1\r\nHost: %s%s\r\nUser-Agent: %.80s\r\n"
-                 "Accept: %.120s\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n", u.path, u.host, port,
-                 g->agent && g->agent[0] ? g->agent : "GLOS-FETCH/1.0", g->accept && g->accept[0] ? g->accept : "*/*");
-        if (send_all(&c, req, strlen(req)) != 0) {
+        more[0] = 0;
+        if (posting)                            /* (a form's body: its kind and length, then itself) */
+            snprintf(more, sizeof more, "Content-Type: %.100s\r\nContent-Length: %lu\r\n",
+                     g->post_type && g->post_type[0] ? g->post_type : "application/x-www-form-urlencoded", g->post_len);
+        snprintf(req, sizeof req, "%s %s HTTP/1.1\r\nHost: %s%s\r\nUser-Agent: %.80s\r\n"
+                 "Accept: %.120s\r\nAccept-Encoding: identity\r\n%sConnection: close\r\n\r\n", posting ? "POST" : "GET",
+                 u.path, u.host, port, g->agent && g->agent[0] ? g->agent : "GLOS-FETCH/1.0",
+                 g->accept && g->accept[0] ? g->accept : "*/*", more);
+        if (send_all(&c, req, strlen(req)) != 0 || (posting && g->post_len && send_all(&c, g->post, g->post_len) != 0)) {
             snprintf(g->why, sizeof g->why, "%s", c.tls ? tls_why(c.tls) : "connection lost");
             close_conn(&c);
             return -1;
@@ -340,6 +345,8 @@ int http_get(struct http_get *g)
                 snprintf(g->why, sizeof g->why, "a redirect too long");
                 return -1;
             }
+            if (g->status != 307 && g->status != 308)
+                posting = 0;                    /* (after a form: the page it leads to, by GET) */
             continue;
         }
         if (g->status < 200 || g->status > 299) {
