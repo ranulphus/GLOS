@@ -1622,3 +1622,18 @@ is. `WEB -dump URL -post BODY` asks by POST (the suite's).
 
 - **Tests:** the https suite's `web-post` (a form's body echoed by the suite's server, over TLS) and
   `web-post-303` (a POST answered by a 303: the page then asked by GET); `web-form`'s second form sent by POST.
+
+## Files: a disk's image opened as a folder (2026-11-22)
+
+Disk Tools' plan: "open an image in Files as a folder (FAT12/16 read, through GLOS's own FAT reader: read only
+in v1)". The archive layer (apps/shared/arc.c, which Files enters like folders) has a kind more, `IMG`: a file
+whose first sector is a FAT volume's (55 AA at its end, 512 bytes a sector, a size of whole sectors) and that
+Disk Tools' reader (fatimg.c) opens is listed through it, its folders depth first (long names as the volume
+has them), and a file's bytes read by its path; a file that looked like one and is not is tried as the other
+kinds. By name, .IMG, .IMA and .VFD are archives to Files. Read only: Extract and copying out work, adding
+does not.
+
+- **Tests:** `arc_test` (host): a 1.44 MB floppy that mtools makes (a file, folders in folders, a long name):
+  its entries, their bytes, every folder's list and a walk; the same image spoiled (no sectors a cluster)
+  refused; and every damaged copy the test makes of it read without harm.
+- **Not yet:** images written to from Files; a hard disk's image (its partition table).

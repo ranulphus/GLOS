@@ -266,7 +266,8 @@ APP_LIBS_term := apps/shared/sessions.c
 # Archives read and ZIPs written (Files' folders, phase E): the reader and writer, the packer, the loader's unpacker.
 # (7z archives: the LZMA SDK's reader, third_party/lzma, unchanged; arc7z.c is ours between it and arc.c)
 LZMA_SRCS := $(addprefix third_party/lzma/,7zArcIn.c 7zDec.c LzmaDec.c Lzma2Dec.c Bcj2.c Bra.c Bra86.c Delta.c 7zBuf.c 7zStream.c)
-ARC_SRCS := apps/shared/arc.c apps/shared/arc7z.c apps/shared/lzh.c apps/shared/deflate.c loader/inflate.c $(LZMA_SRCS)
+ARC_SRCS := apps/shared/arc.c apps/shared/arc7z.c apps/shared/lzh.c apps/shared/deflate.c loader/inflate.c $(LZMA_SRCS) \
+            apps/shared/fatimg.c
 # Pictures read and written: one code in the viewer and the editor (apps/shared/picfile.c).
 # (... and folders on other computers over SFTP, phase F: apps/shared/remote.c on the SSH client's library.)
 APP_HOST_LIBS_files := $(ARC_SRCS) apps/shared/picfile.c apps/shared/thumbs.c apps/shared/remote.c apps/shared/sessions.c \

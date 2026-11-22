@@ -661,6 +661,37 @@ manifest("sz-badhead.7z", "!", [])
 write("sz-sfx.7z", b"MZ" + bytes(lrnd.getrandbits(8) for _ in range(700)) + sz)    # (a program before it: not looked for)
 manifest("sz-sfx.7z", "!", [])
 
+# ---- (phase F) a disk's image: a 1.44 MB FAT12 floppy that mtools makes, read by Disk Tools' reader (fatimg.c):
+# its files in folders' order, folders before what is in them; a long name as the volume has it
+import shutil, subprocess
+if shutil.which("mformat") and shutil.which("mcopy") and shutil.which("mmd"):
+    src = os.path.join(out, "imgsrc")
+    os.makedirs(src, exist_ok=True)
+    i_a, i_b, i_c, i_l = text(300), text(5000), bytes(rnd.getrandbits(8) for _ in range(20000)), text(100)
+    for n, d in (("a", i_a), ("b", i_b), ("c", i_c), ("l", i_l)):
+        open(os.path.join(src, n), "wb").write(d)
+    img = os.path.join(out, "floppy.img")
+    if os.path.exists(img):
+        os.remove(img)
+    env = dict(os.environ, MTOOLS_SKIP_CHECK="1")
+    run = lambda *a: subprocess.run(list(a), check=True, env=env, capture_output=True)
+    run("mformat", "-i", img, "-C", "-f", "1440", "-v", "GLOSTEST", "::")
+    run("mcopy", "-i", img, os.path.join(src, "a"), "::A.TXT")
+    run("mmd", "-i", img, "::SUB")
+    run("mcopy", "-i", img, os.path.join(src, "b"), "::SUB/B.TXT")
+    run("mmd", "-i", img, "::SUB/DEEP")
+    run("mcopy", "-i", img, os.path.join(src, "c"), "::SUB/DEEP/C.BIN")
+    run("mcopy", "-i", img, os.path.join(src, "l"), "::A long name.txt")
+    manifest("floppy.img", "IMG", [("A.TXT", i_a, 0, "0"), ("SUB", None, 0, "0"), ("SUB/B.TXT", i_b, 0, "0"),
+                                   ("SUB/DEEP", None, 0, "0"), ("SUB/DEEP/C.BIN", i_c, 0, "0"),
+                                   ("A long name.txt", i_l, 0, "0")], stamp=None)
+    bad = bytearray(open(img, "rb").read())
+    bad[13] = 0                                     # (no sectors a cluster: no volume, and no other archive)
+    write("floppy-bad.img", bytes(bad))
+    manifest("floppy-bad.img", "!", [])
+else:
+    sys.stderr.write("arc_cases: no mtools: no disk image case\n")
+
 # ---- no archives
 write("random.bin", bytes(rnd.getrandbits(8) for _ in range(9000)))
 manifest("random.bin", "!", [])

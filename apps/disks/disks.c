@@ -21,7 +21,7 @@
  *
  * Not yet (docs/v1/phase-f.md): a full format and floppies of another size than their drive's (both need the
  * BIOS's track format, which GLOS_FS_SECTORS has not got), images in parts for disks over 2 GB, backups as
- * ZIPs and their schedule, images opened as folders in Files.
+ * ZIPs. (Images are opened as folders in Files too: apps/shared/arc.c's IMG kind.)
  *
  * The suite's lines (tests/gui/disks.txt, disks-floppy.txt): "DISKS ..." on the output. */
 #include <stdarg.h>

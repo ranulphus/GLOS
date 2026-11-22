@@ -12,11 +12,12 @@
 
 #include "arc.h"
 #include "arc7z.h"
+#include "fatimg.h"
 #include "lzh.h"
 #include "deflate.h"
 #include "../../loader/inflate.h"
 
-enum { K_ZIP, K_TAR, K_GZ, K_TGZ, K_LZH, K_ARJ, K_7Z };
+enum { K_ZIP, K_TAR, K_GZ, K_TGZ, K_LZH, K_ARJ, K_7Z, K_IMG };
 #define BUF 4096u
 #define CD_MAX (8ul << 20)              /* a ZIP's directory at most: some hundred thousand names */
 
@@ -128,7 +129,8 @@ static int ends_with(const char *name, const char *end)
 int arc_name_is(const char *name)
 {
     return ends_with(name, ".ZIP") || ends_with(name, ".TAR") || ends_with(name, ".GZ") || ends_with(name, ".TGZ")
-        || ends_with(name, ".LZH") || ends_with(name, ".LHA") || ends_with(name, ".ARJ") || ends_with(name, ".7Z");
+        || ends_with(name, ".LZH") || ends_with(name, ".LHA") || ends_with(name, ".ARJ") || ends_with(name, ".7Z")
+        || ends_with(name, ".IMG") || ends_with(name, ".IMA") || ends_with(name, ".VFD");
 }
 
 /* An entry's name as it is kept (malloc'd): '\' is '/', no drive, no '/' before, after or doubled, no "."
@@ -1266,6 +1268,87 @@ static int lzh_extract(struct arc *a, const struct ent *e, int (*data)(void *ctx
     return g.crc == e->crc ? ARC_OK : ARC_E_CRC;
 }
 
+/* ---- (phase F) a disk's image: a FAT12 or FAT16 volume (a floppy's .IMG), read by Disk Tools' own reader
+   (fatimg.c) over the file's sectors. Its folders and files become entries by their names as the volume shows
+   them (long names where it has them); a file's bytes are read by its path. Read only. */
+
+static int img_io(void *ctx, unsigned long lba, unsigned char *data, unsigned count, int write)
+{
+    struct arc *a = ctx;
+    if (write || lba > a->size / 512 || count > a->size / 512 - lba || fseek(a->f, (long)(lba * 512), SEEK_SET) != 0)
+        return -1;
+    return fread(data, 512, count, a->f) == count ? 0 : -1;
+}
+
+static int img_folder(struct arc *a, struct fatimg *v, const char *vpath, const char *apath, int depth)
+{
+    struct fatimg_entry *e = NULL;
+    int n = fatimg_list(v, vpath, &e), i, r = ARC_OK;
+    if (n < 0)
+        return depth ? ARC_OK : ARC_E_DAMAGED;
+    for (i = 0; i < n && r == ARC_OK; i++) {
+        char name[600], vp[600], *clean;
+        struct ent *x;
+        int isdir = e[i].dir;
+        snprintf(name, sizeof name, "%s%s%s", apath, apath[0] ? "/" : "", e[i].name);
+        snprintf(vp, sizeof vp, "%s%s%s", vpath, vpath[0] ? "\\" : "", e[i].dos);
+        if (!(clean = clean_name(name, (unsigned)strlen(name), &isdir)))
+            continue;
+        if (!(x = add(a, clean))) {
+            free(clean);
+            r = ARC_E_MEMORY;
+            break;
+        }
+        x->e.dir = e[i].dir, x->e.date = e[i].date, x->e.time = e[i].time;
+        if (!e[i].dir)
+            x->e.size = x->e.packed = e[i].size;
+        if (e[i].dir && depth < 16)
+            r = img_folder(a, v, vp, name, depth + 1);
+    }
+    free(e);
+    return r;
+}
+
+static int img_open(struct arc *a)
+{
+    char why[80];
+    struct fatimg *v = fatimg_open(img_io, a, why, sizeof why);
+    int r;
+    if (!v)
+        return ARC_E_KIND;
+    r = img_folder(a, v, "", "", 0);
+    fatimg_close(v);
+    return r;
+}
+
+static int img_extract(struct arc *a, const struct ent *e, int (*data)(void *ctx, const void *p, unsigned n), void *ctx)
+{
+    char why[80], vpath[600];
+    struct fatimg *v = fatimg_open(img_io, a, why, sizeof why);
+    unsigned long at = 0;
+    unsigned i;
+    int r = ARC_OK;
+    if (!v)
+        return ARC_E_DAMAGED;
+    for (i = 0; e->name[i] && i < sizeof vpath - 1; i++)       /* (the volume takes either form of a name, '\' between) */
+        vpath[i] = e->name[i] == '/' ? '\\' : e->name[i];
+    vpath[i] = 0;
+    while (at < e->e.size) {
+        long n = fatimg_read(v, vpath, at, a->buf, BUF);
+        if (n <= 0) {
+            r = ARC_E_DAMAGED;
+            break;
+        }
+        if (data && data(ctx, a->buf, (unsigned)n) != 0) {
+            r = ARC_E_STOP;
+            break;
+        }
+        at += (unsigned long)n;
+    }
+    fatimg_close(v);
+    return r;
+}
+
 /* ---- 7z: arc7z.c reads it (the LZMA SDK's reader); here, its files as entries. A solid block is unpacked whole
    into memory and kept while its files are taken one after another: given back when a walk ends, and after one
    file's bytes if it is a big one (SZ_KEEP). */
@@ -1338,7 +1421,14 @@ struct arc *arc_open(const char *path, int *err)
     } else if (n == 512 && tar_header_ok(h)) {
         a->kind = K_TAR;
         r = tar_pass(a, NULL, NULL);
+    } else if (n == 512 && h[510] == 0x55 && h[511] == 0xAA && h[11] == 0 && h[12] == 2 && a->size % 512 == 0
+               && (a->kind = K_IMG, img_open(a)) == ARC_OK) {
+        r = ARC_OK;                             /* (a disk's image: its first sector a FAT volume's) */
     } else {
+        unsigned k;                             /* (an image that was none: what it listed let go) */
+        for (k = 0; k < a->n; k++)
+            free(a->ents[k].name);
+        a->n = 0;
         a->kind = K_ZIP;
         r = zip_open(a);
     }
@@ -1388,7 +1478,7 @@ void arc_close(struct arc *a)
 
 const char *arc_kind(const struct arc *a)
 {
-    static const char *const names[] = { "ZIP", "TAR", "GZ", "TAR.GZ", "LZH", "ARJ", "7Z" };
+    static const char *const names[] = { "ZIP", "TAR", "GZ", "TAR.GZ", "LZH", "ARJ", "7Z", "IMG" };
     return names[a->kind];
 }
 
@@ -1478,6 +1568,8 @@ static int walk(struct arc *a, const struct arc_sink *s, void *ctx)
             r = lzh_extract(a, e, s->data, ctx);
         else if (a->kind == K_7Z)
             r = sz_take(a, e, s->data, ctx);
+        else if (a->kind == K_IMG)
+            r = img_extract(a, e, s->data, ctx);
         else
             r = gz_extract(a, e, s->data, ctx);
         s->end(ctx, i, r);
@@ -1558,6 +1650,8 @@ static int extract(struct arc *a, unsigned i, int (*data)(void *ctx, const void 
     }
     if (a->kind == K_GZ)
         return gz_extract(a, e, data, ctx);
+    if (a->kind == K_IMG)
+        return img_extract(a, e, data, ctx);
     if (a->kind == K_TAR) {             /* its bytes are where the list says */
         unsigned long left;
         if (e->at > a->size || e->e.size > a->size - e->at || fseek(a->f, (long)e->at, SEEK_SET) != 0)
