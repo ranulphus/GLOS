@@ -201,7 +201,8 @@ right error is part of the answer); **internal** after the core.
   is never used under a DOS.
 - **Tests:** host tests against `mtools` and `fsck.fat` (as S0's were), images made by Windows 98 and MS-DOS 7.1
   in 86Box; power cut in Loop A in the middle of writes, then `fsck.fat` and ScanDisk.
-- **In steps** (beside phase F, the owner's choice; none changes what GLOS does but behind a setting that is off by default (N1c), and nothing native runs before N3):
+- **In steps** (beside phase F, the owner's choice; none changes what GLOS does but behind a setting that is off by default (N1c), and nothing native runs before N3, but for N2's native-DOS
+  sessions on disks GLOS alone mounts: the owner, 2026-11-22, [N2](#n2-the-dos-personality)):
   - **N1a, reading:** `kernel/fs/fat.c`, plain C over a sector callback as `kernel/disk` is: a volume mounted
     from its boot sector (FAT12, FAT16, FAT32), cluster chains, folders with their long names (UTF-8, the short
     names in the code page), paths looked up by either name without regard to case, files read and sought, free
@@ -378,6 +379,12 @@ Everything else (the files, the directories, the cache) is the kernel's, above 1
   (55 under plain DOS, 474 under GLOS today); from a DJGPP program 150 µs; findfirst and a cached 512-byte read no
   slower than under plain DOS (653 and 527 µs).
 
+- **Brought up early: native-DOS sessions** (the owner, 2026-11-22). Rather than wait for N3's boot, N2 runs
+  under today's hosted GLOS as a kind of session: a machine whose INT 21h goes to GLOS's own DOS
+  (`kernel/ndos/`), with drives only on volumes GLOS mounts itself through its own IDE driver and `fsv.c` (in
+  Loop A, the scratch disk GLOS formats; on a PC, a disk or partition no DOS beside it uses), never a volume
+  the hosted DOS has: one writer per volume, always. Real DOS programs test N2 end to end in Loop A long
+  before native boot; the machine is the one native GLOS needs anyway (N6's several machines, pulled earlier).
 - **Where it lives:** `kernel/ndos/` (the native DOS; `kernel/dos/` stays the hosted DOS server until hosted
   mode ends). Built so far, plain C and host-tested ahead of the rest: `share.c`, RBIL's table 01404 (DOS 7.x
   sharing) as data, every one of its 400 cells checked against RBIL's own text (`share_test`); `names.c`,
@@ -737,8 +744,9 @@ the performance counters, so it can pace each machine.
    sees otherwise (for example ANSI.SYS later rather than now, DOSKEY absent, the clipboard calls in, EMS 8 MB by
    default).
 2. **Which of "Beyond DOS" go on the route**, and when.
-3. **The MS-DOS 7.1 image** (N7): where it is (`MSDOS_DIR`), and what it is (an installed hard disk image, a
-   Windows 98 SE startup floppy, or both).
+3. **The MS-DOS 7.1 image** (N7): answered 2026-11-22: bench-g400's own Windows 98 SE, from the backup taken
+   before it became a GLOS bench (/srv/bulk/backups/ibm300pl-20261026: its FAT32 partition, whole); its
+   MS-DOS 7.1 files go to `MSDOS_DIR` (private, never in the repository).
 
 Answered 2026-11-20: N1 beside phase F; no redirect of the root's files; the names as proposed; GLOS's own IDE
 driver from the start; the active flag flipped for DOS on another partition; letters as DOS sees them; hosted
