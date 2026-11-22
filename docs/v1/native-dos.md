@@ -547,6 +547,72 @@ Everything the [checklist](#the-checklist-from-rbil) marks implement, absent or 
 - **Apps become processes of their own**: an app's DOS context (PSP, drive, directory, handles) is its own, not
   DOS's swapped in and out around each call (`serve()`).
 
+### Native boot: the design (2026-11-22)
+
+The owner's choice of 2026-11-22, after NS1-NS3: native boot next, before NS4 (DPMI in native machines, which
+waits for N6). GLOS starts from its own boot sector and loader with no DOS at all; GLOS's own DOS
+(`kernel/ndos/dos21.c`) answers INT 21h in the **system VM**, which keeps the BIOS; the DPMI host, apps, sessions,
+the agent and the shell run on top as they do today.
+
+**What leans on DOS today** (a survey of the kernel, 2026-11-22; file:line in the survey's notes, summarised):
+the DOS server's users (GLOS.CFG, GLOS.DAT, the secrets, the clock's 2Bh/2Dh, SFTP, the shell's ~40 file calls,
+DISK's DD, NDOS COPY); the stub's EXEC loop and its NEXT protocol (agent jobs, /RUN, the shell's COMSPEC), GLOS's
+COMMAND.COM's GCMD protocol; apps' DOS calls (`serve()` through DOS's INT 21h vector, `adopt`/`unadopt` writing
+the SDA's current PSP and DTA, PSP:2Eh and the vector table; api2fs.c's raw INT 21h); the DPMI host (INT 21h
+reflected to real mode, dosx.c's buffer by 48h, PSP:0Ah and the terminate address, 31h and resident parents);
+the V86 monitor's INT 21h trap (output capture, stdin, FS watches, EXEC snapshots, session ends); what the kernel
+reads of DOS's own structures (the SDA's current PSP everywhere, InDOS, the List of Lists' SFT chain for console
+handles, the MCB chain's owners and names, PSPs' parents, environments and tails, GLOS.EXE's PSP as every job's
+parent and its environment as the master one); INT 2Fh chained to DOS's handler; drive letters and paths from
+DOS (3305h, `cfg_path`, COMSPEC); conventional memory by 48h/49h (bdisk.c, display.c, crash.c, session.c,
+dosx.c); the loader itself (a DOS program: `fopen`, `_dos_allocmem`, the refusals, XMS mode, the DOS pointers in
+bootinfo); and the ways out (`glos exit` back to DOS, DOWN, /ROUNDTRIP).
+
+**The decisions:**
+- **GLOS's DOS keeps DOS's own structures, in DOS's layouts, in the system VM's memory**: the MCB chain, PSPs,
+  the file table (it does already), the List of Lists, and an SDA laid out as DOS's (the critical-error flag,
+  InDOS, the DTA at 0Ch, the current PSP at 10h), the current PSP and DTA kept *there* (read from there at each
+  call, so a writer of them, as apps' `adopt` is, is obeyed). Then the kernel's readers of DOS's structures, the
+  stub, the agent, sessions, apps and the DPMI host's ends work as they do, and the DOS server works unchanged
+  (its INT 21h, made by the stub, is answered by GLOS's DOS). Moving the kernel's own files off the DOS server
+  onto `fsv.c` is a later cleanup, not a condition of native boot.
+- **Its places are a layout, not constants**: a native machine's DOS area is at 0500h-1280h; the system VM's
+  first 64 KB hold the loader (GLOS's boot sector loads it at 0060:0000), so there GLOS's DOS puts its tables in
+  a block of its own (owner 0008h, as DOS's) after the loader's.
+- **No wait blocks the system VM's thread in a trap.** A native machine's thread is its own; the system VM's
+  thread is also the apps' and the DOS server's. A call that must wait for a key returns to the program at a
+  STI; HLT and an ARPL, the call made again when the ARPL traps (its registers kept): the VM idles in V86 as
+  DOS's own console wait does today, and posted work, apps' calls and the DOS server run meanwhile.
+- **The disks:** the boot volume and the others through `fsv.c` over GLOS's IDE driver, synchronous PIO in the
+  trap as the cache's own INT 13h is (BIOS-only disks, SCSI and USB, later: N4); drive letters as DOS sees them
+  (the owner's choice), the boot drive C:.
+- **INT 2Fh's DOS functions** are answered where DOS's handler answered them (1000h SHARE there, 11xxh no
+  redirector, 1600h not Windows, 4A10h no SMARTDRV, 150Bh no MSCDEX before N4's CD-ROM); `int2f_hook`'s chain
+  ends in an IRET.
+- **The loader** (`\GLOSLDR.SYS`, the owner's name): today's loader built a second way, as a raw binary with no
+  DOS runtime (Open Watcom; GLOS's boot sector loads it whole at 0060:0000 with BL the disk, as it loads
+  KERNEL.SYS): files by `fat.c` built 16-bit over INT 13h, memory by E820h (raw mode, there already), the
+  console on the BIOS and COM1; its first 256 bytes a PSP's, so that the kernel adopts it as the first program
+  and its stub goes resident as GLOS.EXE's does. Bootinfo says `BI_F_NATIVE`; the DOS pointers (InDOS, SDA, List
+  of Lists) are GLOS's DOS's, filled by the kernel.
+- **The way out** is a restart or power off (`glos exit` has no DOS to return to).
+
+**The steps:**
+- **NB1, the start:** `make native-image` (mtools on the host: GLOS's MBR, a FAT volume with GLOS's boot sector
+  naming `GLOSLDR SYS`, `\GLOSLDR.SYS`, `\GLOS\` with GLOSK.BIN and GLOS.CFG); GLOSLDR.SYS reads the kernel by
+  INT 13h and enters it; the kernel says it started native. Loop A (`--hdd`): its GLOS-BOOT and GLOS-RING0 lines.
+- **NB2, the system VM's DOS:** with `BI_F_NATIVE`, GLOS's DOS over the system VM's memory (the loader adopted,
+  its PSP the master environment's), INT 20h and 21h trapped to it, C: the boot volume; the stub goes resident,
+  the agent listens. Loop A: SSH's `ver`, `dir C:\`, a file written and read back through the shell (the DOS server
+  through GLOS's DOS).
+- **NB3, waits and the console:** the HLT-and-again wait; lcon and the shell's terminal typing into GLOS's DOS;
+  INT 2Fh answered; Ctrl-C into sessions' programs.
+- **NB4, programs:** agent jobs and sessions EXEC'd by GLOS's DOS (NDOSTEST, DOSDIFF against MS-DOS 7.1 again),
+  GLOS's COMMAND.COM, apps (the DPMI host's reflection reaching GLOS's DOS), the census's programs; a `native`
+  variant of the suites.
+- **NB5, the way out and the benches:** restart and power off; the 486 and bench-g400 booting natively from a
+  partition of their own (with the owner's OK for each bench).
+
 ## N3: booting and the boot manager
 
 ### GLOS's own start
