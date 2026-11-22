@@ -8,7 +8,9 @@
  *   a game        its page at the right: what is known of it, how long it was played and when, the user's
  *                 notes; Play, and Set Up where it has a set-up program
  *   File          Add Game... (any program, by hand), Add Folder... (another folder of games), Scan Now (F5)
- *   Game          Favourite (Ctrl+D), Properties... (its title, its picture, notes), Remove (from the library:
+ *   Game          Favourite (Ctrl+D), Properties... (its title, its picture, notes; and how its program runs: the
+ *                 whole screen or a window, its memory, the Sound Blaster it is told of, direct mode: GLOS.CFG's
+ *                 [program NAME.EXE]), Remove (from the library:
  *                 nothing on the disk is touched)
  *
  * The library is GAMES.CFG in GLOS's folder (apps/shared/gamelib.c; GAMES -library FILE: another). A game runs
@@ -346,8 +348,66 @@ static void events(const struct glos_ev *ev)   /* the game ended: its time count
 
 /* ---- a game's properties */
 
-static struct gui_widget *p_title, *p_picture, *p_notes, *p_fav;
-static struct { char title[80], picture[128], notes[200]; int fav; } p_got;
+static struct gui_widget *p_title, *p_picture, *p_notes, *p_fav, *p_screen, *p_direct, *p_memory, *p_blaster;
+static struct { char title[80], picture[128], notes[200]; int fav, screen, direct; char memory[12], blaster[48]; } p_got;
+
+/* ---- a game's profile: its program's own settings (GLOS.CFG's [program NAME.EXE], as the Control Panel's Programs
+   page has them): the whole screen or a window, direct mode, its memory, the Sound Blaster it is told of (BLASTER
+   in its environment). For every copy of a program of that name. */
+
+struct profile { int screen, direct; char memory[12], blaster[48], env[200]; };
+
+static void profile_read(const char *run, struct profile *pr)
+{
+    char sec[40], v[200];
+    const char *b;
+    int set = 0;
+    memset(pr, 0, sizeof *pr);
+    snprintf(sec, sizeof sec, "program %s", run);
+    if (glos_setting_get(sec, "screen", v, sizeof v, &set) == 0)
+        pr->screen = !strcmp(v, "full");
+    if (glos_setting_get(sec, "direct", v, sizeof v, &set) == 0)
+        pr->direct = !strcmp(v, "1");
+    if (glos_setting_get(sec, "memory", v, sizeof v, &set) == 0 && strcmp(v, "0"))
+        snprintf(pr->memory, sizeof pr->memory, "%s", v);
+    if (glos_setting_get(sec, "env", pr->env, sizeof pr->env, &set) != 0)
+        pr->env[0] = 0;
+    for (b = pr->env; b && *b; b = strchr(b, '\n') ? strchr(b, '\n') + 1 : NULL)   /* (its lines: NAME=VALUE) */
+        if (!strncasecmp(b, "BLASTER=", 8)) {
+            size_t n = strcspn(b + 8, "\n");
+            snprintf(pr->blaster, sizeof pr->blaster, "%.*s", (int)(n < sizeof pr->blaster ? n : sizeof pr->blaster - 1), b + 8);
+        }
+}
+
+/* The settings that differ written; the environment's other lines kept as they are. 0, or the words of a refusal. */
+static const char *profile_write(const char *run, const struct profile *was, const struct profile *now)
+{
+    static char why[120];
+    char sec[40], env[220];
+    const char *b;
+    size_t n = 0;
+    snprintf(sec, sizeof sec, "program %s", run);
+    if (now->screen != was->screen && glos_setting_set(sec, "screen", now->screen ? "full" : "window", NULL, why, sizeof why))
+        return why;
+    if (now->direct != was->direct && glos_setting_set(sec, "direct", now->direct ? "1" : "0", NULL, why, sizeof why))
+        return why;
+    if (strcmp(now->memory, was->memory)
+        && glos_setting_set(sec, "memory", now->memory[0] ? now->memory : NULL, NULL, why, sizeof why))
+        return why;
+    if (strcmp(now->blaster, was->blaster)) {
+        env[0] = 0;
+        for (b = was->env; b && *b; b = strchr(b, '\n') ? strchr(b, '\n') + 1 : NULL) {
+            size_t k = strcspn(b, "\n");
+            if (strncasecmp(b, "BLASTER=", 8) && n + k + 2 < sizeof env)
+                n += (size_t)snprintf(env + n, sizeof env - n, "%s%.*s", n ? "\n" : "", (int)k, b);
+        }
+        if (now->blaster[0] && n + strlen(now->blaster) + 10 < sizeof env)
+            n += (size_t)snprintf(env + n, sizeof env - n, "%sBLASTER=%s", n ? "\n" : "", now->blaster);
+        if (glos_setting_set(sec, "env", n ? env : NULL, NULL, why, sizeof why))
+            return why;
+    }
+    return NULL;
+}
 static const char *const pictures_kinds[] = { "Pictures|*.PNG;*.JPG;*.BMP;*.GIF;*.PCX;*.TGA", "All files|*.*", NULL };
 
 static void props_done(struct gui_widget *b, int what)
@@ -368,6 +428,10 @@ static void props_done(struct gui_widget *b, int what)
         snprintf(p_got.picture, sizeof p_got.picture, "%s", gui_get_text(p_picture));
         snprintf(p_got.notes, sizeof p_got.notes, "%s", gui_get_text(p_notes));
         p_got.fav = gui_checked(p_fav);
+        p_got.screen = gui_value(p_screen);
+        p_got.direct = gui_checked(p_direct);
+        snprintf(p_got.memory, sizeof p_got.memory, "%s", gui_get_text(p_memory));
+        snprintf(p_got.blaster, sizeof p_got.blaster, "%s", gui_get_text(p_blaster));
     }
     gui_end_modal(b->win, b->id == 1 ? GUI_OK : GUI_CANCEL_R);
 }
@@ -377,10 +441,14 @@ static void properties(void)
     struct game *g = current();
     struct gui_window *d;
     struct gui_widget *box, *form, *row;
+    struct profile was, now;
+    char run[16], head[80];
     unsigned long id;
     if (!g)
         return;
     id = g->id;
+    snprintf(run, sizeof run, "%s", g->run);
+    profile_read(run, &was);
     d = gui_window(GUI_T("Properties"), 420, 0, GUI_W_DIALOG);
     d->owner = win;
     box = gui_vbox(d->root, 6, 8);
@@ -394,6 +462,21 @@ static void properties(void)
     p_notes = gui_field(gui_row(form, GUI_T("&Notes:"), NULL), 40);
     gui_set_text(p_notes, g->notes);
     p_fav = gui_check(box, GUI_T("A &favourite"), g->favourite);
+    snprintf(head, sizeof head, GUI_T("How %s runs (every copy of it):"), run);
+    gui_label(box, head);
+    form = gui_form(box);
+    p_screen = gui_choice(gui_row(form, GUI_T("&Screen:"), NULL), 16);
+    gui_choice_add(p_screen, GUI_T("In a window"));
+    gui_choice_add(p_screen, GUI_T("The whole screen"));
+    gui_set_value(p_screen, was.screen);
+    p_memory = gui_field(gui_row(form, GUI_T("&Memory (KB):"), NULL), 8);
+    gui_tip(p_memory, GUI_T("Empty: all there is"));
+    gui_set_text(p_memory, was.memory);
+    p_blaster = gui_field(gui_row(form, GUI_T("Sound &Blaster:"), NULL), 24);
+    gui_tip(p_blaster, GUI_T("As BLASTER has it: A220 I5 D1 H5 T6. Empty: as GLOS tells every program"));
+    gui_set_text(p_blaster, was.blaster);
+    p_direct = gui_check(box, GUI_T("&Direct mode: the PC's ports are the game's (for one that won't run otherwise)"),
+                         was.direct);
     row = gui_hbox(box, 6, 0);
     gui_space(row, 0, 0);
     gui_button(row, GUI_T("OK"), props_done, 1)->flags |= GUI_DEFAULT;
@@ -402,6 +485,22 @@ static void properties(void)
     if (gui_modal(d) != GUI_OK) {
         say("properties left");
         return;
+    }
+    now = was;
+    now.screen = p_got.screen, now.direct = p_got.direct;
+    snprintf(now.memory, sizeof now.memory, "%s", strcmp(p_got.memory, "0") ? p_got.memory : "");
+    snprintf(now.blaster, sizeof now.blaster, "%s", p_got.blaster);
+    if (now.screen != was.screen || now.direct != was.direct || strcmp(now.memory, was.memory) || strcmp(now.blaster, was.blaster)) {
+        const char *why = profile_write(run, &was, &now);
+        if (why) {
+            char t[200];
+            snprintf(t, sizeof t, GUI_T("%s's settings weren't all kept: %s."), run, why);
+            gui_message(win, GUI_T("Games"), t, GUI_MB_OK);
+            say("profile refused %s %s", run, why);
+        } else {
+            say("profile %s screen=%s direct=%d memory=%s blaster=%s", run, now.screen ? "full" : "window", now.direct,
+                now.memory[0] ? now.memory : "all", now.blaster[0] ? now.blaster : "none");
+        }
     }
     if (!(g = gamelib_find(&lib, id)))
         return;

@@ -1333,3 +1333,16 @@ The plan's "toolkit window" before the game (`docs/v1/apps/hovercraft.md`), `app
   game on the network, Play Alone, the game, Esc back to the lobby, Quit.
 - **Not yet:** a game of the lobby's list played over two emulated PCs (the hoverpair case joins by J); the
   strength and the name remembered across starts (the name is); names over the craft.
+
+## The Games Library: a game's profile (2026-11-22)
+
+The plan's "a game's profile as a form" (`docs/v1/apps/games-library.md`): the Properties dialog's lower part
+is the game's program's own settings, GLOS.CFG's `[program NAME.EXE]` as the Control Panel's Programs page
+has them: the screen (a window or the whole screen), the memory (KB; empty: all), the Sound Blaster it is told
+of (the `BLASTER=` line of its environment; the environment's other lines kept), direct mode. Read when the
+dialog opens, written (`glos_setting_set`) only where they changed; a refusal is said in a message. For every
+copy of a program of that name.
+
+- **Tests:** `games-profile` (host and the emulated desktops): Doom's Properties set to the whole screen,
+  8192 KB, a Sound Blaster at IRQ 7 and direct mode, and read back when the dialog opens again.
+- **Not yet:** the controller's mapping for a game (`[joystick] map` is one for every program).

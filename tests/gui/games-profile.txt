@@ -1,0 +1,29 @@
+# The Games Library: a game's profile, how its program runs (apps/games; phase F's second part): Doom's
+# Properties with the whole screen, its memory, the Sound Blaster it is told of and direct mode set; kept as
+# DOOM.EXE's own settings (GLOS.CFG's [program DOOM.EXE]) and read back when the dialog opens again. (A library
+# of its own, -library: the main script, after it on the same disk, begins with none.)
+run GAMES.EXE -library C:\\OUT\\GAMESPRO.CFG
+wait "Games"
+said GAMES scanned folders=1 games=5 added=5
+click "Games" 282 125
+key alt+enter
+wait "Properties"
+shot empty "Properties"
+quick alt+s home down
+quick alt+m
+type 8192
+quick alt+b
+type A220 I7 D1 H5 T6
+quick alt+d
+key enter
+gone "Properties"
+said GAMES profile DOOM.EXE screen=full direct=1 memory=8192 blaster=A220 I7 D1 H5 T6
+key alt+enter
+wait "Properties"
+shot kept "Properties"
+key esc
+gone "Properties"
+said GAMES properties left
+key alt+f4
+gone "Games"
+expect GAMES end
