@@ -1482,5 +1482,13 @@ The plan's "folders backed up to an SFTP server: full, or only what changed sinc
   by a session and by an address, the bytes there and back by SHA-256, a computer not met refused; then Back
   Up a Folder, Restore a Backup and the set chosen in the window. `disks-backup` (host and the emulated
   desktops): the dialogs, a computer not named refused with the dialog kept.
-- **Not yet:** backups as ZIPs; a schedule chosen in Disk Tools (the SHELL SCHEDULE API can start `DISKS
-  -backup` now); sets thinned out; a set browsed file by file (Files' remote folders show a set's files).
+- **The schedule:** Back Up a Folder's **Again** (each time GLOS starts, every day, every week; a time, a
+  day) sets `backup-NAME` in GLOS's schedule (API 2.0's SHELL SCHEDULE, its first user) to `DISKS -backup`
+  with the dialog's folder, computer, folder there and what; **Backup, Scheduled Backups** lists the
+  schedule's backups (folder, when, where to, last run) and removes one. The host's stand-in keeps a schedule
+  of its own for the scripts.
+- **Tests (the schedule):** `disks-schedule` (host and the emulated desktops): a time that is none refused,
+  weekly Friday 07:45 set, listed, removed; the sshc suite's backup part schedules daily 03:00 in the window,
+  moves the guest's clock a day on (`glos time set`), and GLOS's own run of DISKS makes a set there.
+- **Not yet:** backups as ZIPs; sets thinned out; a set browsed file by file (Files' remote folders show a
+  set's files).

@@ -10118,8 +10118,9 @@ def backup_case(profile, vcard, card, bits):
     bytes there by SHA-256); the folder changed (a file grown, one new, one gone) and backed up again (what
     changed: two copied, one held by the set before), and once more by an address (nothing to copy); the newest
     set and the first restored, each the folder as it was then (bytes, the file gone or not); a computer not met
-    before refused with no window to ask in. Then the same in Disk Tools' window: Back Up a Folder, Restore a
-    Backup, the set chosen, its files back."""
+    before refused with no window to ask in. Then the same in Disk Tools' window: Back Up a Folder (and again
+    every day at 03:00), Restore a Backup, the set chosen, its files back; the clock moved a day on, and GLOS
+    backs the folder up by itself (the schedule's DISKS -backup)."""
     import hashlib
     import threading
     tag = "%s-%s" % (profile, vcard)
@@ -10234,7 +10235,11 @@ def backup_case(profile, vcard, card, bits):
         typed("C:\\\\DATA")
         keys("alt+t", "ctrl+a")
         typed("glos-backups/GUI")
+        keys("alt+a", "home", "down", "down")   # Again: every day, at 03:00
+        keys("alt+m", "ctrl+a")
+        typed("03:00")
         keys("enter")
+        checks["gui-scheduled"] = said(dk, "DISKS scheduled ") == "DISKS scheduled backup-DATA daily 03:00"
         checks["gui-backup"] = " files=3 copied=3 kept=0 failed=0 folders=1 " in said(dk, "DISKS backup set=") + " "
         time.sleep(2)
         keys("enter")                           # (the message: Backed Up)
@@ -10253,6 +10258,19 @@ def backup_case(profile, vcard, card, bits):
         keys("alt+f4")
         checks["gui-end"] = bool(said(dk, "DISKS end", 60))
         dk = None
+        # The schedule: the clock a day on, so that 03:00 has passed; GLOS backs the folder up by itself (DISKS
+        # -backup, no window), a set of 2030 there
+        agent.ssh("glos time set 2030-01-01T12:00:00")
+        t0, sets = time.time(), ""
+        while time.time() - t0 < 180:
+            sets = srv.run("ls glos-backups/GUI")
+            if "20300101-" in sets:
+                break
+            time.sleep(5)
+        new = [x for x in sets.split() if x.startswith("20300101-")]
+        checks["scheduled-run"] = bool(new) and "MANIFEST.TXT" in srv.run("ls glos-backups/GUI/%s" % new[0])
+        if not checks["scheduled-run"]:
+            notes.append("sets there: %r" % sets)
         agent.ssh("glos exit")
     except subprocess.TimeoutExpired:
         checks["timeout"] = False

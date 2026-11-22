@@ -43,7 +43,8 @@
 #include "../shared/fatimg.h"
 #include "bknet.h"
 
-enum { C_TOIMAGE = 1, C_FROMIMAGE, C_CHECK, C_FORMAT, C_INSIDE, C_REFRESH, C_OPEN, C_NEW, C_EXIT, C_BACKUP, C_RESTORE };
+enum { C_TOIMAGE = 1, C_FROMIMAGE, C_CHECK, C_FORMAT, C_INSIDE, C_REFRESH, C_OPEN, C_NEW, C_EXIT, C_BACKUP, C_RESTORE,
+       C_SCHEDULED };
 enum { J_READ = 1, J_WRITE, J_CHECK, J_FORMAT, J_NEW, J_EXTRACT, J_BACKUP, J_SETS, J_RESTORE };
 enum { L_NOT = 0, L_VOLUME, L_NONE, L_OTHER, L_UNREAD = -1 };  /* what a look at a disk found */
 
@@ -1372,8 +1373,21 @@ static void new_from_folder(void)
 
 /* ---- backups: the dialogs */
 
-static struct gui_widget *b_folder, *b_computer, *b_where, *b_what, *b_sets, *b_to;
-static struct { char folder[260], computer[100], where[200], to[260]; int what, set; } b_got;
+static struct gui_widget *b_folder, *b_computer, *b_where, *b_what, *b_sets, *b_to, *b_again, *b_at, *b_day;
+static struct { char folder[260], computer[100], where[200], to[260], at[8]; int what, set, again, day; } b_got;
+static const char *const day_names[7] = { "sun", "mon", "tue", "wed", "thu", "fri", "sat" };
+
+/* The time typed: HH:MM (or H:MM), into minutes of the day; -1 not one. */
+static int at_minutes(const char *t)
+{
+    int h = 0, m = 0, k = 0;
+    while (*t >= '0' && *t <= '9' && k < 2)
+        h = h * 10 + (*t++ - '0'), k++;
+    if (!k || *t++ != ':' || !(t[0] >= '0' && t[0] <= '9' && t[1] >= '0' && t[1] <= '9') || t[2])
+        return -1;
+    m = (t[0] - '0') * 10 + (t[1] - '0');
+    return h < 24 && m < 60 ? h * 60 + m : -1;
+}
 
 static void where_for(const char *folder, char *out, size_t room)      /* glos-backups/ and the folder's name */
 {
@@ -1411,6 +1425,15 @@ static void backup_done(struct gui_widget *b, int what)
         snprintf(b_got.computer, sizeof b_got.computer, "%s", gui_get_text(b_computer));
         snprintf(b_got.where, sizeof b_got.where, "%s", gui_get_text(b_where));
         b_got.what = b_what ? gui_value(b_what) : 0;
+        b_got.again = b_again ? gui_value(b_again) : 0;
+        b_got.day = b_day ? gui_value(b_day) : 1;
+        snprintf(b_got.at, sizeof b_got.at, "%s", b_at ? gui_get_text(b_at) : "");
+        if (b_got.again >= 2 && at_minutes(b_got.at) < 0) {
+            say("backup no time \"%s\"", b_got.at);
+            gui_message(b->win, GUI_T("Backups"), GUI_T("The time is written as hours and minutes: 21:30."), GUI_MB_OK);
+            gui_focus(b_at);
+            return;
+        }
         if (b_folder && !gui_is_dir(b_got.folder)) {    /* (said with the dialog still there, to be put right) */
             say("no folder %s", b_got.folder);
             gui_message(b->win, GUI_T("No Such Folder"), GUI_T("There is no such folder."), GUI_MB_OK);
@@ -1429,6 +1452,135 @@ static void computer_row(struct gui_widget *form)       /* the computer: a saved
     b_computer = gui_field(gui_row(form, GUI_T("&Computer:"), NULL), 30);
     gui_tip(b_computer, GUI_T("A saved session's name (the Terminal's Sessions), or user@computer:port"));
     gui_set_text(b_computer, b_got.computer[0] ? b_got.computer : n > 0 ? names[0] : "");
+}
+
+/* The backup asked for, again at its times (API 2.0's SHELL SCHEDULE: GLOS starts DISKS -backup then, with no
+   window): "backup-" and the folder's name. 0, or -1 (said). */
+static int schedule_backup(void)
+{
+    char name[24], when[24], command[200], dname[16];
+    const char *f = gui_path_name(b_got.folder);
+    int i, k = 0, r;
+    for (i = 0; f && f[i] && k < 15; i++)       /* (a name's letters: letters and digits) */
+        if ((f[i] >= 'A' && f[i] <= 'Z') || (f[i] >= 'a' && f[i] <= 'z') || (f[i] >= '0' && f[i] <= '9'))
+            dname[k++] = f[i];
+    dname[k] = 0;
+    snprintf(name, sizeof name, "backup-%s", k ? dname : "C");
+    if (b_got.again == 1)
+        snprintf(when, sizeof when, "start");
+    else if (b_got.again == 2)
+        snprintf(when, sizeof when, "daily %02d:%02d", at_minutes(b_got.at) / 60, at_minutes(b_got.at) % 60);
+    else
+        snprintf(when, sizeof when, "weekly %s %02d:%02d", day_names[b_got.day >= 0 && b_got.day < 7 ? b_got.day : 1],
+                 at_minutes(b_got.at) / 60, at_minutes(b_got.at) % 60);
+    {
+        char exe[260];
+        gui_path_join(exe, sizeof exe, glos_home(), "DISKS.EXE");
+        r = snprintf(command, sizeof command, "%s -backup %s %s %s%s", exe, b_got.folder, b_got.computer, b_got.where,
+                     b_got.what == 1 ? " -changes" : "");
+    }
+    if (r > 160) {
+        say("schedule too long %d", r);
+        gui_message(win, GUI_T("Backups"), GUI_T("That backup can't be scheduled: its folders' names are too long "
+                                                 "(160 letters in all, at most)."), GUI_MB_OK);
+        return -1;
+    }
+    if ((r = glos_schedule_set(name, when, command)) != 0) {
+        say("schedule refused %s %d", name, r);
+        gui_message(win, GUI_T("Backups"), r == GLOS_E_ROOM ? GUI_T("GLOS has as many things scheduled as it can keep: "
+                                                                    "take one away first (Backup, Scheduled Backups).")
+                                                            : GUI_T("GLOS would not schedule that backup."), GUI_MB_OK);
+        return -1;
+    }
+    say("scheduled %s %s", name, when);
+    return 0;
+}
+
+/* Backup, Scheduled Backups: the schedule's backups (its "backup-" names), their times, folders, computers and
+   last runs; one taken off the schedule. */
+static struct gui_widget *s_list;
+static char s_names[GLOS_SCHEDULE_MAX][24];
+static int s_n;
+
+static void scheduled_fill(void)
+{
+    char *list = malloc(8192), *p, *nl;
+    unsigned length = 0;
+    s_n = 0;
+    gui_list_clear(s_list);
+    if (list && glos_schedule_list(list, 8192, &length) == 0)
+        for (p = list; *p && s_n < GLOS_SCHEDULE_MAX; p = nl + 1) {
+            char *f[5], *e, folder[100] = "", to[160] = "", last[40];
+            const char *cells[4];
+            int k = 0;
+            if (!(nl = strchr(p, '\n')))
+                break;
+            *nl = 0;
+            f[k++] = p;
+            for (e = p; *e && k < 5; e++)
+                if (*e == '\t')
+                    *e = 0, f[k++] = e + 1;
+            if (k < 5 || strncmp(f[0], "backup-", 7))
+                continue;
+            if ((e = strstr(f[2], " -backup ")) != NULL) {     /* FOLDER COMPUTER WHERE */
+                char a[100] = "", b[100] = "", c[100] = "";
+                sscanf(e + 9, "%99s %99s %99s", a, b, c);
+                snprintf(folder, sizeof folder, "%s", a);
+                snprintf(to, sizeof to, "%s: %s", b, c);
+            }
+            {
+                time_t t = (time_t)strtoul(f[4], NULL, 10);
+                struct tm *tm = t ? localtime(&t) : NULL;
+                if (tm)
+                    strftime(last, sizeof last, "%Y-%m-%d %H:%M", tm);
+                else
+                    snprintf(last, sizeof last, "%s", GUI_T("not yet"));
+            }
+            snprintf(s_names[s_n++], 24, "%s", f[0]);
+            cells[0] = folder, cells[1] = f[1], cells[2] = to, cells[3] = last;
+            gui_list_add(s_list, cells, NULL, NULL);
+        }
+    free(list);
+    if (s_n)
+        gui_list_set(s_list, 0);
+    say("scheduled list %d", s_n);
+}
+
+static void scheduled_done(struct gui_widget *b, int what)
+{
+    (void)what;
+    if (b->id == 3) {                           /* Remove */
+        int row = gui_list_get(s_list);
+        if (row >= 0 && row < s_n) {
+            int r = glos_schedule_remove(s_names[row]);
+            say("unscheduled %s %d", s_names[row], r);
+            scheduled_fill();
+        }
+        return;
+    }
+    gui_end_modal(b->win, GUI_OK);
+}
+
+static void scheduled(void)
+{
+    static const char *const heads[] = { GUI_N("Folder"), GUI_N("When"), GUI_N("To"), GUI_N("Last backed up") };
+    static const int widths[] = { 100, 110, 160, 110 };
+    struct gui_window *dlg;
+    struct gui_widget *box, *line;
+    dlg = gui_window(GUI_T("Scheduled Backups"), 520, 0, GUI_W_DIALOG);
+    dlg->owner = win;
+    box = gui_vbox(dlg->root, 6, 8);
+    s_list = gui_list(box, 4, heads, widths);
+    gui_size(s_list, 0, 120);
+    gui_label(box, GUI_T("GLOS backs these up at their times, with no window (a computer it has met before)."));
+    line = gui_hbox(box, 6, 0);
+    gui_button(line, GUI_T("&Remove"), scheduled_done, 3);
+    gui_space(line, 0, 0);
+    gui_button(line, GUI_T("Close"), scheduled_done, 1)->flags |= GUI_DEFAULT | GUI_CANCEL;
+    scheduled_fill();
+    gui_focus(s_list);
+    gui_modal(dlg);
+    s_list = NULL;
 }
 
 static void backup_ask(void)
@@ -1453,16 +1605,39 @@ static void backup_ask(void)
     gui_choice_add(b_what, GUI_T("Every file"));
     gui_choice_add(b_what, GUI_T("What changed since the last"));
     gui_set_value(b_what, b_got.what);
+    b_again = gui_choice(gui_row(form, GUI_T("&Again:"), NULL), 24);
+    gui_choice_add(b_again, GUI_T("No: this once"));
+    gui_choice_add(b_again, GUI_T("Each time GLOS starts"));
+    gui_choice_add(b_again, GUI_T("Every day"));
+    gui_choice_add(b_again, GUI_T("Every week"));
+    gui_set_value(b_again, b_got.again);
+    line = gui_row(form, GUI_T("Ti&me:"), NULL);
+    b_at = gui_field(line, 6);
+    gui_set_text(b_at, b_got.at[0] ? b_got.at : "21:00");
+    gui_label(line, GUI_T("On &day:"));
+    b_day = gui_choice(line, 12);
+    {
+        static const char *const days[7] = { GUI_N("Sunday"), GUI_N("Monday"), GUI_N("Tuesday"), GUI_N("Wednesday"),
+                                             GUI_N("Thursday"), GUI_N("Friday"), GUI_N("Saturday") };
+        int d;
+        for (d = 0; d < 7; d++)
+            gui_choice_add(b_day, GUI_T(days[d]));
+    }
+    gui_set_value(b_day, b_got.again ? b_got.day : 1);
+    gui_tip(b_at, GUI_T("Every day, or every week on the day chosen: at this time"));
     line = gui_hbox(box, 6, 0);
     gui_space(line, 0, 0);
     gui_button(line, GUI_T("OK"), backup_done, 1)->flags |= GUI_DEFAULT;
     gui_button(line, GUI_T("Cancel"), backup_done, 2)->flags |= GUI_CANCEL;
     gui_focus(b_folder);
     if (gui_modal(dlg) != GUI_OK) {
+        b_folder = b_what = b_again = b_at = b_day = NULL;
         say("backup left");
         return;
     }
-    b_folder = b_what = NULL;
+    b_folder = b_what = b_again = b_at = b_day = NULL;
+    if (b_got.again && schedule_backup() != 0)
+        return;
     if (!(j = job_new(J_BACKUP, NULL)))
         return;
     snprintf(j->from, sizeof j->from, "%s", b_got.folder);
@@ -1489,7 +1664,7 @@ static void restore_ask(void)                   /* the computer and the folder t
     gui_button(line, GUI_T("OK"), backup_done, 1)->flags |= GUI_DEFAULT;
     gui_button(line, GUI_T("Cancel"), backup_done, 2)->flags |= GUI_CANCEL;
     gui_focus(b_computer);
-    b_folder = b_what = NULL;
+    b_folder = b_what = b_again = b_at = b_day = NULL;
     if (gui_modal(dlg) != GUI_OK) {
         say("restore left");
         return;
@@ -1613,6 +1788,7 @@ static void command(struct gui_window *w, int id)
     case C_NEW: new_from_folder(); break;
     case C_BACKUP: backup_ask(); break;
     case C_RESTORE: restore_ask(); break;
+    case C_SCHEDULED: scheduled(); break;
     case C_EXIT:
         im_close();
         gui_close(win);
@@ -1632,6 +1808,7 @@ static void update(struct gui_window *w)
     gui_command_enable(w, C_NEW, !running);
     gui_command_enable(w, C_BACKUP, !running);
     gui_command_enable(w, C_RESTORE, !running);
+    gui_command_enable(w, C_SCHEDULED, !running);
 }
 
 static void dlist_on(struct gui_widget *w, int what)
@@ -1677,6 +1854,7 @@ static void build(void)
     gui_command(win, C_BACKUP, GUI_T("&Back Up a Folder..."), "Ctrl+B", gui_glyph("upload"),
                 GUI_T("Copy a folder to another computer"));
     gui_command(win, C_RESTORE, GUI_T("&Restore a Backup..."), "Ctrl+R", NULL, GUI_T("Copy a backup back to this PC"));
+    gui_command(win, C_SCHEDULED, GUI_T("&Scheduled Backups..."), NULL, NULL, GUI_T("The backups GLOS makes at their times"));
     bar = gui_menubar(win);
     m = gui_menu(bar, GUI_T("&Disk"));
     gui_menu_command(m, C_TOIMAGE), gui_menu_command(m, C_FROMIMAGE);
@@ -1690,6 +1868,8 @@ static void build(void)
     gui_menu_command(m, C_OPEN), gui_menu_command(m, C_NEW);
     m = gui_menu(bar, GUI_T("&Backup"));
     gui_menu_command(m, C_BACKUP), gui_menu_command(m, C_RESTORE);
+    gui_menu_sep(m);
+    gui_menu_command(m, C_SCHEDULED);
     tb = gui_toolbar(win);
     gui_toolbar_command(tb, C_TOIMAGE), gui_toolbar_command(tb, C_FROMIMAGE), gui_toolbar_command(tb, C_CHECK);
     gui_toolbar_sep(tb);

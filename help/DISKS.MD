@@ -42,7 +42,9 @@ Disk Tools can keep copies of a folder on another computer, over SSH (SFTP), and
 - **Backup, Back Up a Folder** (Ctrl+B): the **Folder** here; the **Computer**, by the name of a session
   saved in the Terminal's Sessions (its address, user and key) or as `user@computer:port`; the **Folder
   there** that keeps this folder's backups; and **What**: every file, or what changed since the last backup
-  (by size and date). Each backup is a folder there named by its date and time.
+  (by size and date). Each backup is a folder there named by its date and time. **Again** makes GLOS do the
+  same backup by itself each time it starts, every day, or every week, at the **Time** (and **On day**) given:
+  **Backup, Scheduled Backups** lists those, and **Remove** stops one.
 - **Backup, Restore a Backup** (Ctrl+R): the computer and the folder there; then choose one of the backups
   (the newest first) and the folder to put it in. Files of the same names there are written over.
 
@@ -57,6 +59,5 @@ schedule, without a window:
 
 ## Not yet
 
-Disks larger than 2 GB cannot be read to an image yet. Backups are files, not ZIPs, and are not scheduled
-from Disk Tools itself yet. A floppy of another size than its drive's (a 720 KB
+Disks larger than 2 GB cannot be read to an image yet. Backups are files, not ZIPs. A floppy of another size than its drive's (a 720 KB
 disk in a 1.44 MB drive) is not read or written yet.

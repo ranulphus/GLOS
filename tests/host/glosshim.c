@@ -1289,6 +1289,55 @@ int glos_entry_list(char *list, unsigned room, unsigned *length)
     return 0;
 }
 
+/* The schedule (API 2.0's SHELL SCHEDULE): kept here for the run, as GLOS keeps it (16 at most, by name). */
+static struct { char name[24], when[20], command[161]; } shim_sched[16];
+static int shim_nsched;
+
+int glos_schedule_set(const char *name, const char *when, const char *command)
+{
+    int i;
+    if (!name || !when || !command || !name[0] || strlen(name) > 23 || strlen(when) > 19 || strlen(command) > 160)
+        return GLOS_E_ARGUMENT;
+    for (i = 0; i < shim_nsched && strcmp(shim_sched[i].name, name); i++)
+        ;
+    if (i == 16)
+        return GLOS_E_ROOM;
+    if (i == shim_nsched)
+        shim_nsched++;
+    snprintf(shim_sched[i].name, sizeof shim_sched[i].name, "%s", name);
+    snprintf(shim_sched[i].when, sizeof shim_sched[i].when, "%s", when);
+    snprintf(shim_sched[i].command, sizeof shim_sched[i].command, "%s", command);
+    return 0;
+}
+
+int glos_schedule_remove(const char *name)
+{
+    int i;
+    for (i = 0; i < shim_nsched && strcmp(shim_sched[i].name, name); i++)
+        ;
+    if (i == shim_nsched)
+        return GLOS_E_NOT_FOUND;
+    memmove(&shim_sched[i], &shim_sched[i + 1], (size_t)(shim_nsched - i - 1) * sizeof shim_sched[0]);
+    shim_nsched--;
+    return 0;
+}
+
+int glos_schedule_list(char *list, unsigned room, unsigned *length)
+{
+    unsigned n = 0;
+    int i;
+    char line[260];
+    for (i = 0; i < shim_nsched; i++) {
+        int k = snprintf(line, sizeof line, "%s\t%s\t%s\t0\t0\n", shim_sched[i].name, shim_sched[i].when, shim_sched[i].command);
+        if (n + (unsigned)k + 1 <= room)
+            memcpy(list + n, line, (size_t)k + 1);
+        n += (unsigned)k;
+    }
+    if (length)
+        *length = n;
+    return n < room ? 0 : GLOS_E_ROOM;
+}
+
 int glos_recent_list(const char *program, char *list, unsigned room, unsigned *length)
 {
     static const char *const made[][2] = { { "C:\\GUI\\EDIT.TXT", "NOTEPAD.EXE" }, { "C:\\GUI\\IMG\\A.PNG", "IMAGES.EXE" },
