@@ -426,6 +426,42 @@ Everything else (the files, the directories, the cache) is the kernel's, above 1
   differ (437 in Belgium, Switzerland, Sweden and Finland makes e acute E acute): a region setting may choose
   them later. File names GLOS makes on long-name volumes stay Windows 98's (`fat.c`'s short names, E acute).
 
+### Native-DOS sessions: the design (2026-11-22)
+
+Today's GLOS has one V86 machine, the system VM (`kernel/vm/v86.c`'s `vm`, one thread): its "sessions" are DOS
+programs in it, its shell sessions kernel threads, its apps DPMI clients. A native-DOS session is GLOS's first
+second V86 machine, the one N6 needs anyway. What it is:
+
+- **Its memory:** a page table of its own for the first MB (fresh frames for 0-9FFFFh; nothing at A0000h-FFFFFh
+  or in the HMA at first, so a program that touches them faults and is told), in an address space like an
+  app's, freed with it. Today PDE 0 is the shared `kpt_low` everywhere; only the native machine's own thread runs
+  with its private one, and switching from it to any thread without an address space of its own loads the
+  kernel's (kernel threads read the system VM's BIOS data area through `vm_rd8`: they must keep seeing it).
+- **Its thread and traps:** a thread kind of its own (beside `TU_VM` and `TU_APP`); `dispatch` and `back_to_user`
+  route its V86 frames to the native machine's code, never to `vm_exception`/`vm_return` (the system VM's kill,
+  posted work, PIC and HLT queue stay the system VM's). Its vector table points every vector at an ARPL in its
+  DOS area, so every INT reaches GLOS (with VME the global bitmap's vectors trap as #GP, the rest through its own
+  table as #UD; without VME all as #GP). No port is its: every IN and OUT is refused and logged.
+- **No BIOS of its own:** the BIOS's hardware state is the system VM's, so a native machine never runs BIOS code;
+  its INT 10h, 13h, 16h and 1Ah are GLOS's to answer (console through its terminal, later steps). No IRQ is
+  delivered to it at first; its timer (INT 08h/1Ch) comes with the console.
+- **Its drives:** volumes GLOS mounts itself (`fsv.c` over GLOS's IDE driver) on a disk no DOS has a letter for
+  (in Loop A, the scratch disk). Every use of an IDE channel by GLOS (the cache's driver, a native volume) holds
+  that channel's lock, and the cache holds it round its BIOS calls for drives on that channel: one user of the
+  channel at a time, one writer of a volume always.
+- **The steps:**
+  - **NS1, the machine:** its memory, thread and traps; INT 21h 02h, 09h and 4Ch answered, the rest logged
+    (`GLOS-NDOS unanswered`) and refused; a .COM loaded from a GLOS-mounted volume; the shell's `NDOS FORMAT`,
+    `NDOS COPY` (from a hosted drive onto the native volume: two volumes, one writer each) and `NDOS RUN`,
+    the program's output on the shell's terminal and its exit code back. Loop A: a test .COM run, its words
+    and code checked.
+  - **NS2, the groundwork wired:** files, paths, searches, PSPs, EXEC of .COM and .EXE, memory, date and time
+    (`kernel/ndos/`); Loop A: test programs of GLOS's own (Open Watcom), the census's programs.
+  - **NS3, the console and the clock:** INT 16h and 10h's teletype, cooked input, Ctrl-C, INT 23h and 24h, the
+    timer IRQ.
+  - **NS4, programs that need more:** DPMI on a native machine (DJGPP programs), EMS and XMS, a VGA of its own.
+  - **NS5, a suite:** `loopa-ndos` in the gate.
+
 ### What it answers
 
 Everything the [checklist](#the-checklist-from-rbil) marks implement, absent or null; the census
