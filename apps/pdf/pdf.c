@@ -415,6 +415,8 @@ static void ahead_work(struct gui_task *t, void *arg)  /* (a worker's thread) */
     unlock();
 }
 
+static void draw_ahead(void);
+
 static void ahead_done(struct gui_window *owner, void *arg, int cancelled)
 {
     struct ahead_job *a = arg;
@@ -427,19 +429,33 @@ static void ahead_done(struct gui_window *owner, void *arg, int cancelled)
         free(a->px);
     }
     free(a);
+    if (!cancelled)
+        draw_ahead();                           /* (the next is kept: the one before, if it is not) */
 }
 
-static void draw_ahead(void)            /* the next page, if it is not kept already and nothing is being drawn */
+static void draw_ahead(void)            /* the next page, then the one before, if not kept already and nothing is being
+                                           drawn */
 {
     struct ahead_job *a;
-    if (!doc || ahead || page + 1 >= pdf_pages(doc) || !(a = calloc(1, sizeof *a)))
+    int k;
+    if (!doc || ahead)
         return;
-    a->page = page + 1, a->gen = gen;
-    lock();
-    a->zoom = zoom_for(a->page, &a->w, &a->h);
-    unlock();
-    if (cache_find(a->page, a->zoom) >= 0 || !(ahead = gui_task_start(win, NULL, ahead_work, a, ahead_done, 0)))
-        free(a);
+    for (k = 0; k < 2; k++) {
+        unsigned pg = k == 0 ? page + 1 : page - 1;
+        if ((k == 0 && page + 1 >= pdf_pages(doc)) || (k == 1 && page == 0) || !(a = calloc(1, sizeof *a)))
+            continue;
+        a->page = pg, a->gen = gen;
+        lock();
+        a->zoom = zoom_for(a->page, &a->w, &a->h);
+        unlock();
+        if (cache_find(a->page, a->zoom) >= 0) {
+            free(a);
+            continue;
+        }
+        if (!(ahead = gui_task_start(win, NULL, ahead_work, a, ahead_done, 0)))
+            free(a);
+        return;
+    }
 }
 
 static void draw_page(void)             /* the page into its picture, at the zoom (or the view's width) */

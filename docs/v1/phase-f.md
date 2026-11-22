@@ -1508,8 +1508,10 @@ by `wrapcheck.py`).
 
 - **Tests:** `pdf` (host) and `pdf-run` (the emulated Pentiums): the second page drawn ahead while the first
   shows, then both served from the cache as they are turned; every other step as before.
-- **Not yet:** the page before drawn ahead too; a page drawn in parts as it comes (a slow page shows only
-  when whole); continuous and two-page views.
+- **The page before** (later the same day): once the next page is kept, the one before is drawn ahead too (at
+  the zoom the view gives it), so reading back is at once as well; the scripts wait for each.
+- **Not yet:** a page drawn in parts as it comes (a slow page shows only when whole); continuous and two-page
+  views.
 
 ## The Games Library: the scan off the window's thread (2026-11-22)
 
