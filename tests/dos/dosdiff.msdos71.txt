@@ -87,6 +87,8 @@ DOSDIFF 2
 71A0h                  cf=1 ax=7100
 4411h                  cf=1 ax=0001
 6900h C:               cf=0
+7302h C: cf=0 len=003D bps=512 fats=2 media=F8
+7302h small buffer     cf=1 ax=0018
 4Dh at the start ax=0000
 spawn none=-1
 3Ah DDIFF              cf=0

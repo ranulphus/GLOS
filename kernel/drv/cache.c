@@ -226,6 +226,15 @@ static void forget(u32 di, u32 lba, u32 n)
     }
 }
 
+void cache_forget(u32 dl, u32 lba, u32 n)
+{
+    u32 i;
+
+    for (i = 0; c.ready && i < c.nd; i++)
+        if (c.d[i].dl == dl)
+            forget(c.d[i].idx, lba, n);
+}
+
 static void forget_drive(u32 di)
 {
     u32 f, prev, fl = irq_save(), seg;

@@ -346,6 +346,15 @@ int main(void)
     r.x.ax = 0x6900, r.x.bx = 3, r.x.dx = (unsigned)buf;
     dos();
     line("6900h C:");
+    ds_es();                                    /* (what doesn't hang on the disk's size or its kind of FAT) */
+    memset(buf, 0, sizeof buf);
+    r.x.ax = 0x7302, r.x.dx = 3, r.x.cx = 0x3F, r.x.di = (unsigned)buf;
+    dos();
+    printf("7302h C: cf=%u len=%04X bps=%u fats=%u media=%02X\n", r.x.cflag ? 1 : 0, *(unsigned *)buf,
+           *(unsigned *)(buf + 4), (unsigned char)buf[10], (unsigned char)buf[0x19]);
+    r.x.ax = 0x7302, r.x.dx = 3, r.x.cx = 0x20, r.x.di = (unsigned)buf;
+    dos();
+    line("7302h small buffer");
     r.x.ax = 0x4D00;
     dos();
     printf("4Dh at the start ax=%04X\n", r.x.ax);

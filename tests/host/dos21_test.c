@@ -546,6 +546,13 @@ int main(void)
     r.bx = 1;
     call(&r, 0x4411);
     CHECK((r.flags & 1) && r.ax == 1, "4411h");
+    r.es = psp, r.di = 0x400, r.cx = 0x3F, r.dx = 3;
+    call(&r, 0x7302);
+    CHECK(!(r.flags & 1) && w(lin(psp, 0x400)) == 0x3D && w(lin(psp, 0x404)) == 512 && mem[lin(psp, 0x40A)] == vol.fat.nfats
+          && w(lin(psp, 0x40F)) == vol.fat.clusters + 1, "7302h: its DPB");
+    r.cx = 0x20;
+    call(&r, 0x7302);
+    CHECK((r.flags & 1) && r.ax == 0x18, "7302h: a buffer too small %x", r.ax);
     r.bx = 3;
     call(&r, 0x4408);
     CHECK(!(r.flags & 1) && r.ax == 1, "4408h C: fixed");

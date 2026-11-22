@@ -21,6 +21,7 @@
 #include "../drv/ide.h"
 #include "../ndos/dos21.h"
 #include "../ndos/dtime.h"
+#include "cache.h"
 #include "vdos.h"
 
 static void vm_wr16(u32 lin, u32 v)
@@ -43,10 +44,14 @@ static int c_read(void *ctx, unsigned long lba, unsigned char *buf, unsigned cou
     return ata_read(cdev, cbase + lba, 0, count, buf, 0) != 0;
 }
 
+/* (past the block cache, which then forgets those sectors: a program's INT 13h through it reads them again) */
 static int c_write(void *ctx, unsigned long lba, const unsigned char *buf, unsigned count)
 {
+    int r = ata_write(cdev, cbase + lba, 0, count, buf, 0);
+
     (void)ctx;
-    return ata_write(cdev, cbase + lba, 0, count, buf, 0) != 0;
+    cache_forget(0x80, (u32)(cbase + lba), count);
+    return r != 0;
 }
 
 static unsigned long c_now(void *ctx)

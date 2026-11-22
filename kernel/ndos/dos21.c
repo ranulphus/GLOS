@@ -1145,6 +1145,51 @@ static int serial(struct dos_m *m, struct dos_regs86 *r)
     return ok(r);
 }
 
+/* 7302h: DL's drive's extended DPB at ES:DI (CX bytes, 3Fh at least), as MS-DOS 7.1 gives it for any FAT drive:
+   the length (3Dh), DOS 4's DPB from the volume's parameters (FAT32's 16-bit fields 0), then FAT32's fields. */
+static int ext_dpb(struct dos_m *m, struct dos_regs86 *r)
+{
+    unsigned long b = lin(r->es, r->di), p = b + 2;
+    int d = (r->dx & 0xFF) ? (int)(r->dx & 0xFF) - 1 : m->cds.current;
+    const struct fat_vol *f;
+    unsigned shift = 0, i, big;
+
+    if (r->cx < 0x3F)
+        return err(m, r, 0x18);
+    if (d < 0 || d >= DOS_DRIVES || !m->vol[d])
+        return err(m, r, 0x0F);
+    f = &m->vol[d]->fat;
+    big = f->fat == 32;
+    while ((1u << shift) < f->spc && shift < 8)
+        shift++;
+    for (i = 0; i < 0x3F; i++)
+        wr8(m, b + i, 0);
+    wr16(m, b, 0x3D);
+    wr8(m, p + 0x00, (unsigned)d), wr8(m, p + 0x01, (unsigned)d);
+    wr16(m, p + 0x02, 512);
+    wr8(m, p + 0x04, f->spc - 1), wr8(m, p + 0x05, shift);
+    wr16(m, p + 0x06, (unsigned)f->fat0);
+    wr8(m, p + 0x08, f->nfats);
+    wr16(m, p + 0x09, big ? 0 : (unsigned)(f->root_sectors * 16));
+    wr16(m, p + 0x0B, big ? 0 : (unsigned)f->data_start);
+    wr16(m, p + 0x0D, big ? 0 : (unsigned)(f->clusters + 1));
+    wr16(m, p + 0x0F, big ? 0 : (unsigned)f->fat_sectors);
+    wr16(m, p + 0x11, big ? 0 : (unsigned)f->root_start);
+    wr8(m, p + 0x17, 0xF8);                     /* (a fixed disk's media byte) */
+    wr16(m, p + 0x19, 0xFFFF), wr16(m, p + 0x1B, 0xFFFF);      /* (the last DPB) */
+    wr16(m, p + 0x1D, (unsigned)f->next_free);
+    wr16(m, p + 0x1F, f->free_count == 0xFFFFFFFFUL ? 0xFFFF : (unsigned)f->free_count);
+    wr16(m, p + 0x21, f->free_count == 0xFFFFFFFFUL ? 0xFFFF : (unsigned)(f->free_count >> 16));
+    wr16(m, p + 0x25, big ? (unsigned)f->fsinfo : 0xFFFF);
+    wr16(m, p + 0x27, big ? 6 : 0xFFFF);
+    wr16(m, p + 0x29, (unsigned)f->data_start), wr16(m, p + 0x2B, (unsigned)(f->data_start >> 16));
+    wr16(m, p + 0x2D, (unsigned)(f->clusters + 1)), wr16(m, p + 0x2F, (unsigned)((f->clusters + 1) >> 16));
+    wr16(m, p + 0x31, (unsigned)f->fat_sectors), wr16(m, p + 0x33, (unsigned)(f->fat_sectors >> 16));
+    wr16(m, p + 0x35, (unsigned)f->root_cluster), wr16(m, p + 0x37, (unsigned)(f->root_cluster >> 16));
+    wr16(m, p + 0x39, (unsigned)f->next_free), wr16(m, p + 0x3B, (unsigned)(f->next_free >> 16));
+    return ok(r);
+}
+
 static int country(struct dos_m *m, struct dos_regs86 *r)
 {
     unsigned long b = lin(r->ds, r->dx);
@@ -1574,6 +1619,8 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
     case 0x73:
         if (al == 0x03)
             return free32(m, r);
+        if (al == 0x02)
+            return ext_dpb(m, r);
         break;
     case 0x56:
         e = resolve(m, r->ds, r->dx, &v, &drive, path);
