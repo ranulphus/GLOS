@@ -1,8 +1,14 @@
 # Native GLOS: no DOS underneath
 
-**Status: a design for the owner's review (2026-11-20). Nothing in the kernel has changed. N0 is built: the census
-(`tools/census`, results in [native-dos-census.md](native-dos-census.md)) and the checklist of every DOS function
-from Ralf Brown's Interrupt List ([native-dos-rbil.md](native-dos-rbil.md), `make rbil`).**
+**Status (2026-11-22):** a design the owner reviewed (2026-11-20), being built. Built: N0 (the census, `tools/census`,
+results in [native-dos-census.md](native-dos-census.md); the checklist of every DOS function from Ralf Brown's
+Interrupt List, [native-dos-rbil.md](native-dos-rbil.md), `make rbil`); N1a-N1d (FAT read and write, GLOS's IDE
+driver under the cache, many callers); N2's groundwork and GLOS's own INT 21h (`kernel/ndos/`), checked line by
+line against MS-DOS 7.1 (DOSDIFF); native-DOS sessions NS1-NS3 (`glos ndos`, `loopa-ndos`); and native boot NB1-NB3
+and NB4's first part (GLOS started by its own boot sector and GLOSLDR.SYS with no DOS on the disk, its own DOS in
+the system VM under the agent, SSH, the console, Open Watcom and DJGPP programs and GLOS apps: `loopa-nboot`). Each
+step's own section says what was built and how it was shown to work. Hosted GLOS (GLOS.EXE from DOS) is unchanged
+but where a step says otherwise (N1c's `[cache] driver`).
 
 ## What the owner asked for (2026-11-20)
 
