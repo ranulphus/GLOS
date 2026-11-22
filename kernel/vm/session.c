@@ -43,6 +43,7 @@
 #include "dpmi.h"
 #include "gdbprog.h"
 #include "io.h"
+#include "joy.h"
 #include "kprintf.h"
 #include "mixer.h"
 #include "vsbdev.h"
@@ -275,6 +276,7 @@ static void end(const char *why)
     mode = vm_rd8(0x449);
     ses.active = 0;
     ses.ending = 1;                             /* (apps wait on until this is done) */
+    joy_program_map(NULL);                      /* ([joystick] map's again) */
     vm_direct(0);                               /* (before the BIOS calls: they run at IOPL 0) */
     if (ses.env_seg) {                          /* the profile's environment: DOS has copied it */
         if (vm_rd16(ses.env_pb) == ses.env_seg) {
@@ -532,6 +534,11 @@ void session_exec(const struct trapframe *tf)
     ses.grab = 0;
     ses.n++;
     ses.prof = profile_for(psp == vm.loader_psp && job.profile[0] ? job.profile : ses.prog, &ses.prof_copy);
+    {                                           /* (phase F) its own pad mapping: the virtual game port's while it runs */
+        char jm[48];
+        if (kcfg_profile_key(psp == vm.loader_psp && job.profile[0] ? job.profile : ses.prog, "joymap", jm, sizeof jm) > 0)
+            joy_program_map(jm);
+    }
     ses.direct = psp == vm.loader_psp && job.direct;
     mixer_refresh();                            /* (a session in direct mode has the real sound card, the virtual
                                                    Sound Blaster or no: its ports are not trapped. mixer.c) */

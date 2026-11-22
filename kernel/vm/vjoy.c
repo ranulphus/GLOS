@@ -77,6 +77,9 @@ static struct {
     u8 btn[4];                          /* 0 none, 1 to 16 */
 } map = { { 1, 2, 3, 4 }, { 0, 0, 0, 0 }, { 1, 2, 3, 4 } };
 
+static char own_map[48];                /* a session's program's own (joy_program_map), or "" */
+static void update(void);
+
 static u8 axis_of(const struct joy_pad *p, int k)
 {
     u8 v = map.axis[k] == 1 ? p->lx : map.axis[k] == 2 ? p->ly : map.axis[k] == 3 ? p->rx : map.axis[k] == 4 ? p->ry : 128;
@@ -98,7 +101,10 @@ static void map_read(void)
     memset(map.inv, 0, 4);
     memcpy(map.btn, rule_btn, 4);
     m[0] = 0;
-    kcfg_get("joystick", "map", m, sizeof m);
+    if (own_map[0])
+        memcpy(m, own_map, sizeof own_map);
+    else
+        kcfg_get("joystick", "map", m, sizeof m);
     for (p = m; !bad;) {
         char w[8];
         const char *q = w;
@@ -133,6 +139,19 @@ static void map_read(void)
         memcpy(map.btn, rule_btn, 4);
         kprintf("GLOS-JOY map not taken: \"%s\"\n", m);
     }
+}
+
+void joy_program_map(const char *m)
+{
+    u32 n = 0;
+    if (m)
+        for (; m[n] && n < sizeof own_map - 1; n++)
+            own_map[n] = m[n];
+    own_map[n] = 0;
+    if (n)
+        kprintf("GLOS-JOY map \"%s\" (the program's)\n", own_map);
+    map_read();
+    update();
 }
 
 /* The USB pads onto the port. */

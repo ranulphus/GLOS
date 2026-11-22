@@ -101,6 +101,9 @@ The default mapping, overridable with `[joystick] map=`:
   a flight stick's pull-back `lx -ly rx ry 1 2 3 4`. A setting that is not eight such words is not taken (the
   rule holds, and the log says `GLOS-JOY map not taken`). With two pads each is mapped by the same words (the
   first two axes, the first two buttons).
+- **A program's own** (phase F, 2026-11-22): `[program NAME.EXE] joymap` in the same words, the port's while
+  a session of that program runs (`GLOS-JOY map "..." (the program's)` in the log), `[joystick] map`'s again
+  when it ends. The Games Library's Properties sets it as a game's Pad mapping.
 
 GLOS apps get the same virtual port (D48 changes with it). Joystick events in the GLOS API (PRD §10) come later,
 outside this plan.

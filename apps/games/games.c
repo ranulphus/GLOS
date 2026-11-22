@@ -348,14 +348,50 @@ static void events(const struct glos_ev *ev)   /* the game ended: its time count
 
 /* ---- a game's properties */
 
-static struct gui_widget *p_title, *p_picture, *p_notes, *p_fav, *p_screen, *p_direct, *p_memory, *p_blaster;
-static struct { char title[80], picture[128], notes[200]; int fav, screen, direct; char memory[12], blaster[48]; } p_got;
+static struct gui_widget *p_title, *p_picture, *p_notes, *p_fav, *p_screen, *p_direct, *p_memory, *p_blaster, *p_joymap;
+static struct { char title[80], picture[128], notes[200]; int fav, screen, direct; char memory[12], blaster[48], joymap[48]; } p_got;
 
 /* ---- a game's profile: its program's own settings (GLOS.CFG's [program NAME.EXE], as the Control Panel's Programs
    page has them): the whole screen or a window, direct mode, its memory, the Sound Blaster it is told of (BLASTER
-   in its environment). For every copy of a program of that name. */
+   in its environment), its pad mapping (joymap: [joystick] map's words, the virtual game port's while it runs).
+   For every copy of a program of that name. */
 
-struct profile { int screen, direct; char memory[12], blaster[48], env[200]; };
+struct profile { int screen, direct; char memory[12], blaster[48], env[200], joymap[48]; };
+
+/* A pad mapping as kernel/vm/vjoy.c takes one: eight words, four axes (lx ly rx ry, "-" before one, or none) then
+   four buttons (1 to 16, or none); or nothing. 1 if so. */
+static int joymap_ok(const char *m)
+{
+    int k = 0;
+    while (*m) {
+        char w[8];
+        size_t n = 0;
+        while (*m == ' ')
+            m++;
+        if (!*m)
+            break;
+        while (*m && *m != ' ')
+            if (n < sizeof w - 1)
+                w[n++] = *m++;
+            else
+                return 0;
+        w[n] = 0;
+        if (k < 4) {
+            const char *q = w + (w[0] == '-');
+            if (strcmp(q, "lx") && strcmp(q, "ly") && strcmp(q, "rx") && strcmp(q, "ry") && strcmp(w, "none"))
+                return 0;
+        } else if (k < 8) {
+            char *e;
+            long b = strtol(w, &e, 10);
+            if (strcmp(w, "none") && (*e || e == w || b < 1 || b > 16))
+                return 0;
+        } else {
+            return 0;
+        }
+        k++;
+    }
+    return k == 0 || k == 8;
+}
 
 static void profile_read(const char *run, struct profile *pr)
 {
@@ -372,6 +408,8 @@ static void profile_read(const char *run, struct profile *pr)
         snprintf(pr->memory, sizeof pr->memory, "%s", v);
     if (glos_setting_get(sec, "env", pr->env, sizeof pr->env, &set) != 0)
         pr->env[0] = 0;
+    if (glos_setting_get(sec, "joymap", pr->joymap, sizeof pr->joymap, &set) != 0)
+        pr->joymap[0] = 0;
     for (b = pr->env; b && *b; b = strchr(b, '\n') ? strchr(b, '\n') + 1 : NULL)   /* (its lines: NAME=VALUE) */
         if (!strncasecmp(b, "BLASTER=", 8)) {
             size_t n = strcspn(b + 8, "\n");
@@ -393,6 +431,9 @@ static const char *profile_write(const char *run, const struct profile *was, con
         return why;
     if (strcmp(now->memory, was->memory)
         && glos_setting_set(sec, "memory", now->memory[0] ? now->memory : NULL, NULL, why, sizeof why))
+        return why;
+    if (strcmp(now->joymap, was->joymap)
+        && glos_setting_set(sec, "joymap", now->joymap[0] ? now->joymap : NULL, NULL, why, sizeof why))
         return why;
     if (strcmp(now->blaster, was->blaster)) {
         env[0] = 0;
@@ -432,6 +473,16 @@ static void props_done(struct gui_widget *b, int what)
         p_got.direct = gui_checked(p_direct);
         snprintf(p_got.memory, sizeof p_got.memory, "%s", gui_get_text(p_memory));
         snprintf(p_got.blaster, sizeof p_got.blaster, "%s", gui_get_text(p_blaster));
+        snprintf(p_got.joymap, sizeof p_got.joymap, "%s", gui_get_text(p_joymap));
+        if (!joymap_ok(p_got.joymap)) {         /* (said before the dialog goes: it stays to be put right) */
+            say("properties joymap refused %s", p_got.joymap);
+            gui_message(b->win, GUI_T("Properties"),
+                        GUI_T("A pad mapping is eight words: four axes (lx, ly, rx, ry, one with a minus before it the "
+                              "other way round, or none), then four buttons by number (1 to 16, or none). Or nothing, "
+                              "for the mapping every program has."), GUI_MB_OK);
+            gui_focus(p_joymap);
+            return;
+        }
     }
     gui_end_modal(b->win, b->id == 1 ? GUI_OK : GUI_CANCEL_R);
 }
@@ -475,6 +526,10 @@ static void properties(void)
     p_blaster = gui_field(gui_row(form, GUI_T("Sound &Blaster:"), NULL), 24);
     gui_tip(p_blaster, GUI_T("As BLASTER has it: A220 I5 D1 H5 T6. Empty: as GLOS tells every program"));
     gui_set_text(p_blaster, was.blaster);
+    p_joymap = gui_field(gui_row(form, GUI_T("Pad m&apping:"), NULL), 24);
+    gui_tip(p_joymap, GUI_T("The pad's axes and buttons for its game port: lx ly rx ry 1 2 3 4 as a rule. Empty: as "
+                            "every program has it"));
+    gui_set_text(p_joymap, was.joymap);
     p_direct = gui_check(box, GUI_T("&Direct mode: the PC's ports are the game's (for one that won't run otherwise)"),
                          was.direct);
     row = gui_hbox(box, 6, 0);
@@ -490,7 +545,9 @@ static void properties(void)
     now.screen = p_got.screen, now.direct = p_got.direct;
     snprintf(now.memory, sizeof now.memory, "%s", strcmp(p_got.memory, "0") ? p_got.memory : "");
     snprintf(now.blaster, sizeof now.blaster, "%s", p_got.blaster);
-    if (now.screen != was.screen || now.direct != was.direct || strcmp(now.memory, was.memory) || strcmp(now.blaster, was.blaster)) {
+    snprintf(now.joymap, sizeof now.joymap, "%s", p_got.joymap);
+    if (now.screen != was.screen || now.direct != was.direct || strcmp(now.memory, was.memory) || strcmp(now.blaster, was.blaster)
+        || strcmp(now.joymap, was.joymap)) {
         const char *why = profile_write(run, &was, &now);
         if (why) {
             char t[200];
@@ -498,8 +555,8 @@ static void properties(void)
             gui_message(win, GUI_T("Games"), t, GUI_MB_OK);
             say("profile refused %s %s", run, why);
         } else {
-            say("profile %s screen=%s direct=%d memory=%s blaster=%s", run, now.screen ? "full" : "window", now.direct,
-                now.memory[0] ? now.memory : "all", now.blaster[0] ? now.blaster : "none");
+            say("profile %s screen=%s direct=%d memory=%s blaster=%s joymap=%s", run, now.screen ? "full" : "window", now.direct,
+                now.memory[0] ? now.memory : "all", now.blaster[0] ? now.blaster : "none", now.joymap[0] ? now.joymap : "none");
         }
     }
     if (!(g = gamelib_find(&lib, id)))

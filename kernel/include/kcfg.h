@@ -14,6 +14,8 @@ int kcfg_get(const char *section, const char *key, char *out, u32 room);   /* 1 
 int kcfg_set(const char *section, const char *key, const char *value, char *why, u32 room);    /* CFG_ when, or -1;
                                            value NULL: unset */
 int kcfg_profile(const char *name, struct bi_profile *p);       /* 0; -1 none; -2 the file not read (bi's) */
+/* One key of the program's profile (phase F: joymap), into v: its length; -1 none (v ""). */
+int kcfg_profile_key(const char *name, const char *key, char *v, u32 room);
 u32 kcfg_list(char *buf, u32 max);
 u32 kcfg_sections(char *buf, u32 max);
 u32 kcfg_keys(const char *section, char *buf, u32 max);  /* a section's "key = value" lines */

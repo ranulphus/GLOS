@@ -1,5 +1,6 @@
 # The Games Library: a game's profile, how its program runs (apps/games; phase F's second part): Doom's
-# Properties with the whole screen, its memory, the Sound Blaster it is told of and direct mode set; kept as
+# Properties with the whole screen, its memory, the Sound Blaster it is told of, its pad mapping (one that is
+# not a mapping refused first) and direct mode set; kept as
 # DOOM.EXE's own settings (GLOS.CFG's [program DOOM.EXE]) and read back when the dialog opens again. (A library
 # of its own, -library: the main script, after it on the same disk, begins with none.)
 run GAMES.EXE -library C:\\OUT\\GAMESPRO.CFG
@@ -14,10 +15,18 @@ quick alt+m
 type 8192
 quick alt+b
 type A220 I7 D1 H5 T6
+quick alt+a
+type lx ly
 quick alt+d
 key enter
+said GAMES properties joymap refused lx ly
+key enter
+key end
+key space
+type rx ry 2 1 none 3
+key enter
 gone "Properties"
-said GAMES profile DOOM.EXE screen=full direct=1 memory=8192 blaster=A220 I7 D1 H5 T6
+said GAMES profile DOOM.EXE screen=full direct=1 memory=8192 blaster=A220 I7 D1 H5 T6 joymap=lx ly rx ry 2 1 none 3
 key alt+enter
 wait "Properties"
 shot kept "Properties"

@@ -254,6 +254,16 @@ static int profile_section(const char *prog, char *sec, u32 room)
     return -1;
 }
 
+int kcfg_profile_key(const char *name, const char *key, char *v, u32 room)
+{
+    char sec[48];
+    if (room)
+        v[0] = 0;
+    if (!c.loaded || strlen(name) > 12 || profile_section(name, sec, sizeof sec) != 0)
+        return -1;
+    return kcfg_get(sec, key, v, room);
+}
+
 /* The program's profile from its section (supervisor.md §11.2): 0, or -1 if it has none. */
 int kcfg_profile(const char *name, struct bi_profile *p)
 {

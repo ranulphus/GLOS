@@ -20,8 +20,10 @@ many well-known games by their files, and shows each with its title, year and ma
 - **Properties** gives a game a title of your own, a picture, and notes. Its lower part says how the game's
   program runs: in a window or on **the whole screen**, how much **memory** it is given (empty: all there
   is), the **Sound Blaster** it is told of (as DOS's BLASTER has it, A220 I5 D1 H5 T6; empty: as GLOS tells
-  every program), and **direct mode**, which gives the game the PC's ports for itself, for a game that won't
-  run otherwise. These are the program's own settings, for every copy of it (the Control Panel's Programs
+  every program), its **pad mapping** (which of the pad's sticks and buttons work its game port, as the
+  Control Panel's Joystick page's Mapping says it for every program: `lx ly rx ry 1 2 3 4`; empty: that
+  one), and **direct mode**, which gives the game the PC's ports for itself, for a game that won't run
+  otherwise. These are the program's own settings, for every copy of it (the Control Panel's Programs
   page shows them too).
 - The **View** menu sorts by title, by when a game was last played, or by the time played. Games counts how
   often and how long you play each.

@@ -213,6 +213,8 @@ const struct cfg_key cfg_schema[] = {
       "What it offers for kinds of file beside opening them: .KIND:Label=ARGUMENTS;..." },
     { "program", "env", CFG_ENV, CFG_PROGRAM, 0, 190, 0, "", "&Environment",
       "NAME=VALUE lines added to its environment" },
+    { "program", "joymap", CFG_TEXT, CFG_PROGRAM, 0, 47, "line", "", "&Controller mapping",
+      "Its own pad mapping ([joystick] map) while it runs: the same eight words (empty: [joystick] map's)" },
 };
 
 const int cfg_schema_n = (int)(sizeof cfg_schema / sizeof cfg_schema[0]);

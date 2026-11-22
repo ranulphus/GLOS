@@ -1393,3 +1393,16 @@ words in brackets; a picture that is part of a link has the link's words under i
   (`WEB pictures 1 of 1`), the page one link fewer.
 - **Not yet:** the place a remade page was scrolled to kept; the pictures' sizes from the page's own width
   and height before they come; CSS backgrounds.
+
+## The Games Library: a game's pad mapping (2026-11-22)
+
+The plan's "each game's profile ... and its pad mapping": `[program NAME.EXE] joymap`, `[joystick] map`'s
+eight words for that program alone (sdk/config/cfg.c; `docs/gamepad.md`). The kernel reads it as a session of
+the program begins (`kcfg_profile_key`; session.c) and the virtual game port maps the pads by it until the
+session ends (`joy_program_map`; kernel/vm/vjoy.c), then by `[joystick] map` again. In the Games Library it is
+the Properties' **Pad mapping**, checked as the kernel takes it (eight words, or empty) before the dialog goes.
+
+- **Tests:** the joy suite (bf6 and the 486): JOYTEST.EXE given its own mapping reads the pad's sticks and
+  buttons moved about, and `glos joy` has the rule again after it; the config suite sets and reads
+  `joymap`; `games-profile` (host and the emulated desktops): a mapping that is not one refused, then one
+  kept.

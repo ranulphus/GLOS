@@ -29,6 +29,9 @@ int joy_pad_get(int n, struct joy_pad *out);    /* pad n as it is now: 1, or 0 i
 void joy_pad_hook(void (*fn)(int n, const struct joy_pad *p)); /* told of every joy_pad() (API 2.0's INPUT) */
 void joy_info(int *on, int *mode, u32 *range_us, u32 *pads);    /* for API 2.0's GAMEPORT */
 void joy_config(void);                  /* [joystick] port and range, from GLOS.CFG */
+/* (phase F) A session's program's own map (its profile's joymap, [joystick] map's words), or NULL: [joystick]
+   map's again. */
+void joy_program_map(const char *map);
 void joy_source(int src, const struct joy_state *s);     /* a source's state; NULL: the source is gone */
 int joy_virtual(void);                  /* 201h is GLOS's now (else the PC's own, passed through) */
 u8 joy_in(void);                        /* a read of 201h */

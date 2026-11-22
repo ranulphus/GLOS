@@ -5342,6 +5342,15 @@ def joy_case(profile, vcard, card):
         checks["map-not"] = agent.ssh("glos config set joystick map lx ly")[0] == 0 \
             and " source=usb a=10,20 b=30,40 buttons=1010 " in agent.ssh("glos joy")[1]
         agent.ssh("glos config unset joystick map")
+        # (phase F) a program's own mapping (its profile's joymap): the port's while it runs, [joystick] map's after
+        agent.ssh("glos config set program:JOYTEST.EXE joymap rx -ry lx ly 2 1 none 3")
+        j = run("C:\\TEST\\JOYTEST.EXE 3")
+        c = j["count"] if j else [None]
+        checks["program-map"] = j is not None and j["buttons"] == "0101" and None not in c and c[2] < c[3] < c[0] < c[1]
+        checks["program-map-ends"] = " source=usb a=10,20 b=30,40 buttons=1010 " in agent.ssh("glos joy")[1]
+        if not checks["program-map"]:
+            info.append("program-map %r" % (j,))
+        agent.ssh("glos config unset program:JOYTEST.EXE joymap")
         agent.ssh("glos joy pad=0,off")
         checks["exit"] = agent.ssh("glos exit")[0] == 0
     except subprocess.TimeoutExpired:
@@ -8361,6 +8370,7 @@ CONFIG_SETS = [
     ("program:FWHEEL.EXE", "menu", "1", None), ("program:FWHEEL.EXE", "desktop", "1", None),
     ("program:FWHEEL.EXE", "screen", "full", None), ("program:FWHEEL.EXE", "direct", "1", None),
     ("program:FWHEEL.EXE", "memory", "16384", None), ("program:FWHEEL.EXE", "env", "A=1;B=2", None),
+    ("program:FWHEEL.EXE", "joymap", "rx ry lx ly 2 1 3 4", None),
 ]
 CONFIG_CASES = [("bf6", "g200", "ne2kpci")]
 
