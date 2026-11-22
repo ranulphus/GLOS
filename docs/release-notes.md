@@ -4,6 +4,13 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## The two games' names (2026-11-21)
+
+- The skiing game is **Fall Line** and the hovercraft game is **Cushion** (the owner's choices), in the Start
+  menu, their windows and the guide. Their programs keep their files' names, SKI.EXE and HVCRAFT.EXE. A fall
+  in Fall Line costs time, never the run; Cushion has nothing to pick up: bumps, the boost and setting down
+  are the whole fight.
+
 ## Devices (2026-11-21, API 2.12)
 
 - **A new page in the Control Panel, Devices:** every device GLOS finds in the PC, by kind (display, network,

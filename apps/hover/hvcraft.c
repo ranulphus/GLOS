@@ -1,5 +1,5 @@
 /* HVCRAFT.EXE: the hovercraft game (GLOS v1, phase F; docs/v1/apps/hovercraft.md), its first playable part.
- * "Hovercraft" is its working name: its name is the owner's to choose. GLOS's own game: its craft, arenas, rules
+ * Its name, Cushion (the air a hovercraft rides on), is the owner's choice (2026-11-21). GLOS's own game: its craft, arenas, rules
  * and look were made for it; nothing of any other game is in it.
  *
  * Here: the game's six arenas (built in: apps/shared/hvarenas.c) and the user's own (text files in the folder
@@ -51,7 +51,7 @@
 #include "hvlink.h"
 #include "hvsound.h"
 
-#define GAME_NAME "Hovercraft"          /* (the working name) */
+#define GAME_NAME "Cushion"             /* (the owner's choice, 2026-11-21) */
 
 static struct hv_arena arena;
 static struct hv_game alone;            /* the game played alone */

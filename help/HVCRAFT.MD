@@ -1,7 +1,7 @@
-# Hovercraft
+# Cushion
 
 A game of hovercraft in walled harbour yards, in 3D, alone against the computer's craft or with the other
-GLOS PCs of your network. (Its name is still a working one, and more of it is to come.)
+GLOS PCs of your network. A hovercraft rides on a cushion of air, which is where the game's name comes from.
 
 A hovercraft has almost no grip. Its fans change its speed, not its place: it goes on the way it was going
 until you have pushed it somewhere else. Turn early, and use the side fans to stop a slide.

@@ -1,7 +1,7 @@
-# Skiing
+# Fall Line
 
 A downhill skiing game: a slope seen from above, a skier, and a mountain made new from a number each time.
-(Its name is still a working one.)
+The fall line is the way straight down a slope. A fall costs you time, never the run.
 
 ## Skiing
 

@@ -105,9 +105,8 @@ The first part is in `docs/v1/phase-f.md` ("The skiing game"): the mountains, th
 free run and the mountain of the day, under the working name "Skiing" and with this page's defaults for the
 points below.
 
-## For the owner
+## For the owner (answered 2026-11-21)
 
-- **The name.** Suggestions, all skiing's own words: **Fall Line** (the line straight down a slope), **Schuss**
-  (a straight fast run), **Black Run**, **Powder Day**. Another of the owner's is as good.
-- **The skier:** one figure whose jacket's colour is chosen, or a few to choose from.
-- **Whether a fall can end a run** (a number of falls allowed in slalom) or only costs time, as planned here.
+- **The name: Fall Line.** A fall costs time only, as planned (the owner's answers by the question tool).
+- Still open: the skier's figure (one figure whose jacket's colour is chosen, as built, or a few to choose
+  from).

@@ -115,12 +115,7 @@ G450, the IBM with the G400, the P3 with its TNT2 when DOS-GL draws there in a w
 Music; more than eight craft; a game across the Internet; an arena editor with a picture (Notepad and the
 reader's messages do for v1); two players on one PC.
 
-## For the owner
+## For the owner (answered 2026-11-21)
 
-- **The name.** Suggestions: **Slipway** (where craft come ashore), **Cushion**, **Skirt and Fan**, **Basin**.
-  Another of the owner's is as good.
-- **The setting:** harbour yards and basins by day and by night, as planned here; or something else with walls
-  and floors (a quarry, an ice works, a rooftop).
-- **Nothing shot, nobody destroyed** is this plan's choice (bumps, the boost and setting down are the whole of
-  the fight). A thing to pick up now and then (a moment's heavier craft, a beacon's lock) could be added if the
-  games feel thin when played.
+- **The name: Cushion.** No pickups, as planned (the owner's answers by the question tool).
+- Still open: the setting (harbour yards and basins, as built, or something else with walls and floors).

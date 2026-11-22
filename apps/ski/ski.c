@@ -1,6 +1,6 @@
 /* SKI.EXE: the skiing game (GLOS v1, phase F; docs/v1/apps/skiing.md), its first part. One of the two games GLOS
  * comes with: GLOS's own, with its own skier, pictures, mountains and rules; nothing of any other game is in it.
- * "Skiing" is its working name: its name is the owner's to choose.
+ * Its name, Fall Line (skiing's word for the line straight down a slope), is the owner's choice (2026-11-21).
  *
  * A slope seen from above scrolls up under a skier. The mountain is made by rule from a number
  * (apps/shared/skimount.c); the skier moves in sixty steps a second from the keys held (apps/shared/skirun.c);
@@ -48,7 +48,7 @@
 #include "art.h"
 #include "sound.h"
 
-#define GAME_NAME "Skiing"              /* (the working name) */
+#define GAME_NAME "Fall Line"           /* (the owner's choice, 2026-11-21) */
 
 enum { C_AGAIN = 1, C_NEW, C_DAY, C_NUMBER, C_WATCH, C_TABLES, C_PAUSE, C_EXIT, C_SLALOM, C_FREE, C_GREEN, C_BLUE, C_RED, C_BLACK,
        C_SOUND, C_JACKET };             /* (C_JACKET + n: the jackets) */

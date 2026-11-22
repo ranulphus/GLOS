@@ -1043,7 +1043,7 @@ The plan is `docs/v1/apps/help.md`. HELP.EXE, "Help" in the Start menu, and F1 i
 
 ## The skiing game (2026-11-21): the first part
 
-The plan is `docs/v1/apps/skiing.md`. SKI.EXE, "Skiing" in the Start menu: **a working name**. The name, the
+The plan is `docs/v1/apps/skiing.md`. SKI.EXE, "Skiing" in the Start menu at first (a working name; **Fall Line** since 2026-11-21, the owner's choice, with falls costing time only). The name, the
 skier's figure and whether a fall can end a run are the owner's to choose (the plan's last section); built
 with the plan's defaults (one figure with a jacket's colour chosen; a fall costs time and no more), and the
 name is one line of the program. GLOS's own game: its skier, pictures, mountains and rules were made for it.
@@ -1136,7 +1136,7 @@ to choose (the plan's last section); nothing here depends on them.
 
 ### Its first playable part (the same day)
 
-HVCRAFT.EXE, "Hovercraft" in the Start menu (**a working name**): `apps/hover/hvcraft.c`. Six arenas, built
+HVCRAFT.EXE, "Hovercraft" in the Start menu at first (a working name; **Cushion** since 2026-11-21, the owner's choice, with no pickups): `apps/hover/hvcraft.c`. Six arenas, built
 in (`apps/shared/hvarenas.c`: the Old Basin, the Dry Dock, the Timber Yard, the Lock Gates, the Customs Quay,
 the Roundhouse; Tab goes from one to the next); the player's craft and three of the computer's (the middle strength); the four kinds of game on keys 1
 to 4; the picture drawn with DOS-GL in a window, as the savers draw: the arena's squares as boxes lit by the
