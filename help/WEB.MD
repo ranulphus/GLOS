@@ -21,6 +21,11 @@ Type in **Address** (Ctrl+L) and press Enter:
 | F5 | Fetch the page again |
 | Esc | Stop fetching |
 | Ctrl+O | Open a file from a disk |
+| Ctrl+F | Find words in the page |
+| F3, Shift+F3 | Find them again further on, or further back |
+| Ctrl+D | Keep the page among your bookmarks |
+| Ctrl+B | The bookmarks: a page of links, each with **take away** |
+| F9 | Reader View: the page's own text alone, without its menus, lists of links and colours |
 
 - Pictures inside a page are shown in it (PNG, JPEG, GIF and BMP), made smaller where they are wider than
   the page; those from the web come once the page is there, a moment later. A picture that can't be had is

@@ -35,7 +35,7 @@ type C:\\PIX\\SUNSET.BMP\n
 said WEB loaded file:///C:/PIX/SUNSET.BMP title= blocks=1 links=0
 shot picture "Web Reader"
 key alt+home
-said WEB loaded about:home title=Web Reader blocks=6 links=3
+said WEB loaded about:home title=Web Reader blocks=6 links=4
 shot home "Web Reader - Web Reader"
 key alt+f4
 gone "Web Reader - Web Reader"

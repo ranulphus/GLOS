@@ -22,7 +22,9 @@
  * The tip of the day (HELP /TIP [N]): one of TIPS.MD's list in a small window of its own (the day's, or the
  * Nth), Next Tip, and a box for [desktop] tips, which GLOS starts it by each time the desktop comes on.
  *
- * Not yet: pictures in pages, the place in a page a link names (#part) and where a search's words are, a
+ * A search's result opens its page with the line's first word chosen and scrolled to (gui_richview_find).
+ *
+ * Not yet: pictures in pages, the place in a page a link names (#part; the guide has no such links), a
  * dialog's own Help button, one Help window for every F1.
  *
  * The suite's lines (tests/gui/help.txt): "HELP ..." on the output. */
@@ -263,6 +265,18 @@ static void plain(const char *line, size_t n, char *out, size_t room)   /* a lin
     out[k] = 0;
 }
 
+static char first_word[40];             /* the search's first word: chosen in the page a result opens */
+
+static int count_word(const char *p, size_t n)  /* first_word's times in p's n bytes, in either case */
+{
+    size_t w = strlen(first_word), i;
+    int c = 0;
+    for (i = 0; w && i + w <= n; i++)
+        if (!strncasecmp(p + i, first_word, w))
+            c++, i += w - 1;
+    return c;
+}
+
 static void search(const char *words)
 {
     int k, lines = 0, in = 0;
@@ -271,6 +285,7 @@ static void search(const char *words)
         words++;
     if (!*words)
         return;
+    snprintf(first_word, sizeof first_word, "%.*s", (int)strcspn(words, " "), words);
     for (k = 0; k < npages && lines < 200; k++) {
         const char *p = pages[k].text, *end = p + pages[k].len;
         int here = 0;
@@ -280,9 +295,12 @@ static void search(const char *words)
             if (n && has(p, n, words)) {
                 char text[160];
                 const char *cells[2];
+                int before = count_word(pages[k].text, (size_t)(p - pages[k].text));   /* (its times before the line:
+                                                   the one on the line is the next) */
                 plain(p, n, text, sizeof text);
                 cells[0] = pages[k].title, cells[1] = text;
-                gui_list_add(results, cells, gui_icon("file-text", 0), (void *)(size_t)(k + 1));
+                gui_list_add(results, cells, gui_icon("file-text", 0),
+                             (void *)(size_t)((unsigned)(k + 1) | (unsigned)(before < 0x7FFF ? before : 0x7FFF) << 16));
                 here++, lines++;
             }
             p = nl ? nl + 1 : end;
@@ -307,9 +325,19 @@ static void field_on(struct gui_widget *w, int what)
 
 static void results_on(struct gui_widget *w, int what)
 {
-    int row = gui_list_get(w);
-    if (what == GUI_ON_ACTIVATE && row >= 0)
-        show((int)(size_t)gui_list_user(w, row) - 1, 0);
+    int row = gui_list_get(w), i, before, block, from = 0;
+    size_t u;
+    if (what != GUI_ON_ACTIVATE || row < 0)
+        return;
+    u = (size_t)gui_list_user(w, row);
+    show((int)(u & 0xFFFF) - 1, 0);
+    before = (int)(u >> 16);
+    for (i = 0; i <= before && first_word[0]; i++)      /* (the word as many times as the page has it before the
+                                                   line, then the line's: in the page as shown, in either case) */
+        if (gui_richview_find(view, first_word, 0, 0) <= 0)
+            break;
+    block = gui_richview_chosen(view, &from, NULL);
+    say("at %s block=%d at=%d", first_word, block, from);
 }
 
 /* ---- the tour: TOUR.MD's parts, a step each */

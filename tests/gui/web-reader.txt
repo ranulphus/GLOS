@@ -1,0 +1,16 @@
+# The Web Reader's reader view (apps/web; phase F): a news page with a site's banner, a menu of links, sign-in
+# links, the article (a heading, paragraphs with a link, a subheading), a list of other pages and a footer of
+# links. View, Reader View (F9): the article alone, the page's colours left; F9 again: the page as it was.
+run WEB.EXE C:\WEB\ARTICLE.HTM
+wait "An Article - Web Reader"
+said WEB loaded file:///C:/WEB/ARTICLE.HTM title=An Article blocks=16 links=13
+shot page "An Article - Web Reader"
+key f9
+said WEB reader on
+said WEB reader kept 5 of 16 blocks
+shot reader "An Article - Web Reader"
+key f9
+said WEB reader off
+key alt+f4
+gone "An Article - Web Reader"
+expect WEB end

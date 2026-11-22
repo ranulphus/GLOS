@@ -1,0 +1,8 @@
+#loopa-run-only (it reads what web-marks.txt left in C:\OUT\MARKS.TXT: Loop A plays every script on one disc, in order)
+# The Web Reader's bookmarks kept: started again on web-marks.txt's file, the one left there is listed.
+run WEB.EXE -marks C:\OUT\MARKS.TXT about:bookmarks
+wait "Bookmarks - Web Reader"
+said WEB loaded about:bookmarks title=Bookmarks blocks=2 links=2
+key alt+f4
+gone "Bookmarks - Web Reader"
+expect WEB end

@@ -33,7 +33,8 @@
 #include "../shared/url.h"
 #include "../shared/webget.h"
 
-enum { C_BACK = 1, C_FORWARD, C_RELOAD, C_STOP, C_HOME, C_ADDRESS, C_OPEN, C_EXIT };
+enum { C_BACK = 1, C_FORWARD, C_RELOAD, C_STOP, C_HOME, C_ADDRESS, C_OPEN, C_EXIT, C_FIND, C_FINDNEXT, C_FINDPREV, C_MARK,
+       C_MARKS, C_READER };
 
 #define PAGE_MAX (2ul << 20)            /* a page's bytes kept at most */
 #define HISTORY 40
@@ -53,8 +54,8 @@ static const char home_page[] =
     "<title>Web Reader</title><h1>Web Reader</h1>"
     "<p>Type an address above and press Enter: a site's name (<b>example.org</b>), a whole address, a file's path, or "
     "words to search for.</p>"
-    "<p>Pages are shown as text with their links: no scripts are run, and pictures are shown by the words that stand "
-    "for them.</p>"
+    "<p>Pages are shown as text with their links and pictures: no scripts are run. Ctrl+D keeps the page shown "
+    "among your <a href=\"about:bookmarks\">bookmarks</a> (Ctrl+B).</p>"
     "<ul><li><a href=\"https://lite.duckduckgo.com/lite/\">Search the web (DuckDuckGo's plain pages)</a>"
     "<li><a href=\"https://wiby.me/\">Wiby: a search of the small, old web</a>"
     "<li><a href=\"http://frogfind.com/\">FrogFind: pages made plain</a></ul>";
@@ -75,23 +76,120 @@ static void say(const char *fmt, ...)
 
 static struct gui_rdoc *doc;
 static char page_title[240];
+static int text_in_block;                /* (the block begun last has text: an anchor now is the next one's) */
+
+/* (phase F) The reader view: the page's main text alone. The page is read twice: first each block's text and
+   how much of it is links counted; then made with the blocks that are mostly links (a site's menus, lists of
+   other pages) left out, and those before the page's first heading where many paragraphs follow it (a site's
+   banner), and the page's own colours. */
+static int reader;                      /* (the user's: View, Reader View) */
+static struct rstat { unsigned text, link; int kind, picture; } *rs;
+static int nrs, rs_room, rbi, skipping;
+static unsigned char *rkeep;
+
+static void c_block(void *c, int kind, int depth)
+{
+    (void)c, (void)depth;
+    if (nrs == rs_room) {
+        int room = rs_room ? rs_room * 2 : 256;
+        struct rstat *n = realloc(rs, (size_t)room * sizeof *rs);
+        unsigned char *k = realloc(rkeep, (size_t)room);
+        if (!n || !k) {
+            if (n)
+                rs = n;
+            if (k)
+                rkeep = k;
+            return;
+        }
+        rs = n, rkeep = k, rs_room = room;
+    }
+    memset(&rs[nrs], 0, sizeof rs[nrs]);
+    rs[nrs++].kind = kind;
+}
+
+static void c_text(void *c, const char *text, int n, unsigned style, const char *link)
+{
+    unsigned k = 0;
+    int i;
+    (void)c, (void)style;
+    for (i = 0; n < 0 ? text[i] != 0 : i < n; i++)      /* (letters, not blanks) */
+        k += text[i] != ' ' && text[i] != '\n' && text[i] != '\t';
+    if (nrs) {
+        rs[nrs - 1].text += k;
+        if (link)
+            rs[nrs - 1].link += k;
+    }
+}
+
+static void c_image(void *c, const char *src, const char *alt, int w, int h, const char *link)
+{
+    (void)c, (void)src, (void)alt, (void)w, (void)h, (void)link;
+    if (nrs)
+        rs[nrs - 1].picture = 1;
+}
+
+static const struct html_sink counting = { c_block, c_text, NULL, NULL, c_image, NULL, NULL, NULL, NULL };
+
+static int reader_choose(void)          /* rkeep[] for each block: the number kept */
+{
+    int i, first = -1, after = 0, kept = 0;
+    for (i = 0; i < nrs && first < 0; i++)
+        if (rs[i].kind == GUI_RB_HEAD1)
+            first = i;
+    for (i = first + 1; first >= 0 && i < nrs; i++)
+        after += rs[i].kind == GUI_RB_PARA && rs[i].text >= 40 && rs[i].link * 2 < rs[i].text;
+    if (after < 2)
+        first = -1;                             /* (no heading that a text follows: from the start) */
+    for (i = 0; i < nrs; i++) {
+        const struct rstat *r = &rs[i];
+        int keep = 1;
+        if (i < first)
+            keep = 0;
+        else if (!r->text && !r->picture && r->kind != GUI_RB_RULE)
+            keep = 0;                           /* (nothing in it) */
+        else if (r->kind != GUI_RB_HEAD1 && r->kind != GUI_RB_HEAD2 && r->kind != GUI_RB_CODE && r->link * 2 > r->text
+                 && r->text < 400)
+            keep = 0;                           /* (mostly links: a menu, a list of other pages) */
+        rkeep[i] = (unsigned char)keep;
+        kept += keep;
+    }
+    for (i = nrs - 1; i >= 0; i--)              /* (a heading whose part is all left out goes with it) */
+        if (rkeep[i] && (rs[i].kind == GUI_RB_HEAD2 || rs[i].kind == GUI_RB_HEAD3)) {
+            int j, any = 0;
+            for (j = i + 1; j < nrs && rs[j].kind != GUI_RB_HEAD1 && rs[j].kind != GUI_RB_HEAD2
+                            && (rs[j].kind != GUI_RB_HEAD3 || rs[i].kind == GUI_RB_HEAD2); j++)
+                any |= rkeep[j];
+            if (!any)
+                rkeep[i] = 0, kept--;
+        }
+    return kept;
+}
 
 static void d_block(void *c, int kind, int depth)
 {
     (void)c;
+    if (reader && rs) {
+        rbi++;
+        skipping = rbi < nrs && !rkeep[rbi];
+        if (skipping)
+            return;
+    }
     gui_rdoc_block(doc, kind, depth);   /* (the reader's kinds are the toolkit's) */
-    blocks++;
+    blocks++, text_in_block = 0;
 }
 
 static void d_text(void *c, const char *text, int n, unsigned style, const char *link)
 {
     (void)c;
+    if (skipping)
+        return;
+    text_in_block |= n != 0;
     gui_rdoc_text(doc, text, n, style, link);
     links += link != NULL;
 }
 
-static void d_cell(void *c) { (void)c; gui_rdoc_cell(doc); }
-static void d_colour(void *c, long rgb) { (void)c; gui_rdoc_colour(doc, rgb < 0 ? GFX_NONE : (unsigned)rgb); }
+static void d_cell(void *c) { (void)c; if (!skipping) gui_rdoc_cell(doc); }
+static void d_colour(void *c, long rgb) { (void)c; if (!reader) gui_rdoc_colour(doc, rgb < 0 ? GFX_NONE : (unsigned)rgb); }
 
 /* ---- pictures in pages: a page's pictures (24 at most), each fetched once and kept while the page is: a file's
    at once, as the page is made; a web server's one after another once the page shows (the page is then made
@@ -207,8 +305,11 @@ static int pic_find(const char *url)    /* its place in the list (made if new: a
 static void d_image(void *c, const char *src, const char *alt, int w, int h, const char *link)
 {
     char t[300];
-    int k = src && src[0] ? pic_find(src) : -1;
+    int k;
     (void)c, (void)w, (void)h;
+    if (skipping)
+        return;
+    k = src && src[0] ? pic_find(src) : -1;
     if (k >= 0 && pics[k].state == 1) {         /* the picture itself; a link it is part of under it, by its words */
         gui_rdoc_image(doc, pics[k].px, pics[k].w, pics[k].h, alt);
         blocks++;
@@ -223,6 +324,22 @@ static void d_image(void *c, const char *src, const char *alt, int w, int h, con
     blocks++, links++;
 }
 
+/* (phase F) The places a page's "#name" leads to: each name, and the block it is (the one begun next, or the one
+   just begun when no text is in it yet). */
+#define ANCHORS 256
+static struct { char name[48]; int block; } anchors[ANCHORS];
+static int nanchors;
+
+static void d_anchor(void *c, const char *name)
+{
+    int n = gui_rdoc_blocks(doc);
+    (void)c;
+    if (nanchors == ANCHORS || strlen(name) >= sizeof anchors[0].name)
+        return;
+    snprintf(anchors[nanchors].name, sizeof anchors[0].name, "%s", name);
+    anchors[nanchors++].block = text_in_block || n == 0 ? n : n - 1;
+}
+
 static void d_title(void *c, const char *title)
 {
     (void)c;
@@ -230,7 +347,32 @@ static void d_title(void *c, const char *title)
         snprintf(page_title, sizeof page_title, "%s", title);
 }
 
-static const struct html_sink to_doc = { d_block, d_text, d_cell, d_colour, d_image, d_title, NULL, NULL, NULL };
+static const struct html_sink to_doc = { d_block, d_text, d_cell, d_colour, d_image, d_title, d_anchor, NULL, NULL };
+
+/* The page shown at the place "#name" leads to ("": its top); said for the suite. */
+static void show_place(const char *name)
+{
+    int i;
+    if (!name[0]) {
+        gui_richview_show(view, 0);
+        say("at top");
+        return;
+    }
+    for (i = 0; i < nanchors; i++)
+        if (!strcmp(anchors[i].name, name)) {
+            if (gui_richview_show(view, anchors[i].block) != 0)
+                gui_richview_show(view, anchors[i].block - 1);
+            say("at #%s block=%d", name, anchors[i].block);
+            return;
+        }
+    say("no #%s", name);
+}
+
+static int same_page(const char *a, const char *b)     /* the same address but for a "#name" */
+{
+    size_t na = strcspn(a, "#"), nb = strcspn(b, "#");
+    return na == nb && !strncmp(a, b, na);
+}
 
 static int starts(const char *s, const char *with)      /* whatever the letters' case */
 {
@@ -276,7 +418,7 @@ static void show_page(const char *url, const char *bytes, unsigned long n, const
         snprintf(page_url, sizeof page_url, "%s", url);
     }
     doc = gui_rdoc_new();
-    page_title[0] = 0, blocks = links = 0;
+    page_title[0] = 0, blocks = links = 0, nanchors = 0, text_in_block = 0;
     if (!doc)
         return;
     if (is_picture) {
@@ -298,7 +440,17 @@ static void show_page(const char *url, const char *bytes, unsigned long n, const
         blocks++;
         free(latin);
     } else if (!type[0] || starts(type, "text/html") || starts(type, "application/xhtml")) {
+        int kept = -1;
+        if (reader) {                           /* (counted first: what to leave out) */
+            nrs = 0;
+            html_read(bytes, n, type, url, &counting);
+            kept = reader_choose();
+            rbi = -1, skipping = 0;
+        }
         html_read(bytes, n, type, url, &to_doc);
+        skipping = 0;
+        if (kept >= 0)
+            say("reader kept %d of %d blocks", kept, nrs);
     } else {
         gui_rdoc_block(doc, GUI_RB_PARA, 0);
         snprintf(t, sizeof t, GUI_T("This is no page to read but a file (%s, %lu bytes). Files are not saved from here yet."), type, n);
@@ -329,9 +481,13 @@ static void show_page(const char *url, const char *bytes, unsigned long n, const
         for (i = 0; i < npics; i++)
             shown += pics[i].state == 1;
         say("pictures %d of %d", shown, npics);
+        if (strchr(url, '#'))                   /* (the place again: the pictures moved it) */
+            show_place(strchr(url, '#') + 1);
         return;
     }
     say("loaded %s title=%s blocks=%u links=%u", url, page_title, blocks, links);
+    if (strchr(url, '#'))
+        show_place(strchr(url, '#') + 1);
     {
         int i, here = 0;
         for (i = 0; i < npics; i++)
@@ -386,6 +542,152 @@ static void show_failure(const char *url, const char *why)
     }
 }
 
+/* ---- (phase F) bookmarks: the pages kept, in WEBMARKS.TXT in GLOS's folder (WEB -marks FILE: another), a line
+   each: the address, a tab, its title. Shown as a page of links (about:bookmarks), each with a link that takes it
+   away (about:unmark?N). */
+
+#define MARKS 200
+static char marks_file[300];
+static struct { char *url, *title; } marks[MARKS];
+static int nmarks, marks_read;
+
+static void marks_load(void)
+{
+    char line[1400];
+    FILE *f;
+    if (marks_read)
+        return;
+    marks_read = 1;
+    if (!(f = gui_fopen(marks_file, "r")))
+        return;
+    while (nmarks < MARKS && fgets(line, sizeof line, f)) {
+        char *tab = strchr(line, '\t'), *e = line + strcspn(line, "\r\n");
+        *e = 0;
+        if (!tab || tab == line)
+            continue;
+        *tab = 0;
+        marks[nmarks].url = strdup(line);
+        marks[nmarks].title = strdup(tab + 1);
+        if (marks[nmarks].url && marks[nmarks].title)
+            nmarks++;
+    }
+    fclose(f);
+}
+
+static int marks_save(void)
+{
+    FILE *f = gui_fopen(marks_file, "w");
+    int i;
+    if (!f)
+        return -1;
+    for (i = 0; i < nmarks; i++)
+        fprintf(f, "%s\t%s\n", marks[i].url, marks[i].title);
+    return fclose(f) == 0 ? 0 : -1;
+}
+
+static void mark_page(void)             /* the page shown kept (once) */
+{
+    char t[300], title[240];
+    int i;
+    marks_load();
+    if (!current[0] || !strncmp(current, "about:", 6))
+        return;
+    for (i = 0; i < nmarks; i++)
+        if (!strcmp(marks[i].url, current)) {
+            gui_set_text(status, GUI_T("This page is among the bookmarks already."));
+            say("marked already %s", current);
+            return;
+        }
+    if (nmarks == MARKS) {
+        gui_set_text(status, GUI_T("There are as many bookmarks as can be kept: take some away first."));
+        return;
+    }
+    for (i = 0; page_title[i] && i < (int)sizeof title - 1; i++)       /* (a tab or a line's end in it: a blank) */
+        title[i] = page_title[i] == '\t' || page_title[i] == '\r' || page_title[i] == '\n' ? ' ' : page_title[i];
+    title[i] = 0;
+    marks[nmarks].url = strdup(current);
+    marks[nmarks].title = strdup(title[0] ? title : current);
+    if (!marks[nmarks].url || !marks[nmarks].title)
+        return;
+    nmarks++;
+    if (marks_save() != 0) {
+        gui_set_text(status, GUI_T("The bookmarks couldn't be written."));
+        say("marks not written %s", marks_file);
+        return;
+    }
+    snprintf(t, sizeof t, GUI_T("Kept among the bookmarks: %.200s"), marks[nmarks - 1].title);
+    gui_set_text(status, t);
+    say("marked %s", current);
+}
+
+static void html_put(char **b, size_t *n, size_t *room, const char *s, int escape)     /* text onto a page made here */
+{
+    for (; *s; s++) {
+        const char *e = !escape ? NULL : *s == '<' ? "&lt;" : *s == '&' ? "&amp;" : *s == '"' ? "&quot;" : NULL;
+        size_t k = e ? strlen(e) : 1;
+        if (*n + k + 1 > *room) {
+            char *nb = realloc(*b, *room * 2 + k + 1);
+            if (!nb)
+                return;
+            *b = nb, *room = *room * 2 + k + 1;
+        }
+        memcpy(*b + *n, e ? e : s, k);
+        *n += k;
+    }
+    (*b)[*n] = 0;
+}
+
+static void show_page(const char *url, const char *bytes, unsigned long n, const char *type, int push);
+
+static void show_marks(int push)        /* about:bookmarks */
+{
+    size_t n = 0, room = 1024;
+    char *b = malloc(room), num[48];
+    int i;
+    if (!b)
+        return;
+    b[0] = 0;
+    marks_load();
+    html_put(&b, &n, &room, "<title>", 0);
+    html_put(&b, &n, &room, GUI_T("Bookmarks"), 1);
+    html_put(&b, &n, &room, "</title><h1>", 0);
+    html_put(&b, &n, &room, GUI_T("Bookmarks"), 1);
+    html_put(&b, &n, &room, "</h1>", 0);
+    if (!nmarks) {
+        html_put(&b, &n, &room, "<p>", 0);
+        html_put(&b, &n, &room, GUI_T("None yet: Ctrl+D keeps the page shown here."), 1);
+        html_put(&b, &n, &room, "</p>", 0);
+    }
+    if (nmarks)
+        html_put(&b, &n, &room, "<ul>", 0);
+    for (i = 0; i < nmarks; i++) {
+        html_put(&b, &n, &room, "<li><a href=\"", 0);
+        html_put(&b, &n, &room, marks[i].url, 1);
+        html_put(&b, &n, &room, "\">", 0);
+        html_put(&b, &n, &room, marks[i].title, 1);
+        snprintf(num, sizeof num, "</a> (<a href=\"about:unmark?%d\">", i);
+        html_put(&b, &n, &room, num, 0);
+        html_put(&b, &n, &room, GUI_T("take away"), 1);
+        html_put(&b, &n, &room, "</a>)", 0);
+    }
+    if (nmarks)
+        html_put(&b, &n, &room, "</ul>", 0);
+    show_page("about:bookmarks", b, n, "text/html; charset=utf-8", push);
+    free(b);
+}
+
+static void unmark(int k)
+{
+    if (k < 0 || k >= nmarks)
+        return;
+    say("unmarked %s", marks[k].url);
+    free(marks[k].url), free(marks[k].title);
+    memmove(&marks[k], &marks[k + 1], (size_t)(nmarks - k - 1) * sizeof marks[0]);
+    nmarks--;
+    if (marks_save() != 0)
+        say("marks not written %s", marks_file);
+}
+
 /* ---- going somewhere */
 
 static void stop(void)
@@ -417,11 +719,43 @@ static void file_path(const char *url, char *out, unsigned room)       /* file:/
     out[n] = 0;
 }
 
+static int reloading;                   /* (Reload: the page read again, though it is the one shown) */
+
+static void push_place(const char *url)        /* a place in the page shown: kept in the history as a page is */
+{
+    while (nhistory > at + 1)
+        free(history[--nhistory]);
+    if (nhistory == HISTORY) {
+        free(history[0]);
+        memmove(history, history + 1, (HISTORY - 1) * sizeof history[0]);
+        nhistory--;
+    }
+    if ((history[nhistory] = malloc(strlen(url) + 1)) != NULL)
+        strcpy(history[nhistory], url), at = nhistory++;
+}
+
 static void go(const char *url, int push)
 {
     char certs[300], path[300], t[1100];
+    if (!reloading && current[0] && !getting && same_page(url, current) && (strchr(url, '#') || strchr(current, '#'))) {
+        const char *h = strchr(url, '#');       /* (another place in the page shown: scrolled to) */
+        char was[1024];
+        snprintf(was, sizeof was, "%s", url);
+        show_place(h ? h + 1 : "");
+        snprintf(current, sizeof current, "%s", was);
+        gui_set_text(address, current);
+        if (push)
+            push_place(was);
+        return;
+    }
     stop();
-    if (starts(url, "about:")) {
+    if (starts(url, "about:bookmarks")) {
+        show_marks(push);
+    } else if (starts(url, "about:unmark?")) {
+        marks_load();
+        unmark(atoi(url + 13));
+        show_marks(0);                          /* (the list again, in the history's place of the list) */
+    } else if (starts(url, "about:")) {
         show_page("about:home", home_page, sizeof home_page - 1, "text/html; charset=utf-8", push);
     } else if (starts(url, "file:")) {
         FILE *f;
@@ -553,6 +887,41 @@ static void tick(void *arg)             /* a page on its way: how far, and when 
     getting = NULL;
 }
 
+/* ---- (phase F) find in the page: the rich view's find, from what is chosen, round the end */
+
+static char needle[128];
+static void find_ask(void);
+
+static void find_next(int back)
+{
+    char t[200];
+    int r, from = 0, to = 0, block;
+    if (!needle[0]) {
+        find_ask();
+        return;
+    }
+    r = gui_richview_find(view, needle, 0, back);
+    if (r > 0) {
+        block = gui_richview_chosen(view, &from, &to);
+        gui_set_text(status, "");
+        say("found %s block=%d at=%d", needle, block, from);
+        return;
+    }
+    snprintf(t, sizeof t, GUI_T("\"%s\" is not in this page."), needle);
+    gui_set_text(status, t);
+    say("not found %s", needle);
+}
+
+static void find_ask(void)
+{
+    char what[sizeof needle];
+    snprintf(what, sizeof what, "%s", needle);
+    if (!gui_ask(win, GUI_T("Find"), GUI_T("Find in the page:"), what, sizeof what) || !what[0])
+        return;
+    snprintf(needle, sizeof needle, "%s", what);
+    find_next(0);
+}
+
 /* ---- commands */
 
 static void command(struct gui_window *w, int id)
@@ -575,8 +944,39 @@ static void command(struct gui_window *w, int id)
         }
         break;
     case C_RELOAD:
-        if (current[0])
-            go(current, 0);
+        if (current[0]) {
+            char was[1024];
+            snprintf(was, sizeof was, "%s", current);
+            reloading = 1;
+            go(was, 0);
+            reloading = 0;
+        }
+        break;
+    case C_FIND:
+        find_ask();
+        break;
+    case C_MARK:
+        mark_page();
+        break;
+    case C_MARKS:
+        go("about:bookmarks", 1);
+        break;
+    case C_READER:                              /* the page made again, with or without what is not its text */
+        reader = !reader;
+        say("reader %s", reader ? "on" : "off");
+        if (page_bytes && page_url[0]) {
+            char was[1024];
+            snprintf(was, sizeof was, "%s", current);
+            remaking = 1;
+            show_page(page_url, page_bytes, page_n, page_type, 0);
+            remaking = 0;
+            snprintf(current, sizeof current, "%s", was);
+            gui_set_text(address, current);
+        }
+        break;
+    case C_FINDNEXT:
+    case C_FINDPREV:
+        find_next(id == C_FINDPREV);
         break;
     case C_STOP:
         stop();
@@ -603,6 +1003,8 @@ static void update(struct gui_window *w)
     gui_command_enable(w, C_FORWARD, at + 1 < nhistory);
     gui_command_enable(w, C_RELOAD, current[0] != 0);
     gui_command_enable(w, C_STOP, getting != NULL);
+    gui_command_enable(w, C_MARK, current[0] && strncmp(current, "about:", 6));
+    gui_command_check(w, C_READER, reader);
 }
 
 static void address_on(struct gui_widget *w, int what)
@@ -641,19 +1043,33 @@ static void build(void)
     gui_command(win, C_ADDRESS, GUI_T("&Address"), "Ctrl+L", NULL, NULL);
     gui_command(win, C_OPEN, GUI_T("&Open a File..."), "Ctrl+O", NULL, NULL);
     gui_command(win, C_EXIT, GUI_T("E&xit"), "Alt+F4", NULL, NULL);
+    gui_command(win, C_FIND, GUI_T("&Find in the Page..."), "Ctrl+F", gui_glyph("find"), GUI_T("Find words in the page"));
+    gui_command(win, C_FINDNEXT, GUI_T("Find &Next"), "F3", NULL, NULL);
+    gui_command(win, C_FINDPREV, GUI_T("Find &Previous"), "Shift+F3", NULL, NULL);
+    gui_command(win, C_MARK, GUI_T("&Keep This Page"), "Ctrl+D", gui_glyph("star"), GUI_T("Keep the page among the bookmarks"));
+    gui_command(win, C_MARKS, GUI_T("&Bookmarks"), "Ctrl+B", NULL, GUI_T("The pages kept"));
+    gui_command(win, C_READER, GUI_T("&Reader View"), "F9", NULL, GUI_T("The page's text alone: its menus and lists of links left out"));
     bar = gui_menubar(win);
     m = gui_menu(bar, GUI_T("&File"));
     gui_menu_command(m, C_OPEN), gui_menu_command(m, C_ADDRESS);
     gui_menu_sep(m);
     gui_menu_command(m, C_EXIT);
+    m = gui_menu(bar, GUI_T("&Edit"));
+    gui_menu_command(m, C_FIND), gui_menu_command(m, C_FINDNEXT), gui_menu_command(m, C_FINDPREV);
+    m = gui_menu(bar, GUI_T("&View"));
+    gui_menu_command(m, C_READER);
     m = gui_menu(bar, GUI_T("&Go"));
     gui_menu_command(m, C_BACK), gui_menu_command(m, C_FORWARD), gui_menu_command(m, C_HOME);
     gui_menu_sep(m);
     gui_menu_command(m, C_RELOAD), gui_menu_command(m, C_STOP);
+    m = gui_menu(bar, GUI_T("&Bookmarks"));
+    gui_menu_command(m, C_MARK), gui_menu_command(m, C_MARKS);
     tb = gui_toolbar(win);
     gui_toolbar_command(tb, C_BACK), gui_toolbar_command(tb, C_FORWARD);
     gui_toolbar_sep(tb);
     gui_toolbar_command(tb, C_RELOAD), gui_toolbar_command(tb, C_STOP), gui_toolbar_command(tb, C_HOME);
+    gui_toolbar_sep(tb);
+    gui_toolbar_command(tb, C_MARK);
     row = gui_hbox(win->root, 6, 4);
     gui_label(row, GUI_T("Address:"));
     address = gui_field(row, 60);
@@ -761,6 +1177,8 @@ int main(int argc, char **argv)
             dumping = 1;
         else if (!strcmp(argv[i], "-resolve") && i + 1 < argc)
             resolve = argv[++i];
+        else if (!strcmp(argv[i], "-marks") && i + 1 < argc)
+            snprintf(marks_file, sizeof marks_file, "%s", argv[++i]);
         else if (argv[i][0] != '-')
             first = argv[i];
     }
@@ -770,6 +1188,8 @@ int main(int argc, char **argv)
         printf("WEB no GLOS\n");
         return 1;
     }
+    if (!marks_file[0])
+        gui_path_join(marks_file, sizeof marks_file, glos_home(), "WEBMARKS.TXT");
     build();
     gui_show(win, 1);
     gui_focus(view);
@@ -783,6 +1203,9 @@ int main(int argc, char **argv)
     stop();
     for (i = 0; i < nhistory; i++)
         free(history[i]);
+    for (i = 0; i < nmarks; i++)
+        free(marks[i].url), free(marks[i].title);
+    free(rs), free(rkeep), free(page_bytes);
     free(picture);
     printf("WEB end\n");
     return 0;

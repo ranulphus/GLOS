@@ -6,7 +6,7 @@ This is GLOS's guide. **F1** in any of GLOS's programs opens the guide at that p
 - **Links** in a page lead to other pages: press one, or reach it with Tab and press Enter.
 - **Back** (Alt+Left) and **Forward** (Alt+Right) go over the pages you have read; **First Page** is Alt+Home.
 - **Search** (Ctrl+F): type one or more words and press Enter. The lines that have all of them are listed,
-  each with its page; press Enter on one to read that page.
+  each with its page; press Enter on one to read that page, where the first word is chosen on that line.
 - Text in a page can be chosen with the mouse and copied with Ctrl+C.
 - **Tour**, on the Help menu, shows [the tour](TOUR.MD) of the desktop: a few steps, each beside the part of
   the screen it is about. GLOS shows it by itself the first time the desktop comes on after it is installed.

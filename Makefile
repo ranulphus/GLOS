@@ -137,6 +137,10 @@ host-test-run: build/host/libpdfbr32.a
 	  -DGLOSSHIM_NO_MAIN \
 	  -o build/host/gui_test tests/host/gui_test.c tests/host/glosshim.c $(filter-out sdk/gui/field.c,$(GUI_SRCS)) \
 	  $(GFX_SRCS) kernel/lib/png.c $(CFG_SRCS) $(CP_SRCS) && build/host/gui_test
+	@$(HOST_CC) -m32 -O1 -g -pthread -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Ikernel/include -Iinclude \
+	  -DGLOSSHIM_NO_MAIN \
+	  -o build/host/rich_test tests/host/rich_test.c tests/host/glosshim.c $(GUI_SRCS) \
+	  $(GFX_SRCS) kernel/lib/png.c $(CFG_SRCS) $(CP_SRCS) && build/host/rich_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter -Itests/host/kstub -Ikernel/include -Iinclude \
 	  -o build/host/cfg_test tests/host/cfg_test.c $(CFG_SRCS) && build/host/cfg_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Ikernel/include -Iinclude -o build/host/fslist_test \

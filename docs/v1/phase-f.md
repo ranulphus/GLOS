@@ -1406,3 +1406,49 @@ the Properties' **Pad mapping**, checked as the kernel takes it (eight words, or
   buttons moved about, and `glos joy` has the rule again after it; the config suite sets and reads
   `joymap`; `games-profile` (host and the emulated desktops): a mapping that is not one refused, then one
   kept.
+
+## Places in a page: the Web Reader's #name and Find, Help's search (2026-11-22)
+
+Two calls of the rich-text view's (sdk/gui/rich.c), for the Web Reader's and Help's "Not yet"s:
+`gui_richview_show` (a block put at the view's top, a closed block round it opened) and `gui_richview_find`
+(gui_match's text, case and expressions, through each block's text from what is chosen, forward or back,
+round the end once; what it finds chosen and scrolled to), with `gui_richview_chosen` (where the choice is).
+
+- **The Web Reader:** a page's `id`s and `<a name>`s kept as it is made (the block each is); an address with
+  a `#name` shows that place, as the page comes or (the same page) without reading it again, kept in the
+  history; `#` alone its top; Reload reads it again. **Find in the Page** (Edit, Ctrl+F), F3 and Shift+F3.
+- **Help:** a search's result opens its page with the search's first word on that line chosen and scrolled to
+  (the times the page has the word before the line counted in its text).
+- **Tests:** `rich_test` (host): finds forward, back, round the end, into a closed block, with case, an
+  expression, a wrong one; `web-find` (host and the emulated desktops): LONG.HTM's links to `#end` and
+  `#middle`, Back and Forward between places, `#`, an address typed with its place, Find, F3 round the end,
+  Shift+F3, words not there; `help`: the result's word chosen. (Disk Tools' script images C:\WEB: one file
+  more.)
+- **Not yet:** a place kept for each page in the history (Back to another page shows its top); Find's
+  matches all tinted; Help's `#part` links (the guide has none).
+
+## The Web Reader: bookmarks (2026-11-22)
+
+The plan's bookmarks: **Keep This Page** (Bookmarks, Ctrl+D, the toolbar's star) adds the page shown, once,
+to WEBMARKS.TXT in GLOS's folder (a line each: the address, a tab, the title; `WEB -marks FILE` another);
+**Bookmarks** (Ctrl+B) is a page made from it, `about:bookmarks`: a link a bookmark, each with a link that
+takes it away (`about:unmark?N`, the list shown again in its place). The start page links to it.
+
+- **Tests:** `web-marks` (host and the emulated desktops): none at first; two pages kept, one again (kept
+  already), the list, a link followed from it, one taken away; `web-marks2` (Loop A, after it on the same
+  disc): the Web Reader started again finds the one left.
+- **Not yet:** folders of bookmarks; a bookmark renamed; the bookmarks in the menu itself.
+
+## The Web Reader: the reader view (2026-11-22)
+
+The plan's reader view: **Reader View** (View, F9) makes the page again with its main text alone. The page
+is read twice: first each block's letters counted, and how many of them are links' (`counting`, a sink of its
+own); then made leaving out the blocks that are mostly links (under 400 letters: a site's menus, lists of
+other pages, a footer), the empty ones, those before the page's first heading where two paragraphs or more
+follow it (a banner, sign-in links), a heading whose part is all left out, and the page's colours. F9 again
+makes the page as it was; the setting holds for the pages after it until it is turned off.
+
+- **Tests:** `web-reader` (host and the emulated desktops): ARTICLE.HTM, a news page of 16 blocks, 5 kept
+  (`WEB reader kept 5 of 16 blocks`), pictures of both. (Disk Tools' script images C:\WEB: its count again.)
+- **Not yet:** a narrower column and a larger letter for reading; the page's main part by its `<article>`
+  or `<main>`; the setting kept between runs.

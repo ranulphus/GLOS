@@ -911,6 +911,15 @@ void gui_richview_tight(struct gui_widget *w, int on);         /* (phase F) its 
                                            paragraph's gap: the lines of a log or of a chat */
 const char *gui_richview_link(struct gui_widget *w);
 char *gui_richview_text(struct gui_widget *w, int chosen);     /* the text (all, or what is chosen): malloc'd */
+int gui_richview_show(struct gui_widget *w, int block);        /* (phase F) scrolled to put block i at the top (a
+                                           closed block round it opened): 0; -1 no such block */
+int gui_richview_find(struct gui_widget *w, const char *what, unsigned flags, int back);       /* (phase F;
+                                           GUI_FIND_ flags, by gui_match) the next match after what is chosen (back:
+                                           the one before it), in a block's text, round the end once: chosen and
+                                           scrolled to, 1; 0 none; -1 a wrong expression. With nothing chosen, from
+                                           the start (back: the end) */
+int gui_richview_chosen(struct gui_widget *w, int *from, int *to);     /* (phase F) the block what is chosen
+                                           begins in, and its bytes there (to: in the block it ends in); -1 none */
 /* Markdown (CommonMark's headings, paragraphs, lists, quotes, code, rules, tables, emphasis, code spans, links,
    pictures; and <details> and <summary> alone on their lines) into a document; image finds a picture's pixels (0:
    found; NULL or not found: its words shown). len -1: to the NUL. */

@@ -942,6 +942,132 @@ void gui_richview_follow(struct gui_widget *w, int on)  /* kept at the end as th
 
 const char *gui_richview_link(struct gui_widget *w) { return RV(w)->link_text ? RV(w)->link_text : ""; }
 
+/* ---- (phase F) a place shown: a block (a link's #name), or what is found */
+
+static void open_round(struct rview *v, int block)     /* a closed block round it opened (laid out again) */
+{
+    int p;
+    for (p = v->doc->b[block].parent; p >= 0; p = v->doc->b[p].parent)
+        if (!v->doc->b[p].open)
+            v->doc->b[p].open = 1, v->laid_w = 0;
+}
+
+/* The line block's byte at is on (the block's first where none is), its top put `above` pixels under the view's;
+   or, with above -1, scrolled only as far as it takes to show it. */
+static void scroll_to_at(struct rview *v, int block, int at, int above)
+{
+    int i, best = -1;
+    place(v);
+    for (i = 0; i < v->nl; i++) {
+        const struct rline *ln = &v->l[i];
+        int k;
+        if (ln->block != block)
+            continue;
+        if (best < 0)
+            best = i;
+        for (k = ln->first; k < ln->first + ln->n; k++)
+            if (v->p[k].kind == P_TEXT && v->p[k].at <= at)
+                best = i;
+    }
+    if (best < 0)
+        return;
+    if (above >= 0)
+        v->sb.pos = v->l[best].y - above;
+    else if (v->l[best].y < v->sb.pos)
+        v->sb.pos = v->l[best].y - 16;
+    else if (v->l[best].y + v->l[best].h > v->sb.pos + v->sb.page)
+        v->sb.pos = v->l[best].y + v->l[best].h - v->sb.page + 16;
+    gui_sb_clamp(&v->sb);
+    v->at_end = v->sb.pos + v->sb.page >= v->total;
+    gui_damage(&v->w);
+}
+
+int gui_richview_show(struct gui_widget *w, int block)
+{
+    struct rview *v = RV(w);
+    if (!v->doc || block < 0 || block >= v->doc->n)
+        return -1;
+    open_round(v, block);
+    scroll_to_at(v, block, 0, MARGIN);
+    return 0;
+}
+
+static char *block_text(const struct rblock *b, int *len)     /* a block's runs as one text (malloc'd) */
+{
+    int r, n = 0;
+    char *t;
+    for (r = 0; r < b->nrun; r++)
+        n += b->run[r].len;
+    if (!(t = malloc((size_t)n + 1)))
+        return NULL;
+    for (n = 0, r = 0; r < b->nrun; r++)
+        memcpy(t + n, b->run[r].text, (size_t)b->run[r].len), n += b->run[r].len;
+    t[n] = 0;
+    *len = n;
+    return t;
+}
+
+int gui_richview_chosen(struct gui_widget *w, int *from, int *to)
+{
+    struct rview *v = RV(w);
+    int b0, a0, b1, a1;
+    if (!v->doc || !v->sel_on)
+        return -1;
+    sel_range(v, &b0, &a0, &b1, &a1);
+    if (from)
+        *from = a0;
+    if (to)
+        *to = a1;
+    return b0;
+}
+
+int gui_richview_find(struct gui_widget *w, const char *what, unsigned flags, int back)
+{
+    struct rview *v = RV(w);
+    struct gui_rdoc *d = v->doc;
+    int b0, a0, b1, a1, start, k;
+    if (!d || !d->n || !what || !*what)
+        return 0;
+    if (v->sel_on) {
+        sel_range(v, &b0, &a0, &b1, &a1);
+    } else {
+        b0 = b1 = back ? d->n - 1 : 0;
+        a0 = a1 = back ? 0x7FFFFFFF : 0;
+        if (!back)
+            a0 = a1 = -1;                       /* (nothing chosen: a match at the very start counts) */
+    }
+    start = back ? b0 : b1;
+    for (k = 0; k <= d->n; k++) {               /* (round the end once: back to the start block's other part) */
+        int bi = back ? ((start - k) % d->n + d->n) % d->n : (start + k) % d->n, len = 0, from, r;
+        char *t;
+        struct gui_found f;
+        if (d->b[bi].kind == GUI_RB_IMAGE && d->b[bi].px)
+            continue;
+        if (!(t = block_text(&d->b[bi], &len)))
+            return 0;
+        if (back)
+            from = k == 0 ? (a0 < len ? a0 : len) : len + 1;
+        else
+            from = k == 0 ? (a1 < 0 ? 0 : a1 > len ? len : a1) : 0;
+        r = gui_match(what, flags | (back ? GUI_FIND_BACK : 0), t, len, from, &f);
+        if (r < 0) {
+            free(t);
+            return -1;
+        }
+        if (k == d->n && r > 0 && (back ? f.start < a0 : f.start >= a1))
+            r = 0;                              /* (round the end: only what lies before the place it began) */
+        free(t);
+        if (r > 0) {
+            open_round(v, bi);
+            v->sel_on = 1, v->dragging = 0;
+            v->sa_block = v->sb_block = bi, v->sa_at = f.start, v->sb_at = f.end;
+            scroll_to_at(v, bi, f.start, -1);
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* The document's text, or what is chosen of it (chosen 1): a line a block, a tab between cells (malloc'd). */
 char *gui_richview_text(struct gui_widget *w, int chosen)
 {

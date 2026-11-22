@@ -1,0 +1,42 @@
+# The Web Reader's places in a page (apps/web; phase F): a page's link to its "#end" (an <a name>) and to its
+# "#middle" (a heading's id) scroll the page there and are kept in the history; Back and Forward between them;
+# "#" its top; an address typed with its "#middle"; Find in the page (Ctrl+F) chooses the words and scrolls to them, F3 the next, round the end,
+# Shift+F3 the one before; words that are not there.
+run WEB.EXE C:\WEB\LONG.HTM
+wait "A Long Page - Web Reader"
+said WEB loaded file:///C:/WEB/LONG.HTM title=A Long Page blocks=28 links=3
+key tab
+key enter
+said WEB at #end block=27
+shot end "A Long Page - Web Reader"
+key alt+left
+said WEB at top
+key alt+right
+said WEB at #end block=27
+key tab
+key tab
+key enter
+said WEB at top
+key ctrl+l
+type C:\\WEB\\LONG.HTM#middle\n
+said WEB at #middle block=14
+shot middle "A Long Page - Web Reader"
+key ctrl+f
+wait "Find"
+type needle\n
+said WEB found needle block=8 at=48
+shot found "A Long Page - Web Reader"
+key f3
+said WEB found needle block=21 at=54
+key f3
+said WEB found needle block=8 at=48
+key shift+f3
+said WEB found needle block=21 at=54
+key ctrl+f
+wait "Find"
+key ctrl+a
+type zebra\n
+said WEB not found zebra
+key alt+f4
+gone "A Long Page - Web Reader"
+expect WEB end

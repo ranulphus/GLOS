@@ -31,6 +31,7 @@ said HELP found 1 lines in 1 pages for "two short notes"
 shot found "Welcome to GLOS - Help"
 key enter
 said HELP page TROUBLE.MD
+said HELP at two block=10 at=13
 wait "When something goes wrong - Help"
 shot trouble "When something goes wrong - Help"
 key f1
