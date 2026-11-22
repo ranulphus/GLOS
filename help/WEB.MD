@@ -22,7 +22,9 @@ Type in **Address** (Ctrl+L) and press Enter:
 | Esc | Stop fetching |
 | Ctrl+O | Open a file from a disk |
 
-- Pictures inside a page are shown by their words in brackets; a link that leads to a picture shows it.
+- Pictures inside a page are shown in it (PNG, JPEG, GIF and BMP), made smaller where they are wider than
+  the page; those from the web come once the page is there, a moment later. A picture that can't be had is
+  shown by its words in brackets. A link that leads to a picture shows it alone.
 - Forms cannot be filled in yet, and files are not saved from here: use `FETCH address` at the
   [command line](COMMAND.MD) to fetch a file.
 - Connections to https sites are checked as a browser checks them. The PC's clock must be right for that: see

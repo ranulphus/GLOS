@@ -1379,3 +1379,17 @@ what is chosen, or the page's text when nothing is. The choice goes with the pag
   20 bytes.
 - **Not yet:** a choice over two pages; double and triple clicks for a word and a line; Shift and the arrow
   keys.
+
+## The Web Reader: pictures in pages (2026-11-22)
+
+The plan's "a subset of HTML and CSS with images" (`docs/v1/apps/web-reader.md`): a page's pictures (24 at
+most) in it, by `pic_decode` (PNG, JPEG, GIF, BMP, PCX, TGA), made no wider than 560 pixels and no taller than
+700 (the nearest pixel), 3 million pixels in all at most, a megabyte each at most. A file's (`file:`) are read
+as the page is made; a web server's are fetched one after another once the page shows (the page's webget,
+on its own thread), and the page is made again with them (its bytes kept for that). One not had keeps its
+words in brackets; a picture that is part of a link has the link's words under it.
+
+- **Tests:** `web` (host and the emulated desktops): the test page's picture (C:\PIX\SUNSET.BMP) shown in it
+  (`WEB pictures 1 of 1`), the page one link fewer.
+- **Not yet:** the place a remade page was scrolled to kept; the pictures' sizes from the page's own width
+  and height before they come; CSS backgrounds.

@@ -1,11 +1,13 @@
 # The Web Reader (apps/web; phase F, docs/v1/apps/web-reader.md) on the test drive's pages (C:\WEB): a page with
 # its headings, styles, lists in lists, a quotation, a table, preformatted text, a picture's words and colours
-# (scripts not run, what is hidden not shown); its first link reached by Tab and followed to a page in Latin
+# (the picture itself, from the drive; scripts not run, what is hidden not shown); its first link reached by Tab
+# and followed to a page in Latin
 # letters; Back and Forward; a link to a page that is not there; a text file by its path typed in the address;
 # a picture; the page it starts with.
 run WEB.EXE C:\WEB\INDEX.HTM
 wait "A Test Page - Web Reader"
-said WEB loaded file:///C:/WEB/INDEX.HTM title=A Test Page blocks=17 links=3
+said WEB loaded file:///C:/WEB/INDEX.HTM title=A Test Page blocks=17 links=2
+said WEB pictures 1 of 1
 shot index "A Test Page - Web Reader"
 key tab
 key enter
@@ -13,7 +15,8 @@ said WEB loaded file:///C:/WEB/PAGE2.HTM title=The Second Page blocks=5 links=2
 shot second "The Second Page - Web Reader"
 key alt+left
 said WEB back
-said WEB loaded file:///C:/WEB/INDEX.HTM title=A Test Page blocks=17 links=3
+said WEB loaded file:///C:/WEB/INDEX.HTM title=A Test Page blocks=17 links=2
+said WEB pictures 1 of 1
 key alt+right
 said WEB forward
 said WEB loaded file:///C:/WEB/PAGE2.HTM title=The Second Page blocks=5 links=2

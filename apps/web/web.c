@@ -5,8 +5,9 @@
  *   the address   Enter goes there: a whole address, a site's name (https:// is put before it), a file's path,
  *                 or words to search for (DuckDuckGo's plain pages); Ctrl+L puts the keyboard in it
  *   the page      its text as HTML says it (apps/shared/html.c), wrapped to the window; a link pressed (or
- *                 reached by Tab, then Enter) is followed; pictures are shown by the words that stand for them
- *                 (a picture that is itself what a link leads to is shown)
+ *                 reached by Tab, then Enter) is followed; pictures are shown in it (a file's at once, a web
+ *                 server's once the page is there: the page is made again with them), made no wider than the
+ *                 page; one not had by the words that stand for it (a picture that a link leads to: alone)
  *   going         Back (Alt+Left) and Forward (Alt+Right) through where one has been, Reload (F5), Stop (Esc),
  *                 Home (the page it starts with)
  *
@@ -92,10 +93,128 @@ static void d_text(void *c, const char *text, int n, unsigned style, const char 
 static void d_cell(void *c) { (void)c; gui_rdoc_cell(doc); }
 static void d_colour(void *c, long rgb) { (void)c; gui_rdoc_colour(doc, rgb < 0 ? GFX_NONE : (unsigned)rgb); }
 
+/* ---- pictures in pages: a page's pictures (24 at most), each fetched once and kept while the page is: a file's
+   at once, as the page is made; a web server's one after another once the page shows (the page is then made
+   again with them). Each is made no wider than the page (560 pixels) and no taller than 700; 3 million pixels
+   in all at most. One not had is shown by its words, as before. */
+
+#define PICS 24
+#define PIC_W 560
+#define PIC_H 700
+#define PIC_BYTES (1ul << 20)
+#define PIC_PIXELS 3000000ul
+
+static struct { char url[400]; unsigned *px; int w, h, state; } pics[PICS];     /* state: 0 wanted, 1 here, -1 not had */
+static int npics;
+static unsigned long pic_pixels;
+static struct webget *pic_get;          /* the one on its way */
+static int pic_at = -1;
+static char *page_bytes, page_type[128], page_url[1024];       /* the page shown, kept to be made again with them */
+static unsigned long page_n;
+static int remaking;                    /* (the page made again: not a new place, and its pictures kept) */
+static int pics_came;                   /* web pictures that came since the page was last made */
+
+static void pics_forget(void)
+{
+    int i;
+    if (pic_get)
+        webget_free(pic_get);
+    pic_get = NULL, pic_at = -1;
+    for (i = 0; i < npics; i++)
+        free(pics[i].px);
+    npics = 0, pic_pixels = 0, pics_came = 0;
+}
+
+/* A picture's bytes decoded and made to fit: 1, or 0 (not had). */
+static int pic_take(int k, const unsigned char *bytes, unsigned long n)
+{
+    char kind[16];
+    int w = 0, h = 0, nw, nh, x, y;
+    unsigned *px = pic_decode(bytes, n, pics[k].url, &w, &h, kind, sizeof kind, 0xFFFFFF), *small;
+    if (!px || w <= 0 || h <= 0) {
+        free(px);
+        pics[k].state = -1;
+        return 0;
+    }
+    nw = w, nh = h;
+    if (nw > PIC_W)
+        nh = (int)((long)nh * PIC_W / nw), nw = PIC_W;
+    if (nh > PIC_H)
+        nw = (int)((long)nw * PIC_H / nh), nh = PIC_H;
+    if (nw < 1)
+        nw = 1;
+    if (nh < 1)
+        nh = 1;
+    if (pic_pixels + (unsigned long)nw * (unsigned long)nh > PIC_PIXELS) {
+        free(px);
+        pics[k].state = -1;
+        return 0;
+    }
+    if (nw != w || nh != h) {                   /* (the nearest of the picture's pixels to each of the smaller's) */
+        if (!(small = malloc((size_t)nw * (size_t)nh * sizeof *small))) {
+            free(px);
+            pics[k].state = -1;
+            return 0;
+        }
+        for (y = 0; y < nh; y++)
+            for (x = 0; x < nw; x++)
+                small[(size_t)y * (size_t)nw + (size_t)x] = px[(size_t)(y * h / nh) * (size_t)w + (size_t)(x * w / nw)];
+        free(px);
+        px = small;
+    }
+    pics[k].px = px, pics[k].w = nw, pics[k].h = nh, pics[k].state = 1;
+    pic_pixels += (unsigned long)nw * (unsigned long)nh;
+    return 1;
+}
+
+static void file_path(const char *url, char *out, unsigned room);
+static int starts(const char *s, const char *with);
+
+static int pic_find(const char *url)    /* its place in the list (made if new: a file's read now), or -1 */
+{
+    int i;
+    for (i = 0; i < npics; i++)
+        if (!strcmp(pics[i].url, url))
+            return i;
+    if (npics == PICS || strlen(url) >= sizeof pics[0].url)
+        return -1;
+    memset(&pics[npics], 0, sizeof pics[npics]);
+    snprintf(pics[npics].url, sizeof pics[npics].url, "%s", url);
+    if (starts(url, "file:")) {
+        char path[300];
+        FILE *f;
+        long size;
+        unsigned char *b;
+        pics[npics].state = -1;
+        file_path(url, path, sizeof path);
+        if ((f = gui_fopen(path, "rb")) != NULL) {
+            fseek(f, 0, SEEK_END);
+            size = ftell(f);
+            rewind(f);
+            if (size > 0 && (unsigned long)size <= PIC_BYTES && (b = malloc((size_t)size)) != NULL) {
+                if (fread(b, 1, (size_t)size, f) == (size_t)size)
+                    pic_take(npics, b, (unsigned long)size);
+                free(b);
+            }
+            fclose(f);
+        }
+    } else if (!starts(url, "http:") && !starts(url, "https:")) {
+        pics[npics].state = -1;
+    }
+    return npics++;
+}
+
 static void d_image(void *c, const char *src, const char *alt, int w, int h, const char *link)
 {
     char t[300];
+    int k = src && src[0] ? pic_find(src) : -1;
     (void)c, (void)w, (void)h;
+    if (k >= 0 && pics[k].state == 1) {         /* the picture itself; a link it is part of under it, by its words */
+        gui_rdoc_image(doc, pics[k].px, pics[k].w, pics[k].h, alt);
+        blocks++;
+        if (!link)
+            return;
+    }
     /* a picture's place: the words that stand for it, as a link to the picture itself (or to where it leads) */
     gui_rdoc_block(doc, GUI_RB_PARA, 0);
     snprintf(t, sizeof t, "[%s]", alt[0] ? alt : GUI_T("picture"));
@@ -145,6 +264,17 @@ static void show_page(const char *url, const char *bytes, unsigned long n, const
     int is_picture = starts(type, "image/") || (!type[0] && (!strcmp(end, ".png") || !strcmp(end, ".jpg") || !strcmp(end, ".jpeg")
                                                              || !strcmp(end, ".gif") || !strcmp(end, ".bmp")));
     unsigned *px = NULL;
+    if (!remaking) {                            /* (another page: its pictures, and the page kept to be made again) */
+        pics_forget();
+        free(page_bytes);
+        page_bytes = NULL, page_n = 0;
+        if ((page_bytes = malloc(n + 1)) != NULL) {
+            memcpy(page_bytes, bytes, n);
+            page_bytes[n] = 0, page_n = n;
+        }
+        snprintf(page_type, sizeof page_type, "%s", type);
+        snprintf(page_url, sizeof page_url, "%s", url);
+    }
     doc = gui_rdoc_new();
     page_title[0] = 0, blocks = links = 0;
     if (!doc)
@@ -194,7 +324,46 @@ static void show_page(const char *url, const char *bytes, unsigned long n, const
     snprintf(t, sizeof t, "%s%sWeb Reader", page_title, page_title[0] ? " - " : "");
     gui_title(win, t);
     gui_set_text(status, page_title[0] ? page_title : url);
+    if (remaking) {
+        int i, shown = 0;
+        for (i = 0; i < npics; i++)
+            shown += pics[i].state == 1;
+        say("pictures %d of %d", shown, npics);
+        return;
+    }
     say("loaded %s title=%s blocks=%u links=%u", url, page_title, blocks, links);
+    {
+        int i, here = 0;
+        for (i = 0; i < npics; i++)
+            here += pics[i].state == 1;
+        if (here)
+            say("pictures %d of %d", here, npics);
+    }
+}
+
+/* The next picture of the page's from a web server, if one is wanted; when none is, and some came, the page made
+   again with them. */
+static void pics_next(void)
+{
+    char certs[300];
+    int i;
+    if (pic_get)
+        return;
+    for (i = 0; i < npics; i++)
+        if (pics[i].state == 0) {
+            gui_path_join(certs, sizeof certs, glos_home(), TLS_CERTS);
+            if ((pic_get = webget_start(pics[i].url, certs, PIC_BYTES)) != NULL) {
+                pic_at = i;
+                return;
+            }
+            pics[i].state = -1;
+        }
+    if (pics_came && page_bytes) {
+        pics_came = 0;
+        remaking = 1;
+        show_page(page_url, page_bytes, page_n, page_type, 0);
+        remaking = 0;
+    }
 }
 
 static void show_failure(const char *url, const char *why)
@@ -329,8 +498,28 @@ static void tick(void *arg)             /* a page on its way: how far, and when 
     char t[1200], url[1024];
     int state;
     (void)arg;
-    if (!getting)
+    if (pic_get && !getting) {                  /* a picture of the page's on its way */
+        state = webget_state(pic_get, &got, &total);
+        if (state != 0) {
+            const char *b = state > 0 ? webget_bytes(pic_get, &n) : NULL;
+            if (!b || !pic_take(pic_at, (const unsigned char *)b, n))
+                pics[pic_at].state = -1;
+            else
+                pics_came++;
+            webget_free(pic_get);
+            pic_get = NULL;
+            pics_next();
+        }
         return;
+    }
+    if (!getting) {
+        int i;
+        for (i = 0; i < npics && pics[i].state != 0; i++)
+            ;
+        if (i < npics)                          /* (one is wanted: on its way) */
+            pics_next();
+        return;
+    }
     state = webget_state(getting, &got, &total);
     if (state == 0) {
         if (got) {
