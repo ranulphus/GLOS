@@ -852,8 +852,10 @@ static int glos_main(int argc, char **argv)
                    (bi.kernel_total - ((hdr.file_size + 3) & ~3UL)) >> 2, KERNEL_LINK + hdr.entry,
                    bi.ds_base + (unsigned)&bi);     /* (the image is there already: only its bss to clear) */
 #ifdef NATIVE
-    say("GLOS-BOOT step=back ret=%08lx", ret);   /* (NB1: the kernel doesn't resume the system VM yet) */
-    return (int)ret;
+    if (ret != 0x10000UL) {                     /* (a round trip, /ROUNDTRIP's, comes back to real mode) */
+        say("GLOS-BOOT step=back ret=%08lx", ret);
+        return (int)ret;
+    }
 #endif
     if (ret == 0x10000UL) {
         /* Running in the system VM (V86 mode) under the kernel. The image and
@@ -1291,8 +1293,26 @@ void __cdecl native_main(void)
         return;
     }
     bi.cache_mode = BI_CACHE_ON;
-    read_cfg(argv[0], 0);
-    bi.flags |= BI_F_ROUNDTRIP;                 /* (NB1: in and out again; the system VM's own DOS is NB2's) */
+    read_cfg(argv[0], 1);                       /* ([shell] too: natively GLOS is the shell, and options carries flags) */
+    /* The agent, as GLOS.EXE with no mode is: GLOS's own COMMAND.COM its COMSPEC (S4c), and a master environment
+       for the stub to install, of PATH and COMSPEC (there's no DOS's to copy). */
+    {
+        static char env[160];
+        unsigned n;
+
+        if (!bi.comspec[0])                     /* ([shell] comspec = in GLOS.CFG first) */
+            strcpy(bi.comspec, "C:\\GLOS\\COMMAND.COM");
+        if (access(bi.comspec, 0) == 0)
+            bi.flags |= BI_F_OWNCMD;
+        n = (unsigned)sprintf(env, "PATH=C:\\GLOS;C:\\") + 1;
+        n += (unsigned)sprintf(env + n, "COMSPEC=%s", bi.comspec) + 1;
+        env[n++] = 0;                           /* (the strings' end, and no program's name after them) */
+        env[n++] = 0;
+        env[n++] = 0;
+        stub_data.env_src = far_addr(env);
+        stub_data.env_len = n;
+        stub_data.env_paras = (1024 + 15) >> 4;
+    }
     say("GLOS-EXIT code=%d", glos_main(1, argv));
 }
 #else

@@ -734,6 +734,61 @@ int main(void)
     for (i = 0; i < FSV_NODES; i++)
         CHECK(vol.node[i].refs == 0, "node %u still open after dos_m_close", i);
 
+    /* ---- the system VM's DOS on a native boot: the loader there adopted (dos_m_init_vm) */
+    {
+        struct dos_m *vm = &m;
+        unsigned top, size_paras, largest;
+
+        memset(mem, 0, SIZE);
+        memset(mem + 0x790, 0x55, (0x1744 - 0x79) * 16);           /* (the loader's code and data) */
+        mem[0x790] = 0xCD, mem[0x791] = 0x20;
+        res = dos_m_init_vm(vm, mem, SIZE, 0x79, 0x1744, 0x9FC0, &vol, 2, 437);
+        vm->out = con, vm->now = now, vm->wait = no_more, vm->idle = idle;
+        CHECK(res == 0 && dos_mem_check(&vm->mcb) == 0, "init_vm %d", res);
+        CHECK(mem[0x780] == 'M' && w(0x781) == 0x79 && w(0x783) == 0x1744 - 0x79, "the loader's block %c %04x %04x",
+              mem[0x780], w(0x781), w(0x783));
+        CHECK(dos_cur_psp(vm) == 0x79 && w(0x790 + 0x16) == 0x79 && mem[0x790 + 0x18] == 1 && w(0x790 + 0x32) == 20,
+              "the loader the running program, its own parent, its handles");
+        top = (unsigned)((vm->lay.lol - 0x12) >> 4);
+        CHECK(vm->lay.lol > 0x90000 && w((top - 1) * 16 + 1) == 8 && mem[(top - 1) * 16] == 'Z', "DOS's tables at "
+              "the top %05lx", vm->lay.lol);
+        CHECK(memcmp(mem + 0x890, "\x55\x55", 2) == 0, "the loader's memory past its PSP left as it was");
+        /* the stub's own first calls: its block made small, an environment, a program run and back */
+        r.es = 0x79, r.bx = 0xC0;
+        r.cs = 0x89, r.ip = 0x10, r.ss = 0x89, r.sp = 0x800, r.ds = 0x89;
+        call(&r, 0x4A00);
+        CHECK(!(r.flags & 1), "4Ah: the stub's block made small");
+        r.bx = 0x40;
+        call(&r, 0x4800);
+        CHECK(!(r.flags & 1) && r.ax > 0x79 + 0xC0, "48h: the master environment at %04x", r.ax);
+        r.bx = 0xFFFF;
+        call(&r, 0x4800);
+        size_paras = r.bx;
+        CHECK(size_paras > 0x9000, "the rest free: %x paragraphs", size_paras);
+        str(0x89, 0x300, "C:\\HELLO.COM");
+        mem[lin(0x89, 0x400)] = 0, mem[lin(0x89, 0x401)] = 0x0D;
+        memset(mem + lin(0x89, 0x500), 0, 16);
+        put16(lin(0x89, 0x500), 0), put16(lin(0x89, 0x502), 0x400), put16(lin(0x89, 0x504), 0x89);
+        put16(lin(0x89, 0x506), 0x420), put16(lin(0x89, 0x508), 0x89), put16(lin(0x89, 0x50A), 0x420);
+        put16(lin(0x89, 0x50C), 0x89);
+        r.ds = 0x89, r.dx = 0x300, r.es = 0x89, r.bx = 0x500;
+        r.ax = 0x4B00;
+        res = dos21(vm, &r);
+        CHECK(res == DOS21_SWITCH && dos_cur_psp(vm) != 0x79, "the stub's EXEC %d", res);
+        r.ax = 0x4C05;
+        res = dos21(vm, &r);
+        CHECK(res == DOS21_SWITCH && dos_cur_psp(vm) == 0x79 && r.cs == 0x89 && r.ip == 0x10 && !vm->ended,
+              "the child's end back to the stub, which runs on: %d %04x:%04x", res, r.cs, r.ip);
+        r.ax = 0x4D00;
+        dos21(vm, &r);
+        CHECK(r.ax == 5, "4Dh %x", r.ax);
+        r.bx = 0xFFFF;
+        call(&r, 0x4800);
+        CHECK(r.bx == size_paras, "the child's memory back: %x, was %x", r.bx, size_paras);
+        CHECK(dos_mem_check(&vm->mcb) == 0, "the chain");
+        (void)largest;
+    }
+
     printf("dos21_test: %d failures\n", fails);
     return fails != 0;
 }

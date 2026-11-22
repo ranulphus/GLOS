@@ -1691,7 +1691,7 @@ class Agent:
     """GLOS headless (the agent) in a background Loop A run with the test keys,
     and OpenSSH's ssh to it through SLiRP's forward of port 22 (on the host)."""
 
-    def __init__(self, name, profile, card, args, timeout=600):
+    def __init__(self, name, profile, card, args, timeout=600, files=True):
         import socket
         import tempfile
         s = socket.socket()
@@ -1700,7 +1700,8 @@ class Agent:
         s.close()
         self.proc = run(name, os.environ.get("SSH_EXTRA", "").split() + [
             "--machine", profile, "--net", card, "--net-fwd", "%d:22" % self.port, "--timeout", str(timeout),
-            "--idle", "300"] + GLOS_FILES + KEYS + args, background=True)
+            "--idle", "300"] + (GLOS_FILES + KEYS if files else []) + args, background=True)   # (files: a native
+                                                                    # boot's disk has them: --hdd takes none)
         self.serial = os.path.join(ROOT, "out", self.proc.run_name, "serial.log")
         self.tmp = tempfile.mkdtemp()
         self.key, known = os.path.join(self.tmp, "client"), os.path.join(self.tmp, "known")
@@ -7236,7 +7237,9 @@ def nboot_case(profile, card):
     del card
     img = os.path.join(ROOT, "out", "nboot-img-" + profile, "c.img")
     os.makedirs(os.path.dirname(img), exist_ok=True)
-    mk = subprocess.run(["sh", "tools/ndos/native-image.sh", img], cwd=ROOT, capture_output=True)
+    cfg = batfile("nboot-%s/GLOS.CFG" % profile, ["; jobs.py nboot: NB1's round trip", "[shell]", "options = /ROUNDTRIP"])
+    mk = subprocess.run(["sh", "tools/ndos/native-image.sh", img, cfg + "=\\GLOS\\GLOS.CFG"], cwd=ROOT,
+                        capture_output=True)
     st, serial = run("nboot-" + profile, ["--hdd", img, "--machine", profile, "--timeout", "40"])
     checks = {
         "image": mk.returncode == 0,
@@ -7254,6 +7257,49 @@ def nboot_case(profile, card):
     if not checks["image"]:
         info += " image=%r" % mk.stderr.decode("latin-1")[-200:]
     return "  %-22s %s%s%s" % ("nboot-" + profile, "PASS" if not bad else "FAIL", info,
+                               "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
+def nboot_dos_case(profile, card):
+    """Native boot, NB2 (docs/v1/native-dos.md, native boot): GLOS started with no DOS, its own DOS in the system VM
+    (kernel/vm/vdos.c): the loader adopted as the running program, the stub resident on GLOS's own DOS (4Ah, the
+    master environment by 48h), the agent up and SSH listening; GLOS.CFG read by the kernel through the DOS server
+    (the stub's INT 21h, GLOS's own DOS, C: the volume GLOS started from by GLOS's IDE driver); the shell's VER, a
+    folder listed, a file written and read back on C:, GLOS's own COMMAND.COM run as a job (COMSPEC /C)."""
+    img = os.path.join(ROOT, "out", "nboot2-img-" + profile, "c.img")
+    os.makedirs(os.path.dirname(img), exist_ok=True)
+    cfg = batfile("nboot2-%s/GLOS.CFG" % profile, ["; jobs.py nboot: NB2", "[time]", "sntp = off"])
+    mk = subprocess.run(["sh", "tools/ndos/native-image.sh", img, cfg + "=\\GLOS\\GLOS.CFG",
+                         "build/glos/COMMAND.COM=\\GLOS\\COMMAND.COM", "tests/keys/hostkey=\\GLOS\\KEYS\\HOSTKEY",
+                         "tests/keys/AUTHKEYS=\\GLOS\\KEYS\\AUTHKEYS"], cwd=ROOT, capture_output=True)
+    checks, info = {"image": mk.returncode == 0}, ""
+    agent = Agent("nboot2-%s-%s" % (profile, card), profile, card, ["--hdd", img], timeout=600, files=False)
+    try:
+        checks["listen"] = agent.listening()
+        if checks["listen"]:
+            ver = agent.ssh("ver")
+            ls = agent.ssh("dir C:\\GLOS")
+            wr = agent.ssh("echo written natively > C:\\NATIVE.TXT")
+            rd = agent.ssh("type C:\\NATIVE.TXT")
+            job = agent.ssh("C:\\GLOS\\COMMAND.COM /C VER")
+            checks["ver"] = ver[0] == 0 and "GLOS" in ver[1]
+            checks["dir"] = ls[0] == 0 and "GLOSK" in ls[1] and "COMMAND" in ls[1]
+            checks["write-read"] = wr[0] == 0 and rd[0] == 0 and "written natively" in rd[1]
+            checks["job"] = job[0] == 0 and "GLOS" in job[1]
+            info += " ver=%r dir=%r rd=%r job=%r" % (ver[1][:60], ls[1][:160], rd[1][:60], (job[1] + job[2])[:120])
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    agent.proc.kill()
+    text = agent.log()
+    checks["native"] = "GLOS-NATIVE step=dos" in text and re.search(r"GLOS-NATIVE step=c disk=\S.* mount=0", text) is not None
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-REFUSE" not in text
+    asked = sorted(set(re.findall(r"GLOS-NATIVE unanswered int=(\w+) ax=(\w+)", text)))
+    if asked:
+        info += " unanswered=%s" % ",".join("%s:%s" % a for a in asked[:16])
+    bad = [k for k, v in checks.items() if not v]
+    if not checks["image"]:
+        info += " image=%r" % mk.stderr.decode("latin-1")[-200:]
+    return "  %-22s %s%s%s" % ("nboot2-" + profile, "PASS" if not bad else "FAIL", info,
                                "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
@@ -12336,7 +12382,10 @@ def main():
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "nboot":                      # (native boot: the bf6, the 486)
         cases = [c for c in [("bf6", None), ("486dx2", None)] if not a.profile or c[0] in a.profile]
-        return 0 if all(r[1] for r in matrix(nboot_case, cases, a.jobs)) else 1
+        res = matrix(nboot_case, cases, a.jobs)
+        cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
+        res += matrix(nboot_dos_case, cases, a.jobs)
+        return 0 if all(r[1] for r in res) else 1
     if a.suite == "ndos":                       # (native machines: the bf6 with VME, the 486 without)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(ndos_case, cases, a.jobs)) else 1

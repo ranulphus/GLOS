@@ -615,7 +615,21 @@ bootinfo); and the ways out (`glos exit` back to DOS, DOWN, /ROUNDTRIP).
 - **NB2, the system VM's DOS:** with `BI_F_NATIVE`, GLOS's DOS over the system VM's memory (the loader adopted,
   its PSP the master environment's), INT 20h and 21h trapped to it, C: the boot volume; the stub goes resident,
   the agent listens. Loop A: SSH's `ver`, `dir C:\`, a file written and read back through the shell (the DOS server
-  through GLOS's DOS).
+  through GLOS's DOS). **Built 2026-11-22:** NB2a, GLOS's DOS with a layout (`struct dos_layout`) and DOS's SDA
+  holding the current PSP and DTA (read from it at every call, so app.c's `adopt` and the kernel's
+  `vm_current_psp` work as over a DOS); NB2b, `kernel/vm/vdos.c`: `dos_m_init_vm` adopts the loader (its PSP from
+  bootinfo's `int2f_entry`, its memory to PSP:2) as the running program and its own parent (`root_runs`: its
+  children's ends come back to it), DOS's tables in a block of DOS's own (owner 0008h, "SD") at the top of
+  conventional memory, bootinfo's InDOS, SDA and List of Lists its; INT 20h's and 21h's vectors at ARPLs there
+  (`vdos_arpl`: a far call through the vector, as rm_call and the DPMI host's reflection make); `soft_int` gives
+  INT 20h and 21h to it after the agent's hooks (`vdos_int`); a call waiting for a key goes back to its INT, the VM
+  idling meanwhile; C: mounted at the first call (`fsv.c` over GLOS's IDE driver, the active FAT partition of the
+  ATA disk of BIOS 80h's size). The native loader goes resident as GLOS.EXE's agent does, with a master
+  environment of PATH and COMSPEC (GLOS's own COMMAND.COM in `\GLOS`); GLOS.CFG's `[shell]` is read (its `options`
+  carry flags: `/ROUNDTRIP` gives NB1's round trip). `loopa-nboot`'s NB2 cases (bf6, 486): SSH up, VER, `dir
+  C:\GLOS`, a file written and read back on C:, GLOS's COMMAND.COM run as a job; GLOS.CFG read by the kernel
+  through the DOS server; nothing unanswered. Open: the console (NB3); the disk cache under `fsv.c` (today the
+  native volume's I/O goes past the cache, which a program's INT 13h on the same disk would see stale).
 - **NB3, waits and the console:** the HLT-and-again wait; lcon and the shell's terminal typing into GLOS's DOS;
   INT 2Fh answered; Ctrl-C into sessions' programs.
 - **NB4, programs:** agent jobs and sessions EXEC'd by GLOS's DOS (NDOSTEST, DOSDIFF against MS-DOS 7.1 again),

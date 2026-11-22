@@ -683,7 +683,7 @@ static int end_program(struct dos_m *m, struct dos_regs86 *r, unsigned code, uns
         dos_close_all(&m->files, cur);
         dos_mem_free_owner(&m->mcb, cur);
     }
-    if (parent == m->lay.root_psp || parent == cur || cur == m->lay.root_psp) {
+    if ((parent == m->lay.root_psp && !m->root_runs) || parent == cur || cur == m->lay.root_psp) {
         set_psp(m, m->lay.root_psp);
         set_dta(m, m->lay.root_psp, 0x80);
         m->ended = 1;
@@ -739,6 +739,62 @@ void dos_m_init(struct dos_m *m, unsigned char *mem, unsigned long size, const s
     set_psp(m, m->lay.root_psp);
     set_dta(m, m->lay.root_psp, 0x80);
     wr8(m, m->lay.sda + 0x16, (unsigned)drive);
+}
+
+int dos_m_init_vm(struct dos_m *m, unsigned char *mem, unsigned long size, unsigned psp, unsigned top,
+                  unsigned low_top, struct fsv_vol *v, int drive, int cp)
+{
+    unsigned long bytes = 0x12 + 0x70 + DOS_SDA_SIZE + 0x10 + 6 + (unsigned long)DOS_FILES * DOS_SFT_SIZE;
+    unsigned paras = (unsigned)((bytes + 15) / 16), seg, largest, i;
+    struct dos_psp_init pin;
+    unsigned long base;
+
+    memset(m, 0, sizeof *m);
+    m->mem = mem;
+    m->size = size;
+    m->cp = cp ? cp : 437;
+    if (psp < 0x40 || top <= psp || (unsigned long)low_top * 16 > size || top + paras + 2 > low_top)
+        return -1;
+    /* the chain: the program's block, then everything free, then DOS's tables at the top (last fit) */
+    dos_mem_init(&m->mcb, mem, size, psp - 1, low_top, 0, 0);
+    if (dos_mem_alloc(&m->mcb, top - psp, psp, &seg, &largest) != 0 || seg != psp)
+        return -1;
+    dos_mem_strategy(&m->mcb, 0x02);
+    if (dos_mem_alloc(&m->mcb, paras, 0x0008, &seg, &largest) != 0)
+        return -1;
+    dos_mem_strategy(&m->mcb, 0x00);
+    for (i = 0; i < 8; i++)                     /* (its name, as DOS's own blocks have "SC" or "SD") */
+        mem[lin(seg - 1, 8) + i] = (unsigned char)"SD\0\0\0\0\0\0"[i];
+    base = lin(seg, 0);
+    memset(mem + base, 0, (unsigned long)paras * 16);
+    m->lay.lol = base + 0x12;
+    m->lay.sda = m->lay.lol + 0x70;
+    m->lay.misc = m->lay.sda + DOS_SDA_SIZE;
+    m->lay.sft = m->lay.misc + 0x10;
+    m->lay.root_psp = psp;
+    m->lay.first_mcb = psp - 1;
+    m->lay.low_top = low_top;
+    m->vol[drive] = v;
+    m->cds.valid = v ? 1u << drive : 0;
+    m->cds.current = drive;
+    for (i = 0; i < DOS_DRIVES; i++)
+        strcpy(m->cds.cwd[i], "\\");
+    mem[m->lay.misc + 2] = 0xCB;                /* (RETF) */
+    lol_make(m);
+    dos_files_init(&m->files, mem, m->lay.sft, DOS_FILES);
+    memset(&pin, 0, sizeof pin);
+    pin.seg = psp;
+    pin.top = low_top;
+    pin.parent = psp;
+    pin.version = 0x0A07;
+    pin.tail = "";
+    dos_psp_make(mem + lin(psp, 0), &pin);
+    dos_files_first_jft(&m->files, psp);
+    set_psp(m, psp);
+    set_dta(m, psp, 0x80);
+    wr8(m, m->lay.sda + 0x16, (unsigned)drive);
+    m->root_runs = 1;
+    return 0;
 }
 
 int dos_m_start(struct dos_m *m, const char *path, const char *tail, struct dos_regs86 *r)

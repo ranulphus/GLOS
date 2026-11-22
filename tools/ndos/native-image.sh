@@ -31,6 +31,8 @@ mcopy -i "$i" "$here/build/kernel/GLOSK.BIN" ::GLOS/GLOSK.BIN
 for a in "$@"; do
     src=${a%%=*}
     dst=$(printf '%s' "${a#*=}" | tr '\\' '/')
+    dir=$(dirname "$dst")
+    [ "$dir" = "/" ] || [ "$dir" = "." ] || mmd -i "$i" "::$dir" 2> /dev/null || true
     mcopy -o -i "$i" "$src" "::$dst"
 done
 echo "$out: native GLOS, volume at $start ($sectors sectors)"

@@ -39,6 +39,7 @@
 #include "umapage.h"
 #include "v86dec.h"
 #include "vm.h"
+#include "vdos.h"
 #include "vsbdev.h"
 
 /* The kernel's lines: keyboard, cascade, clock, AUX, and any it claims later
@@ -1306,6 +1307,10 @@ static void soft_int(struct trapframe *tf, u8 n, u32 next, u32 at)
             dpmi_dos_exit(tf, n, next);         /* a DPMI client's program ending (may not come back) */
         break;
     }
+    if ((n == 0x20 || n == 0x21) && vdos_on()) {
+        vdos_int(tf, n, next, at, 0);           /* (a native boot: GLOS's own DOS) */
+        return;
+    }
     vm_int(tf, n, next);
 }
 
@@ -1501,6 +1506,8 @@ void vm_exception(struct trapframe *tf)
             return;
         if (cmdcom_call(tf))                    /* (a COMMAND.COM of GLOS's asks what next: shell/cmdcom.c) */
             return;
+        if (vdos_arpl(tf))                      /* (a native boot: INT 20h or 21h through its vector) */
+            return;
         vm_int(tf, 6, ip);
         return;
     case 0: case 1: case 3: case 4: case 5: case 7: case 12:
@@ -1546,6 +1553,8 @@ void vm_start(struct bootinfo *bi)
     u32 i, f;
 
     vm.bi = bi;
+    if (bi->flags & BI_F_NATIVE)                /* (no DOS under GLOS: its own answers INT 20h and 21h; vdos.c) */
+        vdos_init(bi);
     vm.indos = bi->indos;
     vm.sda = bi->sda;
     vm.loader_cs = (u16)(bi->cs_base >> 4);

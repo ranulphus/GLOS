@@ -57,6 +57,8 @@ struct dos_m {
     unsigned last_error;                /* 59h's */
     unsigned unanswered;
     int ended;                          /* the root's child has ended: the machine with it */
+    int root_runs;                      /* the root is a program that runs on (the system VM's stub): its children's
+                                           ends go back to it, as any parent's */
     /* The console's input (NS3): the keys typed (scan code << 8 | character), a ring dos_type fills from the
        machine's terminal (another thread: one writer, one reader) and the machine reads; wait blocks until a key
        may have come (0) or the machine is to end (-1). */
@@ -95,6 +97,13 @@ int dos_ctrl_c_end(struct dos_m *m, struct dos_regs86 *r);
    environment, the memory chain; drive (2: C:) volume v, the current drive. */
 void dos_m_init(struct dos_m *m, unsigned char *mem, unsigned long size, const struct dos_layout *lay,
                 struct fsv_vol *v, int drive, int cp);
+
+/* The system VM's DOS on a native boot (kernel/vm/vdos.c): the program already there (the loader: its PSP at psp,
+   its memory to top) adopted as the running process and its own parent, its PSP made again (its five handles,
+   no environment); the memory chain from the MCB before it to low_top; the tables in a block of DOS's own (owner
+   0008h) at the top of conventional memory. 0, or -1 if they don't fit. */
+int dos_m_init_vm(struct dos_m *m, unsigned char *mem, unsigned long size, unsigned psp, unsigned top,
+                  unsigned low_top, struct fsv_vol *v, int drive, int cp);
 
 /* The running program's PSP, as the SDA has it (a writer of the SDA, as an app's switch is, is obeyed). */
 unsigned dos_cur_psp(struct dos_m *m);
