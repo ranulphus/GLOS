@@ -7268,11 +7268,13 @@ def nboot_dos_case(profile, card):
     folder listed, a file written and read back on C:, GLOS's own COMMAND.COM run as a job (COMSPEC /C)."""
     img = os.path.join(ROOT, "out", "nboot2-img-" + profile, "c.img")
     os.makedirs(os.path.dirname(img), exist_ok=True)
-    cfg = batfile("nboot2-%s/GLOS.CFG" % profile, ["; jobs.py nboot: NB2", "[time]", "sntp = off"])
+    cfg = batfile("nboot2-%s/GLOS.CFG" % profile, ["; jobs.py nboot: NB2 (SNTP on: the clock, as every run's)"])
     mk = subprocess.run(["sh", "tools/ndos/native-image.sh", img, cfg + "=\\GLOS\\GLOS.CFG",
                          "build/glos/COMMAND.COM=\\GLOS\\COMMAND.COM", "tests/keys/hostkey=\\GLOS\\KEYS\\HOSTKEY",
                          "tests/keys/AUTHKEYS=\\GLOS\\KEYS\\AUTHKEYS", "build/ow/dos/TYPEIN.EXE=\\GLOS\\TYPEIN.EXE",
-                         "build/ow/dos/CONTEST.EXE=\\GLOS\\CONTEST.EXE"], cwd=ROOT, capture_output=True)
+                         "build/ow/dos/CONTEST.EXE=\\GLOS\\CONTEST.EXE", "build/ow/dos/NDOSTEST.EXE=\\GLOS\\NDOSTEST.EXE",
+                         "build/ow/dos/DOSDIFF.EXE=\\GLOS\\DOSDIFF.EXE", "build/dj/DOSCALLS.EXE=\\GLOS\\DOSCALLS.EXE"],
+                        cwd=ROOT, capture_output=True)
     checks, info = {"image": mk.returncode == 0}, ""
     agent = Agent("nboot2-%s-%s" % (profile, card), profile, card, ["--hdd", img], timeout=600, files=False)
     try:
@@ -7318,6 +7320,26 @@ def nboot_dos_case(profile, card):
             checks["screen"] = want in shot
             if not checks["console"] or not checks["screen"]:
                 info += " contest=%r/%s screen=%r" % (out[-160:], p.returncode, shot.replace("\n", "|")[-300:])
+            # NB4: programs. NDOSTEST (Open Watcom's C library, spawning itself) and DOSDIFF (MS-DOS 7.1's answers)
+            # as jobs; DOSCALLS (DJGPP: through the DPMI host's reflection) as a program and as a GLOS app (its calls
+            # by app.c's serve, the SDA's PSP switched for it).
+            agent.ssh("cd \\GLOS")
+            nt = agent.ssh("NDOSTEST.EXE x two")
+            agent.ssh("cd \\")
+            dd = agent.ssh("C:\\GLOS\\DOSDIFF.EXE")
+            diffs = dosdiff_compare(dd[1])
+            dc = agent.ssh("C:\\GLOS\\DOSCALLS.EXE")
+            dca = agent.ssh("C:\\GLOS\\DOSCALLS.EXE app")
+            checks["ndostest"] = nt[0] == 0 and "NDOSTEST: 0 failures" in nt[1] and "child: 7 word" in nt[1]
+            checks["dosdiff"] = dd[0] == 0 and "DOSDIFF end" in dd[1] and not diffs
+            checks["djgpp"] = dc[0] == 0 and "DOSCALLS as=dos" in dc[1]
+            checks["app"] = dca[0] == 0 and "DOSCALLS as=app" in dca[1]
+            if not checks["ndostest"]:
+                info += " ndostest=%r/%d" % (nt[1][-300:], nt[0])
+            if not checks["dosdiff"]:
+                info += " dosdiff(%d)=%r" % (len(diffs), diffs[:8] if diffs else dd[1][-200:])
+            if not checks["djgpp"] or not checks["app"]:
+                info += " doscalls=%r/%d app=%r/%d" % ((dc[1] + dc[2])[-160:], dc[0], (dca[1] + dca[2])[-160:], dca[0])
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
     agent.proc.kill()

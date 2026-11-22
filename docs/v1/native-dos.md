@@ -643,7 +643,13 @@ bootinfo); and the ways out (`glos exit` back to DOS, DOWN, /ROUNDTRIP).
   INT 23h, ticks by INT 1Ch and the BIOS's count), its words on the screen as well.
 - **NB4, programs:** agent jobs and sessions EXEC'd by GLOS's DOS (NDOSTEST, DOSDIFF against MS-DOS 7.1 again),
   GLOS's COMMAND.COM, apps (the DPMI host's reflection reaching GLOS's DOS), the census's programs; a `native`
-  variant of the suites.
+  variant of the suites. **First part built 2026-11-22**, in `loopa-nboot` (bf6, 486) on a disk with no DOS:
+  NDOSTEST as an agent job (Open Watcom's C library, spawning itself) 0 failures; DOSDIFF's ~90 probes
+  answered in the system VM as MS-DOS 7.1 answers them (`tests/dos/dosdiff.msdos71.txt`); DOSCALLS (DJGPP: its
+  INT 21h through the DPMI host's reflection, an ARPL of DOS's) as a program, and as a GLOS app (its calls by
+  app.c's `serve`, the SDA's PSP switched for it). Unanswered there: 71A0h (as 7.1 refuses it with no Windows) and
+  7302h. (A shell's `cd` is its session's: Loop A's hosted runs start in `\TEST` because RUN.BAT changes to it,
+  which a native boot's don't.) Open: the census's programs and the suites in a native variant.
 - **NB5, the way out and the benches:** restart and power off; the 486 and bench-g400 booting natively from a
   partition of their own (with the owner's OK for each bench).
 

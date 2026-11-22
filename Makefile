@@ -750,7 +750,7 @@ loopa-api: all build/dj/APITEST.EXE build/dj/JOBTOOL.EXE build/dj/GDBME.EXE dosl
 # An app's own threads (phase B step 4): THRTEST through the agent.
 loopa-ndos: all dos-tests check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py ndos -j $(JOBS)
-loopa-nboot: all native-loader check-deps
+loopa-nboot: all native-loader dos-tests build/dj/DOSCALLS.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py nboot -j $(JOBS)
 loopa-thr: all dos-tests build/dj/THRTEST.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py thr -j $(JOBS)

@@ -106,12 +106,20 @@ static void folders(void)
     check(chdir("NDIR") != 0, "chdir to a removed folder");
 }
 
-static void searches(void)
+/* (in its own folder, argv[0]'s: a shell's folder is its session's, and a run may start anywhere) */
+static void searches(const char *self_path)
 {
     struct find_t ft;
     int n = 0, self = 0;
+    char spec[80];
+    const char *slash = strrchr(self_path, '\\');
+    size_t k = slash ? (size_t)(slash - self_path + 1) : 0;
 
-    if (_dos_findfirst("*.*", _A_NORMAL, &ft) == 0) {
+    if (k > sizeof spec - 4)
+        k = 0;
+    memcpy(spec, self_path, k);
+    strcpy(spec + k, "*.*");
+    if (_dos_findfirst(spec, _A_NORMAL, &ft) == 0) {
         do {
             n++;
             if (!strcmp(ft.name, "NDOSTEST.EXE"))
@@ -176,7 +184,7 @@ int main(int argc, char **argv)
     check(getenv("PATH") != NULL, "PATH in the environment");
     files();
     folders();
-    searches();
+    searches(argv[0]);
     memory();
     programs(argv[0]);
     clock_();
