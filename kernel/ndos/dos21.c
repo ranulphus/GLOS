@@ -12,7 +12,7 @@
 
 #define CF      0x0001u
 #define ZF      0x0040u
-#define LOW_TOP 0xA000u                 /* the memory chain's end (paragraphs) */
+const struct dos_layout dos_layout_machine = { 0x0540, 0x05A0, 0x05E0, 0x0800, 0x0118, 0x0128, 0xA000 };
 
 /* ---- the machine's memory: nothing outside it is read (0) or written */
 
@@ -43,6 +43,20 @@ static int str_in(struct dos_m *m, unsigned seg, unsigned off, char *out, unsign
     out[room - 1] = 0;
     return -1;
 }
+
+/* The SDA's current PSP and DTA. */
+static unsigned cur_psp(struct dos_m *m) { return rd16(m, m->lay.sda + 0x10); }
+static void set_psp(struct dos_m *m, unsigned seg) { wr16(m, m->lay.sda + 0x10, seg); }
+static unsigned dta_seg(struct dos_m *m) { return rd16(m, m->lay.sda + 0x0E); }
+static unsigned dta_off(struct dos_m *m) { return rd16(m, m->lay.sda + 0x0C); }
+
+static void set_dta(struct dos_m *m, unsigned seg, unsigned off)
+{
+    wr16(m, m->lay.sda + 0x0C, off);
+    wr16(m, m->lay.sda + 0x0E, seg);
+}
+
+unsigned dos_cur_psp(struct dos_m *m) { return cur_psp(m); }
 
 static void str_out(struct dos_m *m, unsigned seg, unsigned off, const char *s)
 {
@@ -619,8 +633,8 @@ static int exec_src(struct dos_m *m, unsigned parent, struct src *s, const struc
     r->cx = 0xFF;                               /* (what DOS leaves: to check) */
     r->cs = r0.cs, r->ip = r0.ip, r->ss = r0.ss, r->sp = r0.sp, r->ds = r0.ds, r->es = r0.es;
     r->flags = 0x0202;
-    m->psp = seg;
-    m->dta_seg = seg, m->dta_off = 0x80;
+    set_psp(m, seg);
+    set_dta(m, seg, 0x80);
     return 0;
 }
 
@@ -654,7 +668,7 @@ static int overlay(struct dos_m *m, const char *dospath, unsigned at, unsigned f
    given back; the parent runs on where its EXEC was, or the machine ends with the root's child. */
 static int end_program(struct dos_m *m, struct dos_regs86 *r, unsigned code, unsigned kind)
 {
-    unsigned cur = m->psp, parent = rd16(m, lin(cur, 0x16));
+    unsigned cur = cur_psp(m), parent = rd16(m, lin(cur, 0x16));
     unsigned long ret = (unsigned long)rd16(m, lin(cur, 0x0A)) | (unsigned long)rd16(m, lin(cur, 0x0C)) << 16;
 
     m->exit_code = (kind & 0xFF) << 8 | (code & 0xFF);
@@ -669,14 +683,14 @@ static int end_program(struct dos_m *m, struct dos_regs86 *r, unsigned code, uns
         dos_close_all(&m->files, cur);
         dos_mem_free_owner(&m->mcb, cur);
     }
-    if (parent == DOS_ROOT_PSP || parent == cur || cur == DOS_ROOT_PSP) {
-        m->psp = DOS_ROOT_PSP;
-        m->dta_seg = DOS_ROOT_PSP, m->dta_off = 0x80;
+    if (parent == m->lay.root_psp || parent == cur || cur == m->lay.root_psp) {
+        set_psp(m, m->lay.root_psp);
+        set_dta(m, m->lay.root_psp, 0x80);
         m->ended = 1;
         return DOS21_END;
     }
-    m->psp = parent;
-    m->dta_seg = parent, m->dta_off = 0x80;
+    set_psp(m, parent);
+    set_dta(m, parent, 0x80);
     r->cs = (unsigned)(ret >> 16) & 0xFFFF, r->ip = (unsigned)ret & 0xFFFF;
     r->ss = rd16(m, lin(parent, 0x30)), r->sp = rd16(m, lin(parent, 0x2E));
     r->flags &= ~CF;
@@ -687,7 +701,8 @@ static int end_program(struct dos_m *m, struct dos_regs86 *r, unsigned code, uns
 
 static void lol_make(struct dos_m *m);
 
-void dos_m_init(struct dos_m *m, unsigned char *mem, unsigned long size, struct fsv_vol *v, int drive, int cp)
+void dos_m_init(struct dos_m *m, unsigned char *mem, unsigned long size, const struct dos_layout *lay,
+                struct fsv_vol *v, int drive, int cp)
 {
     static const char env[] = "PATH=C:\\\0COMSPEC=C:\\COMMAND.COM\0";
     struct dos_psp_init pin;
@@ -696,37 +711,40 @@ void dos_m_init(struct dos_m *m, unsigned char *mem, unsigned long size, struct 
     memset(m, 0, sizeof *m);
     m->mem = mem;
     m->size = size;
+    m->lay = *lay;
     m->cp = cp ? cp : 437;
     m->vol[drive] = v;
     m->cds.valid = v ? 1u << drive : 0;
     m->cds.current = drive;
     for (i = 0; i < DOS_DRIVES; i++)
         strcpy(m->cds.cwd[i], "\\");
-    memset(mem + DOS_DATA_LIN, 0, 16);
-    mem[DOS_DATA_LIN + 4] = 0xCB;               /* (RETF) */
+    memset(mem + lay->sda, 0, DOS_SDA_SIZE);
+    memset(mem + lay->misc, 0, 6);
+    mem[lay->misc + 2] = 0xCB;                  /* (RETF) */
     lol_make(m);
-    dos_files_init(&m->files, mem, DOS_SFT_LIN, DOS_FILES);
-    dos_mem_init(&m->mcb, mem, size, DOS_FIRST_MCB, LOW_TOP, 0, 0);
-    dos_mem_alloc(&m->mcb, (sizeof env + 1 + 15) / 16, DOS_ROOT_PSP, &envseg, &largest);
+    dos_files_init(&m->files, mem, m->lay.sft, DOS_FILES);
+    dos_mem_init(&m->mcb, mem, size, m->lay.first_mcb, m->lay.low_top, 0, 0);
+    dos_mem_alloc(&m->mcb, (sizeof env + 1 + 15) / 16, m->lay.root_psp, &envseg, &largest);
     memcpy(mem + lin(envseg, 0), env, sizeof env);      /* (its strings, then the 0 that ends them) */
     mem[lin(envseg, 0) + sizeof env] = 0;
     memset(&pin, 0, sizeof pin);
-    pin.seg = DOS_ROOT_PSP;
-    pin.top = LOW_TOP;
-    pin.parent = DOS_ROOT_PSP;
+    pin.seg = m->lay.root_psp;
+    pin.top = m->lay.low_top;
+    pin.parent = m->lay.root_psp;
     pin.env = envseg;
     pin.version = 0x0A07;
     pin.tail = "";
-    dos_psp_make(mem + lin(DOS_ROOT_PSP, 0), &pin);
-    dos_files_first_jft(&m->files, DOS_ROOT_PSP);
-    m->psp = DOS_ROOT_PSP;
-    m->dta_seg = DOS_ROOT_PSP, m->dta_off = 0x80;
+    dos_psp_make(mem + lin(m->lay.root_psp, 0), &pin);
+    dos_files_first_jft(&m->files, m->lay.root_psp);
+    set_psp(m, m->lay.root_psp);
+    set_dta(m, m->lay.root_psp, 0x80);
+    wr8(m, m->lay.sda + 0x16, (unsigned)drive);
 }
 
 int dos_m_start(struct dos_m *m, const char *path, const char *tail, struct dos_regs86 *r)
 {
     m->ended = 0;
-    return exec(m, DOS_ROOT_PSP, path, 0, tail, 0, 0, 0, r);
+    return exec(m, m->lay.root_psp, path, 0, tail, 0, 0, 0, r);
 }
 
 int dos_m_start_image(struct dos_m *m, const char *name, const unsigned char *image, unsigned long len,
@@ -745,7 +763,7 @@ int dos_m_start_image(struct dos_m *m, const char *name, const unsigned char *im
     if ((e = src_header(&s, &x)) != 0)
         return e;
     m->ended = 0;
-    return exec_src(m, DOS_ROOT_PSP, &s, &x, 0, tail, 0, 0, 0, r);
+    return exec_src(m, m->lay.root_psp, &s, &x, 0, tail, 0, 0, 0, r);
 }
 
 void dos_m_close(struct dos_m *m)
@@ -771,7 +789,7 @@ int dos20(struct dos_m *m, struct dos_regs86 *r)
 static int file_io(struct dos_m *m, struct dos_regs86 *r, unsigned ah)
 {
     unsigned long a = lin(r->ds, r->dx), cnt = r->cx;
-    int i = dos_entry(&m->files, m->psp, r->bx);
+    int i = dos_entry(&m->files, cur_psp(m), r->bx);
     long got;
 
     if (i < 0)
@@ -804,8 +822,8 @@ static int file_io(struct dos_m *m, struct dos_regs86 *r, unsigned ah)
         r->ax = ah == 0x40 ? (unsigned)cnt : 0; /* (no ports: what's written goes nowhere) */
         return ok(r);
     }
-    got = ah == 0x3F ? dos_read(&m->files, m->psp, r->bx, m->mem + a, cnt)
-                     : dos_write(&m->files, m->psp, r->bx, m->mem + a, cnt);
+    got = ah == 0x3F ? dos_read(&m->files, cur_psp(m), r->bx, m->mem + a, cnt)
+                     : dos_write(&m->files, cur_psp(m), r->bx, m->mem + a, cnt);
     if (got < 0)
         return err(m, r, (unsigned)-got);
     r->ax = (unsigned)got;
@@ -822,7 +840,7 @@ static int ioctl(struct dos_m *m, struct dos_regs86 *r, unsigned al)
     case 0x01:
     case 0x06:
     case 0x07:
-        if ((i = dos_entry(&m->files, m->psp, r->bx)) < 0)
+        if ((i = dos_entry(&m->files, cur_psp(m), r->bx)) < 0)
             return err(m, r, 0x06);
         en = m->files.table + 6 + (unsigned long)i * DOS_SFT_SIZE;
         if (al == 0x00) {
@@ -864,7 +882,7 @@ static int ioctl(struct dos_m *m, struct dos_regs86 *r, unsigned al)
 
 static int find(struct dos_m *m, struct dos_regs86 *r, unsigned ah)
 {
-    unsigned long dl = lin(m->dta_seg, m->dta_off);
+    unsigned long dl = lin(dta_seg(m), dta_off(m));
     unsigned char *dta = m->mem + dl;
     char spec[128], dir[128], path[128];
     const char *last;
@@ -972,7 +990,7 @@ static int ext_open(struct dos_m *m, struct dos_regs86 *r)
     if (str_in(m, r->ds, r->si, p, sizeof p) != 0)
         return err(m, r, 0x03);
     if ((d = dev_name(p)) != 0) {
-        if ((e = dos_open(&m->files, m->psp, 0, 0, "", d, mode, &h)) != 0)
+        if ((e = dos_open(&m->files, cur_psp(m), 0, 0, "", d, mode, &h)) != 0)
             return err(m, r, (unsigned)e);
         r->ax = h, r->cx = 1;
         return ok(r);
@@ -987,9 +1005,9 @@ static int ext_open(struct dos_m *m, struct dos_regs86 *r)
     if (there_act > 2 || none_act > 1)
         return err(m, r, 0x01);                 /* (MS-DOS 7.1's answer) */
     if (there && there_act == 1)
-        e = dos_open(&m->files, m->psp, v, (unsigned)drive, path, 0, mode, &h);
+        e = dos_open(&m->files, cur_psp(m), v, (unsigned)drive, path, 0, mode, &h);
     else
-        e = dos_create(&m->files, m->psp, v, (unsigned)drive, path, (unsigned char)r->cx, there, &h),
+        e = dos_create(&m->files, cur_psp(m), v, (unsigned)drive, path, (unsigned char)r->cx, there, &h),
         done_ = there ? 3 : 2;
     if (e)
         return err(m, r, (unsigned)no_file(v, path, e));
@@ -1001,13 +1019,13 @@ static int ext_open(struct dos_m *m, struct dos_regs86 *r)
    drives (to check which of its other fields programs read: DOS/4GW, the census says). */
 static void lol_make(struct dos_m *m)
 {
-    unsigned long l = DOS_LOL_LIN;
+    unsigned long l = m->lay.lol;
     unsigned i;
 
     for (i = 0; i < 0x80; i++)
         wr8(m, l - 0x12 + i, 0);
-    wr16(m, l - 2, DOS_FIRST_MCB);
-    wr16(m, l + 0x04, (unsigned)(DOS_SFT_LIN & 0xF)), wr16(m, l + 0x06, (unsigned)(DOS_SFT_LIN >> 4));
+    wr16(m, l - 2, m->lay.first_mcb);
+    wr16(m, l + 0x04, (unsigned)(m->lay.sft & 0xF)), wr16(m, l + 0x06, (unsigned)(m->lay.sft >> 4));
     wr16(m, l + 0x10, 512);                     /* (the largest sector) */
     wr8(m, l + 0x20, 1);                        /* (block devices) */
     wr8(m, l + 0x21, DOS_DRIVES);               /* (LASTDRIVE: Z:, as 0Eh says) */
@@ -1081,8 +1099,8 @@ static int country(struct dos_m *m, struct dos_regs86 *r)
     wr8(m, b + 0x0B, '-');
     wr8(m, b + 0x0D, ':');
     wr8(m, b + 0x10, 2);
-    wr16(m, b + 0x12, (unsigned)(DOS_DATA_LIN + 4) & 0xF);  /* (the case map: a RETF, to check) */
-    wr16(m, b + 0x14, (unsigned)(DOS_DATA_LIN + 4) >> 4);
+    wr16(m, b + 0x12, (unsigned)(m->lay.misc + 2) & 0xF);  /* (the case map: a RETF, to check) */
+    wr16(m, b + 0x14, (unsigned)(m->lay.misc + 2) >> 4);
     wr8(m, b + 0x16, ',');
     r->bx = 1;
     return ok(r);
@@ -1091,7 +1109,7 @@ static int country(struct dos_m *m, struct dos_regs86 *r)
 static int exec_call(struct dos_m *m, struct dos_regs86 *r, unsigned al)
 {
     unsigned long pb = lin(r->es, r->bx), f1, f2;
-    unsigned env, toff, tseg, len, i, parent = m->psp;
+    unsigned env, toff, tseg, len, i, parent = cur_psp(m);
     unsigned char fcb1[16], fcb2[16];
     char path[128], tail[128];
     struct dos_regs86 child;
@@ -1220,15 +1238,17 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
                 fsv_flush(m->vol[d]);
         return DOS21_DONE;
     case 0x0E:
-        if ((r->dx & 0xFF) < DOS_DRIVES && (m->cds.valid >> (r->dx & 0xFF) & 1))
+        if ((r->dx & 0xFF) < DOS_DRIVES && (m->cds.valid >> (r->dx & 0xFF) & 1)) {
             m->cds.current = (int)(r->dx & 0xFF);
+            wr8(m, m->lay.sda + 0x16, (unsigned)m->cds.current);
+        }
         set_al(r, DOS_DRIVES);                  /* (MS-DOS 7.1's: 26, LASTDRIVE=Z) */
         return DOS21_DONE;
     case 0x19:
         set_al(r, (unsigned)m->cds.current);
         return DOS21_DONE;
     case 0x1A:
-        m->dta_seg = r->ds, m->dta_off = r->dx;
+        set_dta(m, r->ds, r->dx);
         return DOS21_DONE;
     case 0x25:
         set_vec(m, al, (unsigned long)r->ds << 16 | r->dx);
@@ -1261,7 +1281,7 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
         m->verify = (unsigned char)(al != 0);
         return DOS21_DONE;
     case 0x2F:
-        r->es = m->dta_seg, r->bx = m->dta_off;
+        r->es = dta_seg(m), r->bx = dta_off(m);
         return DOS21_DONE;
     case 0x30:
         r->ax = 0x0A07;                         /* (7.10) */
@@ -1287,7 +1307,7 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
     case 0x31:
         return end_program(m, r, al, 3);
     case 0x34:
-        r->es = (unsigned)(DOS_DATA_LIN >> 4), r->bx = (unsigned)(DOS_DATA_LIN & 0xF) + 1;
+        r->es = (unsigned)(m->lay.sda >> 4), r->bx = (unsigned)(m->lay.sda & 0xF) + 1;
         return DOS21_DONE;
     case 0x35: {
         unsigned long x = vec(m, al);
@@ -1341,20 +1361,20 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
         if (str_in(m, r->ds, r->dx, path2, sizeof path2) != 0)
             return err(m, r, 0x03);
         if ((d = dev_name(path2)) != 0)
-            e = dos_open(&m->files, m->psp, 0, 0, "", d, ah == 0x3D ? al : 2, &h);
+            e = dos_open(&m->files, cur_psp(m), 0, 0, "", d, ah == 0x3D ? al : 2, &h);
         else if ((e = resolve_str(m, path2, &v, &drive, path)) != 0)
             ;
         else if (ah == 0x3D)
-            e = no_file(v, path, dos_open(&m->files, m->psp, v, (unsigned)drive, path, 0, al, &h));
+            e = no_file(v, path, dos_open(&m->files, cur_psp(m), v, (unsigned)drive, path, 0, al, &h));
         else
-            e = no_file(v, path, dos_create(&m->files, m->psp, v, (unsigned)drive, path, (unsigned char)r->cx,
+            e = no_file(v, path, dos_create(&m->files, cur_psp(m), v, (unsigned)drive, path, (unsigned char)r->cx,
                                             ah == 0x3C, &h));
         if (e)
             return err(m, r, (unsigned)e);
         r->ax = h;
         return ok(r);
     case 0x3E:
-        return done(m, r, dos_close(&m->files, m->psp, r->bx));
+        return done(m, r, dos_close(&m->files, cur_psp(m), r->bx));
     case 0x3F:
     case 0x40:
         return file_io(m, r, ah);
@@ -1366,7 +1386,7 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
         unsigned long pos;
         long off = (long)((unsigned long)r->cx << 16 | (r->dx & 0xFFFF));
 
-        if ((e = dos_seek(&m->files, m->psp, r->bx, (int)al, off, &pos)) != 0)
+        if ((e = dos_seek(&m->files, cur_psp(m), r->bx, (int)al, off, &pos)) != 0)
             return err(m, r, (unsigned)e);
         r->ax = (unsigned)(pos & 0xFFFF), r->dx = (unsigned)(pos >> 16) & 0xFFFF;
         return ok(r);
@@ -1390,12 +1410,12 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
             return e;
         break;
     case 0x45:
-        if ((e = dos_dup(&m->files, m->psp, r->bx, &h)) != 0)
+        if ((e = dos_dup(&m->files, cur_psp(m), r->bx, &h)) != 0)
             return err(m, r, (unsigned)e);
         r->ax = h;
         return ok(r);
     case 0x46:
-        return done(m, r, dos_dup2(&m->files, m->psp, r->bx, r->cx));
+        return done(m, r, dos_dup2(&m->files, cur_psp(m), r->bx, r->cx));
     case 0x47:
         if ((e = dos_getcwd(&m->cds, (int)(r->dx & 0xFF), path, 64)) != 0)
             return err(m, r, (unsigned)e);
@@ -1405,7 +1425,7 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
     case 0x48: {
         unsigned seg, largest;
 
-        if ((e = dos_mem_alloc(&m->mcb, r->bx, m->psp, &seg, &largest)) != 0) {
+        if ((e = dos_mem_alloc(&m->mcb, r->bx, cur_psp(m), &seg, &largest)) != 0) {
             r->bx = largest;
             return err(m, r, (unsigned)e);
         }
@@ -1437,22 +1457,22 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
     case 0x4F:
         return find(m, r, ah);
     case 0x50:
-        m->psp = r->bx;
+        set_psp(m, r->bx);
         return DOS21_DONE;
     case 0x51:
     case 0x62:
-        r->bx = m->psp;
+        r->bx = cur_psp(m);
         return DOS21_DONE;
     case 0x52:
-        r->es = (unsigned)(DOS_LOL_LIN >> 4), r->bx = (unsigned)(DOS_LOL_LIN & 0xF);
+        r->es = (unsigned)(m->lay.lol >> 4), r->bx = (unsigned)(m->lay.lol & 0xF);
         return DOS21_DONE;
     case 0x54:
         set_al(r, m->verify);
         return DOS21_DONE;
     case 0x5D:
-        if (al == 0x06) {                       /* the swappable data area: 16 bytes, all of them always */
-            r->ds = (unsigned)(DOS_DATA_LIN >> 4), r->si = (unsigned)(DOS_DATA_LIN & 0xF);
-            r->cx = 0x10, r->dx = 0x10;
+        if (al == 0x06) {                       /* the swappable data area, all of it always */
+            r->ds = (unsigned)(m->lay.sda >> 4), r->si = (unsigned)(m->lay.sda & 0xF);
+            r->cx = DOS_SDA_SIZE, r->dx = DOS_SDA_SIZE;
             return ok(r);
         }
         break;
@@ -1472,7 +1492,7 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
         return ok(r);
     case 0x68:
     case 0x6A:
-        if (dos_entry(&m->files, m->psp, r->bx) < 0)
+        if (dos_entry(&m->files, cur_psp(m), r->bx) < 0)
             return err(m, r, 0x06);
         for (d = 0; d < DOS_DRIVES; d++)        /* (writes go through: the volume's own buffers flushed) */
             if (m->vol[d])
@@ -1499,7 +1519,7 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
         return done(m, r, e);
     case 0x57:
         if (al == 0) {
-            int i = dos_entry(&m->files, m->psp, r->bx);
+            int i = dos_entry(&m->files, cur_psp(m), r->bx);
             unsigned long en;
 
             if (i < 0)
@@ -1549,7 +1569,7 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
     }
     case 0x63:
         if (al == 0) {
-            r->ds = (unsigned)(DOS_DATA_LIN >> 4), r->si = (unsigned)(DOS_DATA_LIN & 0xF) + 2;
+            r->ds = (unsigned)(m->lay.misc >> 4), r->si = (unsigned)(m->lay.misc & 0xF);
             set_al(r, 0);
             return ok(r);
         }

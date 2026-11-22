@@ -107,7 +107,7 @@ int main(void)
         put16(i * 4, i * 2);
         put16(i * 4 + 2, 0x0060);
     }
-    dos_m_init(&m, mem, SIZE, &vol, 2, 437);
+    dos_m_init(&m, mem, SIZE, &dos_layout_machine, &vol, 2, 437);
     m.out = con;
     m.now = now;
     m.wait = no_more;
@@ -116,7 +116,7 @@ int main(void)
 
     /* ---- a .COM started */
     res = dos_m_start(&m, "C:\\HELLO.COM", " a b", &r);
-    psp = m.psp;
+    psp = dos_cur_psp(&m);
     if (res) {
         printf("FAIL start %d\n", res);
         return 1;
@@ -126,7 +126,7 @@ int main(void)
     CHECK(!memcmp(mem + lin(psp, 0x100), com, sizeof com), "image");
     CHECK(mem[lin(psp, 0)] == 0xCD && mem[lin(psp, 1)] == 0x20, "PSP INT 20h");
     CHECK(mem[lin(psp, 0x80)] == 4 && !memcmp(mem + lin(psp, 0x81), " a b\r", 5), "tail");
-    CHECK(w(lin(psp, 0x16)) == DOS_ROOT_PSP, "parent %04x", w(lin(psp, 0x16)));
+    CHECK(w(lin(psp, 0x16)) == dos_layout_machine.root_psp, "parent %04x", w(lin(psp, 0x16)));
     CHECK(w(lin(r.ss, r.sp)) == 0, "the 0 word on its stack");
     env = lin(w(lin(psp, 0x2C)), 0);
     CHECK(!strcmp((char *)mem + env, "PATH=C:\\"), "env first string \"%s\"", (char *)mem + env);
@@ -358,7 +358,7 @@ int main(void)
     res = call(&r, 0x4B00);
     CHECK(res == DOS21_SWITCH, "4B00h %d ax=%x", res, r.ax);
     {
-        unsigned c = m.psp, img = c + 0x10;
+        unsigned c = dos_cur_psp(&m), img = c + 0x10;
 
         CHECK(c != psp && w(lin(c, 0x16)) == psp, "child's parent %04x", w(lin(c, 0x16)));
         CHECK(r.cs == img && r.ip == 0 && r.ss == img + 1 && r.sp == 0x100 && r.ds == c && r.es == c,
@@ -386,7 +386,7 @@ int main(void)
         call(&r, 0x4800);                       /* (its memory: freed at its end) */
         res = call(&r, 0x4C07);
     }
-    CHECK(res == DOS21_SWITCH && m.psp == psp, "child's end %d psp %04x", res, m.psp);
+    CHECK(res == DOS21_SWITCH && dos_cur_psp(&m) == psp, "child's end %d psp %04x", res, dos_cur_psp(&m));
     CHECK(r.cs == saved.cs && r.ip == saved.ip && r.ss == saved.ss && r.sp == saved.sp && !(r.flags & 1),
           "back in the parent cs:ip=%04x:%04x ss:sp=%04x:%04x", r.cs, r.ip, r.ss, r.sp);
     CHECK(w(0x23 * 4) == 0x46 && w(0x23 * 4 + 2) == 0x60, "INT 23h given back %04x:%04x", w(0x8E), w(0x8C));
@@ -468,6 +468,26 @@ int main(void)
         CHECK(!memcmp(mem + lin(psp, 0x380), "\000KEEPNAMEX  ", 12), "29h bit 2 \"%.12s\"", (char *)mem + lin(psp, 0x380));
     }
 
+    /* ---- the SDA's current PSP and DTA are DOS's own: a writer of them (an app's switch, app.c's adopt) is obeyed */
+    {
+        unsigned long sda = dos_layout_machine.sda;
+
+        CHECK(w(sda + 0x10) == psp && w(sda + 0x0E) == dos_cur_psp(&m), "the SDA's PSP %04x", w(sda + 0x10));
+        put16(sda + 0x10, dos_layout_machine.root_psp);
+        call(&r, 0x6200);
+        CHECK(r.bx == dos_layout_machine.root_psp, "62h after the SDA was written: %04x", r.bx);
+        put16(sda + 0x10, psp);
+        put16(sda + 0x0C, 0x123), put16(sda + 0x0E, psp);
+        call(&r, 0x2F00);
+        CHECK(r.es == psp && r.bx == 0x123, "2Fh after the SDA was written");
+        r.ds = psp, r.dx = 0x700;
+        call(&r, 0x1A00);
+        CHECK(w(sda + 0x0C) == 0x700, "1Ah writes the SDA's DTA");
+        r.dx = 2;
+        call(&r, 0x0E00);
+        CHECK(mem[sda + 0x16] == 2, "0Eh: the SDA's current drive");
+    }
+
     /* ---- the census's next: 6Ch, 60h, 52h, 5D06h, 6800h, 7303h, 4411h */
     str(psp, 0x300, "EXT.TXT");
     r.ds = psp, r.si = 0x300, r.bx = 0x0002, r.cx = 0, r.dx = 0x0010;  /* (make it if it isn't there, else fail) */
@@ -512,11 +532,11 @@ int main(void)
     CHECK(!(r.flags & 1) && !strcmp((char *)mem + lin(psp, 0x400), "C:\\EXT.TXT"), "60h \"%s\"",
           (char *)mem + lin(psp, 0x400));
     call(&r, 0x5200);
-    CHECK(w(lin(r.es, r.bx) - 2) == DOS_FIRST_MCB && w(lin(r.es, r.bx) + 4) == (DOS_SFT_LIN & 0xF)
-          && w(lin(r.es, r.bx) + 6) == (DOS_SFT_LIN >> 4) && !memcmp(mem + lin(r.es, r.bx) + 0x2C, "NUL     ", 8),
+    CHECK(w(lin(r.es, r.bx) - 2) == dos_layout_machine.first_mcb && w(lin(r.es, r.bx) + 4) == (dos_layout_machine.sft & 0xF)
+          && w(lin(r.es, r.bx) + 6) == (dos_layout_machine.sft >> 4) && !memcmp(mem + lin(r.es, r.bx) + 0x2C, "NUL     ", 8),
           "52h's list");
     call(&r, 0x5D06);
-    CHECK(!(r.flags & 1) && lin(r.ds, r.si) == DOS_DATA_LIN && r.cx == 0x10, "5D06h");
+    CHECK(!(r.flags & 1) && lin(r.ds, r.si) == dos_layout_machine.sda && r.cx == DOS_SDA_SIZE, "5D06h");
     r.ds = psp;
     str(psp, 0x300, "C:\\");
     r.dx = 0x300, r.es = psp, r.di = 0x400, r.cx = 0x30;
@@ -555,7 +575,7 @@ int main(void)
     r.ds = psp, r.dx = 0x300, r.es = psp, r.bx = 0x900, r.cs = psp, r.ip = 0x200, r.ss = psp, r.sp = 0xFF00;
     res = call(&r, 0x4B01);
     {
-        unsigned c = m.psp, img = c + 0x10;
+        unsigned c = dos_cur_psp(&m), img = c + 0x10;
 
         CHECK(res == DOS21_DONE && !(r.flags & 1) && c != psp, "4B01h %d psp %04x", res, c);
         CHECK(w(lin(psp, 0x912)) == 0 && w(lin(psp, 0x914)) == img && w(lin(psp, 0x910)) == img + 1
@@ -564,7 +584,7 @@ int main(void)
         /* the loaded child "runs" (the caller jumps to it) and stays resident with 20h paragraphs */
         r.dx = 0x20;
         res = call(&r, 0x3100);
-        CHECK(res == DOS21_SWITCH && m.psp == psp && r.cs == psp && r.ip == 0x200, "31h back %d %04x:%04x", res,
+        CHECK(res == DOS21_SWITCH && dos_cur_psp(&m) == psp && r.cs == psp && r.ip == 0x200, "31h back %d %04x:%04x", res,
               r.cs, r.ip);
         CHECK(w(lin(c - 1, 1)) == c && w(lin(c - 1, 3)) == 0x20, "31h: its block kept, 20h paragraphs (%x)",
               w(lin(c - 1, 3)));
@@ -697,7 +717,7 @@ int main(void)
     CHECK(res == DOS21_END, "INT 20h");
     /* ... one from the kernel's memory, which leaves a file open when its machine goes */
     res = dos_m_start_image(&m, "HELLO", com, sizeof com, " k", &r);
-    psp = m.psp;                                /* (a paragraph lower: its environment's name is shorter) */
+    psp = dos_cur_psp(&m);                                /* (a paragraph lower: its environment's name is shorter) */
     CHECK(res == 0 && r.cs == psp && !memcmp(mem + lin(psp, 0x100), com, sizeof com), "an image %d", res);
     {
         unsigned long e = lin(w(lin(psp, 0x2C)), 0);

@@ -41,8 +41,9 @@
 #define EFL_ZF    0x00000040u
 #define EFL_TF    0x00000100u
 #define EFL_VIF   0x00080000u
-#define C23_SEG   0x005Fu               /* INT 23h's way back to GLOS: an ARPL at 005F:0006 (DOS's bytes: dos21.h) */
-#define C23_OFF   0x0006u
+#define C23_SEG   0x005Eu               /* INT 23h's way back to GLOS: an ARPL at 005E:0004 (the layout's misc + 4:
+                                           dos21.h) */
+#define C23_OFF   0x0004u
 
 void vm_enter(struct trapframe *tf) __attribute__((noreturn));
 
@@ -662,7 +663,7 @@ struct ndm *ndm_start(struct fsv_vol *v, const char *path, const u8 *image, u32 
         m->mem[STUB_SEG * 16 + 2 * i] = 0x63, m->mem[STUB_SEG * 16 + 2 * i + 1] = 0xC0;
     }
     bda(m);
-    dos_m_init(&m->dos, m->mem, LOW_END, v, 2, 437);
+    dos_m_init(&m->dos, m->mem, LOW_END, &dos_layout_machine, v, 2, 437);
     m->dos.out = dos_out, m->dos.now = dos_now, m->dos.ctx = m;
     m->dos.wait = key_wait, m->dos.idle = key_idle;
     m->mem[C23_SEG * 16 + C23_OFF] = 0x63, m->mem[C23_SEG * 16 + C23_OFF + 1] = 0xC0;
@@ -694,7 +695,7 @@ struct ndm *ndm_start(struct fsv_vol *v, const char *path, const u8 *image, u32 
     m->t->space = m->space;
     m->t->vif = 1;
     fpu_fork(m->t);
-    kprintf("GLOS-NDOS start prog=%s psp=%04x cs:ip=%04x:%04x\n", m->name, m->dos.psp, r.cs, r.ip);
+    kprintf("GLOS-NDOS start prog=%s psp=%04x cs:ip=%04x:%04x\n", m->name, dos_cur_psp(&m->dos), r.cs, r.ip);
     {
         u32 fl = irq_save();
 

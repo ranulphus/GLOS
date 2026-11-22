@@ -21,14 +21,23 @@ struct dos_regs86 {
     unsigned flags;                     /* CF (bit 0), ZF (bit 6): the answer's; the rest as they came */
 };
 
-#define DOS_SFT_LIN   0x0800ul          /* the system file table: 0080:0000 (40 entries: to 113Dh) */
-#define DOS_FILES     40u               /* its entries ([dos] files' default) */
-#define DOS_LOL_LIN   0x0540ul          /* the List of Lists (52h): 052Eh-05A0h (its words before it too) */
-#define DOS_DATA_LIN  0x05F0ul          /* DOS's own bytes, the swappable data area (5D06h): 05F0h the critical-error
-                                           flag, 05F1h InDOS (34h), 05F2h an empty DBCS table (63h), 05F4h a RETF
-                                           (38h's case map) */
-#define DOS_ROOT_PSP  0x0118u           /* the root process's PSP: 1180h-127Fh, in DOS's area */
-#define DOS_FIRST_MCB 0x0128u           /* the memory chain's first MCB (the root's environment its first block) */
+#define DOS_FILES     40u               /* the file table's entries ([dos] files' default) */
+#define DOS_SDA_SIZE  0x30u             /* the swappable data area's bytes (5D06h) */
+
+/* Where a machine's DOS keeps its tables (linear addresses; segments in paragraphs). A native machine's are
+   dos_layout_machine's, in its DOS area (0500h-1280h); the system VM's on a native boot are after the loader's
+   memory (kernel/vm/vdos.c). */
+struct dos_layout {
+    unsigned long lol;                  /* the List of Lists (52h; its words from lol - 12h) */
+    unsigned long sda;                  /* the swappable data area in DOS's layout: 00h the critical-error flag,
+                                           01h InDOS (34h), 0Ch the DTA, 10h the current PSP, 16h the current drive */
+    unsigned long misc;                 /* an empty DBCS table (63h), +2 a RETF (38h's case map), +4 two bytes
+                                           the machine may use (ndm.c: its INT 23h's ARPL) */
+    unsigned long sft;                  /* the file table: DOS_FILES entries */
+    unsigned root_psp;                  /* the root process's PSP (its own parent) */
+    unsigned first_mcb, low_top;        /* the memory chain: its first MCB, its end (A000h) */
+};
+extern const struct dos_layout dos_layout_machine;
 
 struct dos_m {
     unsigned char *mem;                 /* the machine's memory from its address 0 */
@@ -38,8 +47,7 @@ struct dos_m {
     struct dos_cds cds;
     struct fsv_vol *vol[DOS_DRIVES];    /* each drive's volume, 0: none */
     int cp;                             /* its code page */
-    unsigned psp;                       /* the running program's */
-    unsigned dta_seg, dta_off;
+    struct dos_layout lay;              /* (the running program's PSP and its DTA are the SDA's: dos_cur_psp) */
     long time_offset;                   /* its own clock's offset from GLOS's (2Bh, 2Dh) */
     unsigned long (*now)(void *ctx);    /* GLOS's local time: seconds since 1980 */
     void (*out)(void *ctx, const char *s, unsigned n);  /* CON's output */
@@ -85,7 +93,11 @@ int dos_ctrl_c_end(struct dos_m *m, struct dos_regs86 *r);
 /* The machine's DOS made in its memory (size bytes from mem): the vector table is the caller's (ndm.c points
    every vector at its ARPL) and kept from 0 to 3FFh, DOS's data, the file table, the root PSP and its
    environment, the memory chain; drive (2: C:) volume v, the current drive. */
-void dos_m_init(struct dos_m *m, unsigned char *mem, unsigned long size, struct fsv_vol *v, int drive, int cp);
+void dos_m_init(struct dos_m *m, unsigned char *mem, unsigned long size, const struct dos_layout *lay,
+                struct fsv_vol *v, int drive, int cp);
+
+/* The running program's PSP, as the SDA has it (a writer of the SDA, as an app's switch is, is obeyed). */
+unsigned dos_cur_psp(struct dos_m *m);
 
 /* A program started as the root's child (the kernel's: NDOS RUN): path on the machine's drives, its tail. 0 with
    *r its first registers, or a DOS error. */
