@@ -53,6 +53,8 @@ void vm_user_exit(struct trapframe *tf);        /* every way out (trap_exit), to
 void vm_exception(struct trapframe *tf);
 int vm_gp_fast(struct trapframe *tf);           /* a #GP from V86 code that needs only its instruction done: 1, done */
 void vm_return(struct trapframe *tf);
+void ndm_exception(struct trapframe *tf);       /* a native machine's (kernel/vm/ndm.c) */
+void ndm_return(struct trapframe *tf);
 
 extern u32 cpu_cr4_bits;        /* CR4 bits that stick (0 without CR4) */
 extern int cpu_has_cr4;

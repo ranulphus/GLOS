@@ -45,11 +45,12 @@ struct thread {
     u8 front;                           /* woken, it goes first in its class, whatever it has run (the VM thread) */
     u8 ahead;                           /* in a run queue: it goes first */
     u32 vrun;                           /* the normal class: ticks it has run, from the class's floor when it began */
-    void *ctx;                          /* ... in this DPMI context (struct dpmi_ctx), or 0 */
+    void *ctx;                          /* ... in this DPMI context (struct dpmi_ctx), or 0; TU_NDOS: its machine */
+    u32 space;                          /* TU_NDOS: its machine's address space (a page directory) */
     u8 *fpu;                            /* ... and its FPU state (FNSAVE's 108 bytes) while it isn't in the FPU */
 };
 
-enum { TU_NONE, TU_VM, TU_APP };
+enum { TU_NONE, TU_VM, TU_APP, TU_NDOS };     /* TU_NDOS: a native machine's V86 code (kernel/vm/ndm.c) */
 
 struct waitq {
     struct thread *head;

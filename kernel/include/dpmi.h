@@ -154,6 +154,7 @@ struct thread;
 extern struct dpmi_ctx *dctx;           /* the context loaded: the running thread's own (VM and app threads), or 0 */
 void dpmi_ctx_load(struct dpmi_ctx *c); /* another one (or none) loaded: page directory, LDT, watchpoints */
 void dpmi_user_init(struct thread *vm); /* the switch hook, and the FPU as the VM thread's */
+void dpmi_native_leave(void);           /* the kernel's space back if a native machine's is loaded (kernel/vm/ndm.c) */
 void fpu_fork(struct thread *t);        /* a new thread's FPU state: the running one's, as it is */
 void fpu_drop(struct thread *t);        /* the thread is ending */
 u32 dpmi_stat(char *buf, u32 max);      /* glos stat: the context as a JSON object, or null */

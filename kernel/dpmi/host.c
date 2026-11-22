@@ -120,20 +120,54 @@ void fpu_drop(struct thread *t)
         fpu_owner = 0;
 }
 
+/* A native machine's space loaded (TU_NDOS: kernel/vm/ndm.c): its own first MB at 0. While it is, every switch
+   to another thread loads that thread's space, or the kernel's for a kernel thread, which reach the system VM's
+   first MB at 0 too (vm_ptr's alias aside). native.cr3 is the loaded machine's; it has no LDT, no watchpoints. */
+static struct dpmi_ctx native;
+static u8 native_loaded;
+
 void dpmi_ctx_load(struct dpmi_ctx *c)
 {
-    if (c == dctx)
+    if (c == dctx && !native_loaded)
         return;
     dctx = c;
+    native_loaded = 0;
     mm_space_enter(c ? c->cr3 : 0);
     cpu_set_ldt(c ? c->ldt : 0, c ? LDT_ENTRIES * 8 - 1 : 0);
     wp_load();
 }
 
+static void native_load(u32 space)
+{
+    if (native_loaded && native.cr3 == space)
+        return;
+    native.cr3 = space;
+    dctx = &native;
+    native_loaded = 1;
+    mm_space_enter(space);
+    cpu_set_ldt(0, 0);
+    wp_load();
+}
+
+/* The kernel's own space back, if a native machine's is loaded (its thread, before it frees that space). */
+void dpmi_native_leave(void)
+{
+    if (native_loaded)
+        dpmi_ctx_load(0);
+}
+
 static void user_switch(struct thread *next)
 {
-    if (!next->user)
+    if (next->user == TU_NDOS) {
+        native_load(next->space);
+        cpu_io_reach(0);                        /* no port is a native machine's: every IN and OUT traps */
+        fpu_switch(next);
         return;
+    }
+    if (!next->user) {
+        dpmi_native_leave();                    /* (a kernel thread: never a native machine's memory at 0) */
+        return;
+    }
     dpmi_ctx_load(next->ctx);
     cpu_io_reach(next->user != TU_APP);         /* an app reaches no port: every IN and OUT traps */
     fpu_switch(next);

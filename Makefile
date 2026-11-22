@@ -84,7 +84,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: census rbil fat-test fat-test-run floppy loopa-floppy loopa-joy loopa-int2f loopa-cache loopa-mem-page loopa-umaprobe loopa-umb sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
+.PHONY: census rbil fat-test fat-test-run floppy loopa-floppy loopa-ndos loopa-joy loopa-int2f loopa-cache loopa-mem-page loopa-umaprobe loopa-umb sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN build/glos/COMMAND.COM
 
 help:
@@ -576,7 +576,7 @@ KCFLAGS := -m32 -march=i486 -ffreestanding -fno-pic -fno-pie -fno-stack-protecto
            -Ithird_party/lwip/src/include -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint -Ikernel/ssh \
            -I$(RETROGPU)/hal/include
 KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/arch/mtrr.c kernel/core/main.c kernel/core/timer.c \
-         kernel/core/sched.c kernel/drv/pci.c kernel/drv/dev.c kernel/drv/devlist.c kernel/drv/cstore.c kernel/drv/cache.c kernel/drv/ata.c kernel/drv/ide.c kernel/drv/nic.c kernel/drv/ne2k.c kernel/drv/rtl8139.c kernel/drv/e100.c \
+         kernel/core/sched.c kernel/drv/pci.c kernel/drv/dev.c kernel/drv/devlist.c kernel/drv/cstore.c kernel/drv/cache.c kernel/drv/ata.c kernel/drv/ide.c kernel/vm/ndm.c kernel/vm/ndcmd.c kernel/ndos/exe.c kernel/ndos/dtime.c kernel/fs/fat.c kernel/fs/fsv.c kernel/ndos/psp.c kernel/drv/nic.c kernel/drv/ne2k.c kernel/drv/rtl8139.c kernel/drv/e100.c \
          kernel/net/net.c kernel/net/sock.c kernel/lib/libc.c \
          kernel/core/random.c kernel/core/kat.c kernel/ssh/ssh.c kernel/ssh/sshbuf.c kernel/ssh/sshkeys.c \
          kernel/ssh/sshd.c \
@@ -699,6 +699,8 @@ loopa-xfer: all dos-tests check-deps
 loopa-api: all build/dj/APITEST.EXE build/dj/JOBTOOL.EXE build/dj/GDBME.EXE doslfn check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py api -j $(JOBS)
 # An app's own threads (phase B step 4): THRTEST through the agent.
+loopa-ndos: all dos-tests check-deps
+	$(Q)$(DEV) python3 tests/loopa/jobs.py ndos -j $(JOBS)
 loopa-thr: all dos-tests build/dj/THRTEST.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py thr -j $(JOBS)
 loopa-mem-page: all dos-tests build/dj/UMAPROBE.EXE build/dj/NESTRM.EXE check-deps

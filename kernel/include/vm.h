@@ -5,6 +5,7 @@
 #ifndef K_VM_H
 #define K_VM_H
 #include "arch.h"
+#include "mm.h"
 #include "sched.h"
 #include "vpic.h"
 
@@ -134,8 +135,10 @@ void vm_reset_req(const char *source);
 int vm_idle_headless(void);                     /* the stub waits, nothing runs and no desktop: the idle screen */
 u16 vm_current_psp(void);
 
-/* low memory (identity-mapped, 0-10FFFFh) */
-static inline u8 *vm_ptr(u32 lin) { u8 *p; __asm__("" : "=r"(p) : "0"(lin)); return p; }
+/* The system VM's low memory (0-10FFFFh), through the kernel's alias of its page table (VMLOW_BASE), so that it
+   is the system VM's in every address space: a native machine's own first MB is at 0 only while its thread
+   runs (docs/v1/native-dos.md, native-DOS sessions). */
+static inline u8 *vm_ptr(u32 lin) { return (u8 *)(VMLOW_BASE + lin); }
 static inline u32 vm_lin(u32 seg, u32 off) { return ((seg & 0xFFFF) << 4) + (off & 0xFFFF); }
 static inline u8 vm_rd8(u32 lin) { return *vm_ptr(lin); }
 static inline u16 vm_rd16(u32 lin) { return (u16)(vm_rd8(lin) | (vm_rd8(lin + 1) << 8)); }

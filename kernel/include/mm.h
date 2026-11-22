@@ -17,6 +17,9 @@ struct bootinfo;
 #define DEV_MAX     0x02800000u         /* 40 MB: a G450's 32 MB and its registers */
 #define CACHE_BASE  0xC6800000u         /* mm_cache_map's: the disk cache's tables (after DEV_BASE's 40 MB) */
 #define CACHE_MAX   0x01000000u         /* 16 MB of addresses: 20 bytes a frame, for up to 3 GB */
+#define VMLOW_BASE  0xC7800000u         /* the system VM's first 4 MB (PDE 0's table, kpt_low) as the kernel reaches
+                                           it from every address space: vm_ptr's (a native machine's own first MB
+                                           is at 0 while its thread runs: docs/v1/native-dos.md) */
 #define RECURSIVE   0xFFC00000u         /* PDE 1023 maps the page directory itself */
 
 void mm_init(struct bootinfo *bi);
@@ -51,6 +54,9 @@ void mm_set_a20(int on);                /* 100000h-10FFFFh: the HMA, or wrapped 
 u32 mm_space_new(void);                 /* a page directory with the kernel's PDEs; 0 without memory */
 void mm_space_free(u32 pd_phys);        /* not the current one: its page tables and itself */
 void mm_space_enter(u32 pd_phys);       /* CR3; 0: the kernel's own */
+u32 mm_space_new_low(u32 *frames, u32 n);       /* a native machine's: PDE 0 its own table over n fresh zeroed
+                                                   frames from 0 (into frames[]); 0 without memory */
+void mm_space_free_low(u32 pd_phys);    /* ... and freed (not while loaded) */
 int mm_map(u32 lin, u32 phys, u32 flags);       /* one page in the current space; -1 without memory */
 u32 mm_unmap(u32 lin);                  /* the frame that was there, or 0 */
 u32 mm_lookup(u32 lin);                 /* the PTE, 0 if none */

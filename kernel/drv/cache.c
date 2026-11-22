@@ -948,6 +948,8 @@ int cache_int13(struct trapframe *from, struct rmregs *cr, int kind)
 
 int cache_busy(void) { return c.busy_at && rm_nesting() >= c.busy_at; }
 
+int cache_trapping(void) { return c.trapped && !c.direct; }
+
 void cache_nest_ended(int depth)
 {
     if (c.busy_at && c.busy_at >= depth) {      /* the cache's call is gone with them: what it left is dropped */

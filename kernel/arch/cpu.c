@@ -302,7 +302,9 @@ void double_fault(void)
    INT 21h 4Ch), so the frame says which. */
 static void back_to_user(struct trapframe *tf)
 {
-    if (tf->eflags & EFLAGS_VM)
+    if ((tf->eflags & EFLAGS_VM) && current->user == TU_NDOS)
+        ndm_return(tf);                         /* (a native machine: kernel/vm/ndm.c) */
+    else if (tf->eflags & EFLAGS_VM)
         vm_return(tf);
     else
         dpmi_return(tf);
@@ -345,6 +347,13 @@ static void dispatch(struct trapframe *tf)
         sched_trap_exit(tf);
         if ((tf->eflags & EFLAGS_VM) || (tf->cs & 3))
             back_to_user(tf);
+        return;
+    }
+    if ((tf->eflags & EFLAGS_VM) && current->user == TU_NDOS) {     /* from a native machine */
+        ndm_exception(tf);
+        kprintf_pump(LOG_TURN);
+        sched_trap_exit(tf);
+        back_to_user(tf);
         return;
     }
     if (tf->eflags & EFLAGS_VM) {                       /* from the system VM */

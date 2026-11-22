@@ -39,6 +39,7 @@
 #include "pci.h"
 #include "keymap.h"
 #include "diskcmd.h"
+#include "ndcmd.h"
 #include "dos.h"
 #include "dpmi.h"
 #include "gdbprog.h"
@@ -1053,6 +1054,23 @@ static int disk_turn(struct ssh_chan *ch, void *arg)
 
 static void disk_drop(void *arg) { diskcmd_free(arg); }
 
+/* glos ndos (the shell's NDOS: kernel/vm/ndcmd.c): a native machine's volume and programs; what they say as they
+   say it, the command's exit code (a program's: its 4Ch). */
+static int ndos_turn(struct ssh_chan *ch, void *arg)
+{
+    char b[512];
+    u32 n;
+    int code = 0, done = ndcmd_done(arg, &code);        /* (asked first: what it said before its end is all read) */
+    while ((n = ndcmd_read(arg, b, sizeof b)) != 0)
+        ssh_chan_write(ch, 0, (const uint8_t *)b, n);
+    if (!done)
+        return 0;
+    ssh_chan_exit(ch, (uint32_t)code);
+    return 1;
+}
+
+static void ndos_drop(void *arg) { ndcmd_free(arg); }
+
 static void gdb_send(const u8 *d, u32 n)
 {
     if (gdb_chan)
@@ -1688,6 +1706,14 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             if (d)
                 diskcmd_free(d);
             say(ch, 1, "glos disk: another DISK or DD command is under way\n");
+            ssh_chan_exit(ch, 1);
+        }
+    } else if (!strcmp(cmd, "glos ndos") || !strncmp(cmd, "glos ndos ", 10)) {
+        struct ndcmd *nc = ndcmd_start(cmd[9] ? cmd + 10 : "", wake_ssh);
+        if (!nc || stream_add(ch, ndos_turn, ndos_drop, nc) != 0) {
+            if (nc)
+                ndcmd_free(nc);
+            say(ch, 1, "glos ndos: another NDOS command is under way\n");
             ssh_chan_exit(ch, 1);
         }
     } else if (!strncmp(cmd, "glos disktest ", 14)) {

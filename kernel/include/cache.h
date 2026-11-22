@@ -12,6 +12,7 @@ void cache_resident(u32 buf_lin);       /* the stub has gone resident: its block
 int cache_int13(struct trapframe *from, struct rmregs *r, int kind);
                                         /* an INT 13h (V86: from 0, RM_INT; protected mode: rm_call's): 1 if the
                                            cache made it and r holds what it returns */
+int cache_trapping(void);               /* every INT 13h is the cache's to make (on, verify, count; not direct) */
 int cache_busy(void);                   /* inside the BIOS for an INT 13h the cache makes: no kill, no posted work */
 void cache_nest_ended(int depth);       /* rm_nest_end: the nested calls from depth on are gone */
 void cache_port_out(u16 port, u8 v);    /* a write to a trapped port (vdev.c): a watched IDE command register? */

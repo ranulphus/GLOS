@@ -454,7 +454,18 @@ second V86 machine, the one N6 needs anyway. What it is:
     (`GLOS-NDOS unanswered`) and refused; a .COM loaded from a GLOS-mounted volume; the shell's `NDOS FORMAT`,
     `NDOS COPY` (from a hosted drive onto the native volume: two volumes, one writer each) and `NDOS RUN`,
     the program's output on the shell's terminal and its exit code back. Loop A: a test .COM run, its words
-    and code checked.
+    and code checked. **Built 2026-11-22**, in three parts: (a) the system VM's low memory reached by
+    the kernel through an alias of its page table (`VMLOW_BASE`: `vm_ptr`), so that it is the system VM's from
+    every address space (dpmi, console, cache and sess suites unchanged); (b) the machine, `kernel/vm/ndm.c`:
+    `TU_NDOS` threads, its first MB of fresh frames (`mm_space_new_low`), loaded by `user_switch` and left for
+    the kernel's at any switch to a kernel thread, its traps routed by `dispatch` and `back_to_user`, every vector
+    at an ARPL, INT 21h 02h, 09h, 30h (7.10) and 4Ch and INT 20h answered; (c) `NDOS` (`kernel/vm/ndcmd.c`):
+    `DISKS`, `FORMAT n` (one partition of a hidden FAT type, so the DOS beside GLOS gives it no letter; only a
+    blank disk or a native one), `DIR`, `COPY` (from a DOS drive through the DOS server), `RUN N:\path tail` and
+    `RUN HELLO`; the native volume's disk read and written by GLOS's IDE driver only as work posted to the VM
+    thread, never inside the BIOS's INT 13h (and so refused while the cache is off). `loopa-ndos` on the bf6 (VME)
+    and the 486 (none): HELLO six times (its words, 42, the memory back each time), the scratch disk made native,
+    a program copied there from C: and run with its tail (its words, its exit code 4).
   - **NS2, the groundwork wired:** files, paths, searches, PSPs, EXEC of .COM and .EXE, memory, date and time
     (`kernel/ndos/`); Loop A: test programs of GLOS's own (Open Watcom), the census's programs.
   - **NS3, the console and the clock:** INT 16h and 10h's teletype, cooked input, Ctrl-C, INT 23h and 24h, the

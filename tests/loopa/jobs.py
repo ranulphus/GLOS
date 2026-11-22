@@ -7180,6 +7180,88 @@ def api_sched_case(profile, card):
     return "  %-22s %s%s" % ("apisched-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
 
 
+def ndos_nhello():
+    """NHELLO.COM for the ndos suite: "Loaded from the native volume:" and its command tail by 09h and 02h, then 4Ch
+    with the tail's length (PSP:80h)."""
+    msg, crlf = b"Loaded from the native volume:$", b"\r\n$"
+    body = [b"\xB4\x09", b"\xBA", None, b"\xCD\x21",                 # mov ah,9; mov dx,msg; int 21h
+            b"\xBE\x81\x00", b"\x8A\x0E\x80\x00", b"\x30\xED",       # mov si,81h; mov cl,[80h]; xor ch,ch
+            b"\xE3\x09",                                          # jcxz done (the loop's 9 bytes)
+            b"\xAC\x88\xC2\xB4\x02\xCD\x21\xE2\xF7",                # next: lodsb; mov dl,al; ah=2; int 21h; loop
+            b"\xB4\x09", b"\xBA", None, b"\xCD\x21",                 # done: mov ah,9; mov dx,crlf; int 21h
+            b"\xA0\x80\x00", b"\xB4\x4C\xCD\x21"]                   # mov al,[80h]; mov ah,4Ch; int 21h
+    size = sum(2 if p is None else len(p) for p in body)
+    at_msg = 0x100 + size
+    at_crlf = at_msg + len(msg)
+    out, k = b"", 0
+    for p in body:
+        if p is None:
+            p = (at_msg if k == 0 else at_crlf).to_bytes(2, "little")
+            k += 1
+        out += p
+    return out + msg + crlf
+
+
+def ndos_case(profile, card):
+    """A native machine (docs/v1/native-dos.md, native-DOS sessions, NS1: kernel/vm/ndm.c): GLOS's second V86 machine,
+    no DOS under it, its INT 21h GLOS's own. Through the agent, twice (the first machine's memory and thread
+    gone before the next): NDOS's test program HELLO writes by 09h and 02h, asks 30h (7.10), ends by 4Ch with
+    42; what it wrote comes back as the command's output, 42 as its exit code; nothing unanswered; the system VM
+    goes on as before (VER), and GLOS's free memory is what it was."""
+    tag = "%s-%s" % (profile, card)
+    prog = os.path.join(ROOT, "out", "bat", "ndos", "NHELLO.COM")
+    os.makedirs(os.path.dirname(prog), exist_ok=True)
+    open(prog, "wb").write(ndos_nhello())
+    agent = Agent("ndos-" + tag, profile, card, ["--scratch-hdd", "64", "--file", prog + "=/TEST/NHELLO.COM",
+                                                 "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"],
+                  timeout=900)
+    want = "Hello from GLOS's own DOS\r\n!7.10\r\n"
+    checks, info = {"listen": agent.listening()}, ""
+
+    def mem():                                  # free and the disk cache's (which gives its frames back at need)
+        t = agent.ssh("glos mem")[1]
+        f, c = re.search(r"free_kb=(\d+)", t), re.search(r"cache kb=(\d+)", t)
+        return int(f.group(1)) + (int(c.group(1)) if c else 0) if f else -1
+    try:
+        if checks["listen"]:
+            runs = [agent.ssh("glos ndos run hello")]       # (a first run: the heap grows to its size once)
+            before = mem()
+            runs += [agent.ssh("glos ndos run hello") for _ in range(5)]
+            after = mem()
+            ver = agent.ssh("ver")
+            # NS1c: a native volume on the scratch disk, a program copied onto it from C:, run from it.
+            disks = agent.ssh("glos ndos disks")[1]
+            blank = re.search(r"^(\d+) ata \d+ MB .* blank\r?$", disks, re.M)
+            n = blank.group(1) if blank else "9"
+            fmt = agent.ssh("glos ndos format " + n)
+            disks2 = agent.ssh("glos ndos disks")[1]
+            cp = agent.ssh("glos ndos copy C:\\TEST\\NHELLO.COM N:\\NHELLO.COM")
+            ls = agent.ssh("glos ndos dir N:\\")
+            nrun = agent.ssh("glos ndos run N:\\NHELLO.COM abc")
+            checks["format"] = bool(blank) and fmt[0] == 0 and "a native volume" in fmt[1] \
+                and re.search(r"^%s ata .* native\r?$" % n, disks2, re.M) is not None
+            checks["copy"] = cp[0] == 0 and "NDOS COPY: %d bytes" % len(ndos_nhello()) in cp[1] and "NHELLO.COM" in ls[1]
+            checks["native-run"] = nrun[0] == 4 and nrun[1] == "Loaded from the native volume: abc\r\n"
+            info += " disks=%r run=%r/%d" % (disks.replace("\r", "")[:120], nrun[1][:60], nrun[0])
+            if not checks["copy"]:
+                info += " copy=%r/%d dir=%r" % (cp[1][:80], cp[0], ls[1][:160])
+            checks["runs"] = all(r[0] == 42 and r[1] == want for r in runs)
+            checks["memory"] = before > 0 and after >= before - 64   # (a machine's 640 KB a run can't hide in 64; a
+                                                                    # dead thread's stack not yet freed may)
+            checks["vm"] = ver[0] == 0 and "GLOS shell" in ver[1]
+            info = " free_kb=%d->%d out=%r" % (before, after, runs[0][1][:60]) + info
+            agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["log"] = text.count("GLOS-NDOS start prog=HELLO") == 6 \
+        and text.count("GLOS-NDOS end prog=HELLO code=42 why=int21-4c unanswered=0") == 6
+    checks["clean"] = "GLOS-EXIT code=0" in text and "GLOS-PANIC" not in text and "GLOS-NDOS fault" not in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % ("ndos-" + tag, "PASS" if not bad else "FAIL", info,
+                               "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 def thr_case(profile, card):
     """An app's own threads (API 2.0's THREAD, phase B step 4; tests/api/thrtest.c, docs/supervisor.md 12.7),
     THRTEST through the agent: every case of its own (threads computing, allocating and doing file I/O at once; a
@@ -11895,7 +11977,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
                                       "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time", "netapp", "https", "sshc", "pkg", "vnc", "cache",
-                                      "umaprobe", "mem-page", "int2f", "umb", "joy", "xfer", "api", "thr", "floppy"])
+                                      "umaprobe", "mem-page", "int2f", "umb", "joy", "xfer", "api", "thr", "floppy", "ndos"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -12140,6 +12222,9 @@ def main():
             res += matrix(api_dbg_case, wins, a.jobs)   # ... and a program debugged
             res += matrix(api_sec_case, wins, a.jobs)   # ... and secrets kept
         return 0 if all(r[1] for r in res) else 1
+    if a.suite == "ndos":                       # (native machines: the bf6 with VME, the 486 without)
+        cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
+        return 0 if all(r[1] for r in matrix(ndos_case, cases, a.jobs)) else 1
     if a.suite == "thr":                        # (an app's own threads: the bf6, and the 486)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(thr_case, cases, a.jobs)) else 1

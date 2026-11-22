@@ -207,6 +207,61 @@ void mm_space_free(u32 pd_phys)
 
 void mm_space_enter(u32 pd_phys) { write_cr3(pd_phys ? pd_phys : mm_cr3()); }
 
+/* A native machine's address space (docs/v1/native-dos.md, native-DOS sessions): the kernel's, but for PDE 0, a
+   page table of its own over n fresh frames from address 0, zeroed (their frames into frames[]). 0 without
+   memory. */
+u32 mm_space_new_low(u32 *frames, u32 n)
+{
+    u32 pd = mm_space_new(), pt = pd ? pmm_alloc() : 0, i;
+    u32 *p;
+
+    if (!pd || !pt || n > 1024) {
+        if (pt)
+            pmm_free(pt);
+        if (pd)
+            mm_space_free(pd);
+        return 0;
+    }
+    for (i = 0; i < n; i++) {
+        if (!(frames[i] = pmm_alloc())) {
+            while (i--)
+                pmm_free(frames[i]);
+            pmm_free(pt);
+            mm_space_free(pd);
+            return 0;
+        }
+        p = kmap(frames[i]);
+        memset(p, 0, PAGE_SIZE);
+        kunmap(p);
+    }
+    p = kmap(pt);
+    memset(p, 0, PAGE_SIZE);
+    for (i = 0; i < n; i++)
+        p[i] = frames[i] | PTE_P | PTE_W | PTE_U;
+    kunmap(p);
+    p = kmap(pd);
+    p[0] = pt | PTE_P | PTE_W | PTE_U;
+    kunmap(p);
+    return pd;
+}
+
+/* ... and freed: its first MB's frames and table, then the rest as mm_space_free does (never while it is the
+   loaded one). */
+void mm_space_free_low(u32 pd)
+{
+    u32 *p = kmap(pd), pt = p[0] & ~0xFFFu, i;
+
+    p[0] = kpd[0];                              /* (mm_space_free leaves PDE 0 alone) */
+    kunmap(p);
+    p = kmap(pt);
+    for (i = 0; i < 1024; i++)
+        if (p[i] & PTE_P)
+            pmm_free(p[i] & ~0xFFFu);
+    kunmap(p);
+    pmm_free(pt);
+    mm_space_free(pd);
+}
+
 /* The page table for lin in the current space, made if there is none: 0, or -1. */
 static int pt_for(u32 lin)
 {
@@ -613,6 +668,7 @@ void mm_init(struct bootinfo *bi)
         kpt_kernel[0x100 + pages + i] = (bits_phys + (i << 12)) | PTE_P | PTE_W;
     frame_bits = (u32 *)((u32)__kernel_start + pages * PAGE_SIZE);
     kpd[0] = kernel_phys(kpt_low) | PTE_P | PTE_W;
+    kpd[VMLOW_BASE >> 22] = kernel_phys(kpt_low) | PTE_P | PTE_W;     /* (the same table, the kernel's alone) */
     kpd[KERNEL_PDE] = kernel_phys(kpt_kernel) | PTE_P | PTE_W;
     kpd[HEAP_BASE >> 22] = kernel_phys(kpt_heap) | PTE_P | PTE_W;
     kpd[KMAP_BASE >> 22] = kernel_phys(kpt_kmap) | PTE_P | PTE_W;
