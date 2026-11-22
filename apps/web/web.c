@@ -354,7 +354,7 @@ static void d_title(void *c, const char *title)
 static struct wform {
     char action[600], method[8];
     int n;
-    struct { char kind[12], name[48], value[120]; } f[FIELDS];
+    struct { char kind[12], name[48], value[120], label[64]; int on; } f[FIELDS];
 } forms[FORMS];
 static int nforms;
 
@@ -372,7 +372,7 @@ static void d_form(void *c, const char *action, const char *method)
     forms[nforms++].n = 0;
 }
 
-static void d_field(void *c, const char *kind, const char *name, const char *value)
+static void d_field(void *c, const char *kind, const char *name, const char *value, const char *label, int on)
 {
     struct wform *f;
     (void)c;
@@ -381,6 +381,8 @@ static void d_field(void *c, const char *kind, const char *name, const char *val
     snprintf(f->f[f->n].kind, sizeof f->f[0].kind, "%s", kind);
     snprintf(f->f[f->n].name, sizeof f->f[0].name, "%s", name);
     snprintf(f->f[f->n].value, sizeof f->f[0].value, "%s", value);
+    snprintf(f->f[f->n].label, sizeof f->f[0].label, "%s", label);
+    f->f[f->n].on = on;
     f->n++;
 }
 
@@ -756,41 +758,79 @@ static void file_path(const char *url, char *out, unsigned room)       /* file:/
     out[n] = 0;
 }
 
-/* ---- a form filled in: its dialog (the fields one types in), then sent as GET sends it: the address the form
-   names, its query made of the fields' names and values (the hidden ones as the page gave them, the first
-   button's). A form sent by POST is not sent yet: the HTTP client asks by GET alone. */
+/* ---- a form filled in: its dialog, then sent. A box for each field one types in, a check box for each of its
+   check boxes, a choice for each group of radio buttons (by name) and each list; the page's values and choices
+   in them. Sent by GET (the pairs the query of the form's address) or POST (the pairs the body): the hidden
+   fields as the page gave them, the first button's, what was typed and chosen, a check box's value if it is
+   checked. */
 
 static int typed_kind(const char *k)
 {
     return !strcmp(k, "text") || !strcmp(k, "search") || !strcmp(k, "input") || !strcmp(k, "email") || !strcmp(k, "url")
-        || !strcmp(k, "tel") || !strcmp(k, "number") || !strcmp(k, "password") || !strcmp(k, "textarea")
-        || !strcmp(k, "select");
+        || !strcmp(k, "tel") || !strcmp(k, "number") || !strcmp(k, "password") || !strcmp(k, "textarea");
 }
 
-static struct gui_widget *ff_box[8];
-static char ff_got[8][120];
-static int ff_n;
+#define CONTROLS 12
+enum { W_TEXT, W_CHECK, W_GROUP };
+static struct control {
+    int kind;                           /* W_ */
+    struct gui_widget *w;
+    int field;                          /* the field (W_GROUP: its first: a radio button, or the list's "select") */
+    int n, idx[16];                     /* (W_GROUP) its choices' fields */
+    char got[120];                      /* -> what was typed (W_TEXT) */
+    int got_on, got_choice;             /* -> checked (W_CHECK), the choice (W_GROUP) */
+} ctl[CONTROLS];
+static int nctl;
 
 static void form_done(struct gui_widget *b, int what)
 {
     int i;
     (void)what;
-    if (b->id == 1)
-        for (i = 0; i < ff_n; i++)
-            snprintf(ff_got[i], sizeof ff_got[i], "%s", gui_get_text(ff_box[i]));
+    if (b->id == 1) {
+        for (i = 0; i < nctl; i++) {
+            if (ctl[i].kind == W_TEXT)
+                snprintf(ctl[i].got, sizeof ctl[i].got, "%s", gui_get_text(ctl[i].w));
+            else if (ctl[i].kind == W_CHECK)
+                ctl[i].got_on = gui_checked(ctl[i].w);
+            else
+                ctl[i].got_choice = gui_value(ctl[i].w);
+        }
+    }
     gui_end_modal(b->win, b->id == 1 ? GUI_OK : GUI_CANCEL_R);
 }
 
 static void go(const char *url, int push);
 static void go_post(const char *url, const char *body);
 
+static int group_of(const struct wform *f, const char *kind, const char *name)    /* a group's control, or -1 */
+{
+    int i;
+    for (i = 0; i < nctl; i++)
+        if (ctl[i].kind == W_GROUP && !strcmp(f->f[ctl[i].field].kind, kind) && !strcmp(f->f[ctl[i].field].name, name))
+            return i;
+    return -1;
+}
+
+static void add_pair(char *pairs, size_t room, const char *name, const char *value)
+{
+    char esc[400];
+    if (strlen(pairs) + 3 * strlen(name) + 3 * strlen(value) + 3 >= room)
+        return;
+    url_escape(name, esc, sizeof esc);
+    strcat(pairs, pairs[0] ? "&" : "");
+    strcat(pairs, esc);
+    strcat(pairs, "=");
+    url_escape(value, esc, sizeof esc);
+    strcat(pairs, esc);
+}
+
 static void form_fill(int k)
 {
     struct wform *f;
     struct gui_window *dlg;
     struct gui_widget *box, *form, *row;
-    char url[1600], esc[400], label[64], pairs[900];
-    int i, which[8], n, sent_button = 0;
+    char url[1600], label[120], pairs[900];
+    int i, c, sent_button = 0, last_select = -1;
     size_t at;
     if (k < 0 || k >= nforms || k >= FORMS) {
         say("form none %d", k);
@@ -802,51 +842,102 @@ static void form_fill(int k)
         gui_message(win, GUI_T("Form Not Sent"), GUI_T("This form is sent in a way the Web Reader does not know."), GUI_MB_OK);
         return;
     }
+    nctl = 0;                                   /* its controls, from its fields */
+    for (i = 0; i < f->n; i++) {
+        const char *kind = f->f[i].kind;
+        struct control *x = &ctl[nctl];
+        if (!strcmp(kind, "option")) {          /* (a choice of the list before it) */
+            if (last_select >= 0 && ctl[last_select].n < 16)
+                ctl[last_select].idx[ctl[last_select].n++] = i;
+            continue;
+        }
+        if (!strcmp(kind, "radio") && (c = group_of(f, "radio", f->f[i].name)) >= 0) {
+            if (ctl[c].n < 16)
+                ctl[c].idx[ctl[c].n++] = i;
+            continue;
+        }
+        if (nctl == CONTROLS || (!typed_kind(kind) && strcmp(kind, "checkbox") && strcmp(kind, "radio")
+                                  && strcmp(kind, "select")))
+            continue;
+        memset(x, 0, sizeof *x);
+        x->field = i;
+        x->kind = typed_kind(kind) ? W_TEXT : !strcmp(kind, "checkbox") ? W_CHECK : W_GROUP;
+        if (!strcmp(kind, "radio"))
+            x->idx[x->n++] = i;
+        if (!strcmp(kind, "select"))
+            last_select = nctl;
+        nctl++;
+    }
     dlg = gui_window(GUI_T("Fill In the Form"), 420, 0, GUI_W_DIALOG);
     dlg->owner = win;
     box = gui_vbox(dlg->root, 6, 8);
     form = gui_form(box);
-    for (i = n = 0; i < f->n && n < 8; i++) {
-        if (!typed_kind(f->f[i].kind))
+    for (c = 0; c < nctl; c++) {
+        struct control *x = &ctl[c];
+        const char *name = f->f[x->field].name;
+        if (x->kind == W_CHECK) {               /* (its name, and its value where it has one of its own) */
+            snprintf(label, sizeof label, strcmp(f->f[x->field].value, "on") ? "%.40s: %.60s" : "%.40s", name[0] ? name : "?",
+                     f->f[x->field].value);
+            x->w = gui_check(box, label, f->f[x->field].on);
             continue;
-        snprintf(label, sizeof label, "%.40s:", f->f[i].name[0] ? f->f[i].name : f->f[i].kind);
-        ff_box[n] = gui_field(gui_row(form, label, NULL), 30);
-        gui_set_text(ff_box[n], f->f[i].value);
-        which[n++] = i;
+        }
+        snprintf(label, sizeof label, "%.40s:", name[0] ? name : f->f[x->field].kind);
+        if (x->kind == W_TEXT) {
+            x->w = gui_field(gui_row(form, label, NULL), 30);
+            gui_set_text(x->w, f->f[x->field].value);
+        } else {
+            int j, chosen = 0;
+            x->w = gui_choice(gui_row(form, label, NULL), 24);
+            for (j = 0; j < x->n; j++) {
+                const char *t = f->f[x->idx[j]].label[0] ? f->f[x->idx[j]].label : f->f[x->idx[j]].value;
+                gui_choice_add(x->w, t[0] ? t : "?");
+                if (f->f[x->idx[j]].on)
+                    chosen = j;
+            }
+            gui_set_value(x->w, chosen);
+        }
     }
-    ff_n = n;
-    if (!n)
-        gui_label(box, GUI_T("The form has nothing to type in: Send sends it as it is."));
+    if (!nctl)
+        gui_label(box, GUI_T("The form has nothing to fill in: Send sends it as it is."));
     row = gui_hbox(box, 6, 0);
     gui_space(row, 0, 0);
     gui_button(row, GUI_T("Send"), form_done, 1)->flags |= GUI_DEFAULT;
     gui_button(row, GUI_T("Cancel"), form_done, 2)->flags |= GUI_CANCEL;
-    if (n)
-        gui_focus(ff_box[0]);
-    say("form %d fields=%d", k, n);
+    for (c = 0; c < nctl; c++)
+        if (ctl[c].kind == W_TEXT)
+            break;
+    if (c < nctl)
+        gui_focus(ctl[c].w);
+    say("form %d fields=%d", k, nctl);
     if (gui_modal(dlg) != GUI_OK) {
         say("form left");
         return;
     }
-    pairs[0] = 0;
+    pairs[0] = 0;                               /* what is sent, in the form's order */
     for (i = 0; i < f->n; i++) {
-        const char *v = f->f[i].value;
-        int j, pressed = !strcmp(f->f[i].kind, "submit") || !strcmp(f->f[i].kind, "image");
-        if (!f->f[i].name[0] || (!typed_kind(f->f[i].kind) && strcmp(f->f[i].kind, "hidden") && !pressed))
+        const char *kind = f->f[i].kind, *name = f->f[i].name;
+        int pressed = !strcmp(kind, "submit") || !strcmp(kind, "image");
+        if (!name[0])
             continue;
-        if (pressed && sent_button++)
-            continue;                           /* (the first button is the one pressed) */
-        for (j = 0; j < n; j++)
-            if (which[j] == i)
-                v = ff_got[j];
-        if (strlen(pairs) + 3 * strlen(f->f[i].name) + 3 * strlen(v) + 3 >= sizeof pairs)
-            break;
-        url_escape(f->f[i].name, esc, sizeof esc);
-        strcat(pairs, pairs[0] ? "&" : "");
-        strcat(pairs, esc);
-        strcat(pairs, "=");
-        url_escape(v, esc, sizeof esc);
-        strcat(pairs, esc);
+        if (!strcmp(kind, "hidden")) {
+            add_pair(pairs, sizeof pairs, name, f->f[i].value);
+            continue;
+        }
+        if (pressed) {
+            if (!sent_button++)                 /* (the first button is the one pressed) */
+                add_pair(pairs, sizeof pairs, name, f->f[i].value);
+            continue;
+        }
+        for (c = 0; c < nctl && ctl[c].field != i; c++)
+            ;
+        if (c == nctl)
+            continue;                           /* (an option, a radio button after its group's first) */
+        if (ctl[c].kind == W_TEXT)
+            add_pair(pairs, sizeof pairs, name, ctl[c].got);
+        else if (ctl[c].kind == W_CHECK && ctl[c].got_on)
+            add_pair(pairs, sizeof pairs, name, f->f[i].value);
+        else if (ctl[c].kind == W_GROUP && ctl[c].n && ctl[c].got_choice >= 0 && ctl[c].got_choice < ctl[c].n)
+            add_pair(pairs, sizeof pairs, name, f->f[ctl[c].idx[ctl[c].got_choice]].value);
     }
     if (!strcmp(f->method, "post")) {           /* POST: the pairs are the body, sent to the form's address */
         say("form %d sent post %s body %s", k, f->action, pairs);

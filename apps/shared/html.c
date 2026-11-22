@@ -91,7 +91,23 @@ struct reader {
     unsigned nbuf;
     int field_skip;                     /* in a <textarea> or <select>: what is in it is the field's, not the page's */
     int forms, in_form;                 /* forms begun so far; the one fields are in now (-1: none) */
+    /* (a sink of forms) a list's choices: the list's name; the choice whose words are being gathered */
+    int in_select, opt_open, opt_on, opt_valued;
+    char sel_name[48], opt_value[120], opt_text[120];
+    unsigned nopt;
 };
+
+static void option_end(struct reader *r)       /* the choice gathered told of */
+{
+    if (!r->opt_open)
+        return;
+    r->opt_open = 0;
+    while (r->nopt && r->opt_text[r->nopt - 1] == ' ')
+        r->nopt--;
+    r->opt_text[r->nopt] = 0;
+    if (r->s->field)
+        r->s->field(r->s->ctx, "option", r->sel_name, r->opt_valued ? r->opt_value : r->opt_text, r->opt_text, r->opt_on);
+}
 
 static int lower(int c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
 static int blank(int c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f'; }
@@ -144,6 +160,14 @@ static void begin_block(struct reader *r)       /* the block the text to come is
 static void put(struct reader *r, const char *text, unsigned n)        /* text (UTF-8, its references undone) in the page */
 {
     unsigned i;
+    if (r->opt_open && r->field_skip && !r->hidden) {   /* (a choice's words: its label) */
+        for (i = 0; i < n && r->nopt < sizeof r->opt_text - 1; i++)
+            if (!blank(text[i]))
+                r->opt_text[r->nopt++] = text[i];
+            else if (r->nopt && r->opt_text[r->nopt - 1] != ' ')
+                r->opt_text[r->nopt++] = ' ';
+        return;
+    }
     if (r->hidden || r->field_skip)
         return;
     if (r->in_title) {
@@ -445,8 +469,13 @@ static void pop(struct reader *r)       /* the innermost open element closed: wh
         if (r->s->title && !r->hidden)
             r->s->title(r->s->ctx, r->title);
     }
-    if (kind == K_FIELD)
+    if (kind == K_OPTION)
+        option_end(r);
+    if (kind == K_FIELD) {
         r->field_skip = 0;
+        option_end(r);
+        r->in_select = 0;
+    }
     r->style = o->style, r->colour = o->colour;
     r->depth = o->depth, r->head = o->head, r->quote = o->quote, r->pre = o->pre, r->list = o->list, r->in_link = o->in_link;
     r->hidden -= o->hidden;
@@ -519,6 +548,12 @@ static void start_tag(struct reader *r, int tag, const struct attr *a, int na, i
         close_kinds(r, K_ROW, K_TABLE);
     if (t->kind == K_OPTION)
         close_kinds(r, K_OPTION, K_FIELD);
+    if (t->kind == K_OPTION && r->in_select && !strcmp(t->name, "option")) {     /* (a sink of forms: a list's choice) */
+        const char *v = attr_of(a, na, "value");
+        option_end(r);
+        r->opt_open = 1, r->opt_on = attr_of(a, na, "selected") != NULL, r->nopt = 0, r->opt_valued = v != NULL;
+        snprintf(r->opt_value, sizeof r->opt_value, "%s", v ? v : "");
+    }
     if (t->kind == K_LINK)                      /* (a link within a link: the first has ended) */
         close_kinds(r, K_LINK, K_CELL);
     if (id && id[0] && r->s->anchor && !r->hidden && !hidden)
@@ -667,11 +702,18 @@ static void start_tag(struct reader *r, int tag, const struct attr *a, int na, i
         int forming = r->s->form && r->in_form >= 0;
         if (!strcmp(kind, "hidden")) {
             if (r->s->field && forming)         /* (a form's hidden field is sent with it) */
-                r->s->field(r->s->ctx, kind, name ? name : "", value ? value : "");
+                r->s->field(r->s->ctx, kind, name ? name : "", value ? value : "", "", 0);
             break;
         }
-        if (r->s->field && (!r->s->form || forming))  /* (a sink of forms: a form's fields alone) */
-            r->s->field(r->s->ctx, kind, name ? name : "", value && value[0] ? value : "");
+        if (r->s->field && (!r->s->form || forming)) {  /* (a sink of forms: a form's fields alone) */
+            int box = !strcmp(kind, "checkbox") || !strcmp(kind, "radio");
+            r->s->field(r->s->ctx, kind, name ? name : "", value && value[0] ? value : box ? "on" : "", "",
+                        box && attr_of(a, na, "checked") != NULL);
+        }
+        if (t->arg == 2 && forming) {           /* (a list: its choices told of as they come) */
+            r->in_select = 1;
+            snprintf(r->sel_name, sizeof r->sel_name, "%s", name ? name : "");
+        }
         if (t->arg == 1 || t->arg == 2)
             r->field_skip = 1;
         if (t->arg != 3) {                      /* (a button's own words are in it; the others are shown by a word) */

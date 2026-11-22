@@ -1,21 +1,26 @@
 # The Web Reader's forms (apps/web; phase F): a page of two forms, their fields' words links to their dialogs.
-# The first, sent by GET: its text field's word (its placeholder) followed, the dialog filled in and sent: the
-# address the form names, with its hidden field and the words typed as the query. The second, sent by POST: its
+# The first, sent by GET: its text field's word (its placeholder) followed, the dialog (a box to type in, a list,
+# a check box, a pair of radio buttons) filled in and sent: the address the form names, its query its hidden
+# field, the words typed, the list's choice, the box checked and the radio button chosen, as the page set them. The second, sent by POST: its
 # body made of its field (a file's address is read as it is: the POST itself is the https suite's, by WEB -dump).
 run WEB.EXE C:\WEB\FORM.HTM
 wait "A Form - Web Reader"
-said WEB loaded file:///C:/WEB/FORM.HTM title=A Form blocks=4 links=4
+said WEB loaded file:///C:/WEB/FORM.HTM title=A Form blocks=4 links=8
 key tab
 key enter
-said WEB form 0 fields=1
+said WEB form 0 fields=4
 wait "Fill In the Form"
 shot form "Fill In the Form"
 type hello there
 key enter
-said WEB form 0 sent file:///C:/WEB/RESULT.HTM?src=glos&q=hello+there
-said WEB loaded file:///C:/WEB/RESULT.HTM?src=glos&q=hello+there title=Found blocks=1 links=0
+said WEB form 0 sent file:///C:/WEB/RESULT.HTM?src=glos&q=hello+there&in=pics&safe=on&size=l
+said WEB loaded file:///C:/WEB/RESULT.HTM?src=glos&q=hello+there&in=pics&safe=on&size=l title=Found blocks=1 links=0
 key alt+left
-said WEB loaded file:///C:/WEB/FORM.HTM title=A Form blocks=4 links=4
+said WEB loaded file:///C:/WEB/FORM.HTM title=A Form blocks=4 links=8
+key tab
+key tab
+key tab
+key tab
 key tab
 key tab
 key tab

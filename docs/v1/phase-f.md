@@ -1567,7 +1567,13 @@ client asks by GET alone.
 - **Tests:** `web-form` (host and the emulated desktops): FORM.HTM's GET form sent with "hello there" (the
   address with `src=glos&q=hello+there`), its POST form refused; `html_test`'s form. (Disk Tools' image of
   C:\WEB: two pages more.)
-- **Not yet:** POST; check boxes and radio buttons; a list's own choices; fields typed in the page itself.
+- **Check boxes, radio buttons and lists** (later the same day): the reader tells of a check box or radio
+  button with whether it is checked, and of each of a list's choices after the list (its value, its words,
+  whether chosen); the dialog has a check box for each, a choice for each group of radio buttons (by name, its
+  values) and for each list (its choices' words). What is sent: a checked box's value, the radio button's and
+  the list's choice. html_test's lists and boxes; `web-form`'s first form has a list, a box and a pair.
+- **Not yet:** fields typed in the page itself; a radio button's or a box's own words (the page's text beside
+  it) as its label.
 
 ## MIDI Studio: the click and the count-in (2026-11-22)
 

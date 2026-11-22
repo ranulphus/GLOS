@@ -27,8 +27,11 @@ struct html_sink {
                                                            size the page says (0: not said) */
     void (*title)(void *ctx, const char *title);        /* the page's title */
     void (*anchor)(void *ctx, const char *name);        /* here is what "#name" leads to */
-    void (*field)(void *ctx, const char *kind, const char *name, const char *value);   /* a form's field (hidden ones
-                                                           too: shown as a word in brackets, the others) */
+    /* A form's field (hidden ones too: the others shown as a word in brackets): its kind ("text", "checkbox",
+       "select" ...), name and value; on: a check box or radio button checked. (Phase F, to a sink of forms:)
+       a list's choices too, each after its "select" as kind "option", the list's name, its value (its words if
+       it has none), label its words, on if it is chosen. */
+    void (*field)(void *ctx, const char *kind, const char *name, const char *value, const char *label, int on);
     /* (phase F) A form begins: where it is sent (made whole; "" the page's own address) and how ("get", "post").
        Given this, the reader shows a form's fields' words as links to "about:form?N", N the form's number on
        the page from 0 (a field's word its placeholder, or its name), and tells it of a form's fields alone. */

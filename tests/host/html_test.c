@@ -85,11 +85,14 @@ static void s_image(void *c, const char *src, const char *alt, int w, int h, con
 static void s_title(void *c, const char *title) { (void)c; note("%sTITLE:%s", ngot ? "\n" : "", title); }
 static void s_anchor(void *c, const char *name) { (void)c; note("@%s%s", name, " "); }
 
-static void s_field(void *c, const char *kind, const char *name, const char *value)
+static void s_field(void *c, const char *kind, const char *name, const char *value, const char *label, int on)
 {
     char t[300];
     (void)c;
-    snprintf(t, sizeof t, "FIELD(%s,%s,%s)", kind, name, value);
+    if (label[0] || on)
+        snprintf(t, sizeof t, "FIELD(%s,%s,%s,%s%s)", kind, name, value, label, on ? ",on" : "");
+    else
+        snprintf(t, sizeof t, "FIELD(%s,%s,%s)", kind, name, value);
     note("%s%s", t, "");
 }
 
@@ -173,6 +176,12 @@ int main(void)
     CHECK(!strcmp(got, "P0:[input]FORM(http://h/d/s?old=1,get)FIELD(hidden,h,1)FIELD(input,q,)\nP0:<about:form?0|[Words]>"
                        "FIELD(submit,,Go) <about:form?0|[Go]>FORM(http://h/d/p.html,post)FIELD(textarea,t,)\nP0:<about:form?1|[t]>"),
           "forms:\n  got  %s", got);
+    ngot = 0, got[0] = 0;
+    html_read("<form><select name=s><option value=a>A<option selected> B  b </select><input type=checkbox name=c checked>"
+              "<input type=radio name=r value=1></form>", 146, "", "http://h/d/p.html", &form_sink);
+    CHECK(!strcmp(got, "FORM(http://h/d/p.html,get)FIELD(select,s,)\nP0:<about:form?0|[s]>FIELD(option,s,a,A)"
+                       "FIELD(option,s,B b,B b,on)FIELD(checkbox,c,on,,on)<about:form?0|[c]>FIELD(radio,r,1)<about:form?0|[r]>"),
+          "lists and boxes:\n  got  %s", got);
     is("a form's fields",
        "<form action=/s><input type=text name=q value=\"hi\"><input type=submit value=\"Go\"> <select name=s><option>One<option>Two</select>"
        "<textarea name=t>typed &amp; kept</textarea><button>Press</button><input type=hidden name=h value=1><input></form>",
