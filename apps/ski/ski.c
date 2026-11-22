@@ -284,10 +284,93 @@ static void finished(void)
     }
 }
 
+/* The mouse over the slope (once it has moved there, until a key or the pad is used): the skier turns towards
+   the pointer, the left button tucks, the right one ploughs. */
+static int mouse_on, mouse_x, mouse_y;
+static unsigned mouse_buttons;
+
+static int field_event(struct gui_widget *w, struct gui_ev *e)
+{
+    int x = e->x - w->r.x, y = e->y - w->r.y;
+    if (e->type != GUI_EV_MOVE && e->type != GUI_EV_PRESS && e->type != GUI_EV_RELEASE)
+        return 0;
+    if (x < 0 || x >= FW || y < 0 || y >= FH) {         /* (off the slope: the tables' side is not steered from) */
+        mouse_buttons = e->type == GUI_EV_RELEASE ? e->buttons : mouse_buttons;
+        return 0;
+    }
+    if (!mouse_on && e->type == GUI_EV_MOVE && (abs(x - mouse_x) + abs(y - mouse_y) < 4))
+        return 0;                               /* (a still pointer the slope scrolled under is no wish) */
+    if (!mouse_on)
+        say("mouse steers");
+    mouse_on = 1;
+    mouse_x = x, mouse_y = y;
+    mouse_buttons = e->buttons;
+    return 1;
+}
+
+/* The skier's heading towards the pointer: -8 (across, leftwards) to 8, from where the skier is drawn. */
+static unsigned mouse_keys(void)
+{
+    static const int tan_x100[9] = { 0, 20, 41, 67, 100, 150, 241, 503, 100000 };     /* tan(h * 11.25 degrees) */
+    int px = run.x >> 8, cam_x = px - FW / 2, sx, dx, dy, want = 8, k;
+    unsigned keys = 0;
+    if (cam_x < 0)
+        cam_x = 0;
+    if (cam_x > SKI_WORLD_W - FW)
+        cam_x = SKI_WORLD_W - FW;
+    sx = px - cam_x;
+    dx = mouse_x - sx, dy = mouse_y - SKIER_ROW;
+    if (dy > 4)                                 /* (below the skier: the way down towards it) */
+        for (k = 0, want = 8; k < 8; k++)
+            if (abs(dx) * 100 < dy * (tan_x100[k] + tan_x100[k + 1]) / 2) {
+                want = k;
+                break;
+            }
+    if (dx < 0)
+        want = -want;
+    if (abs(dx) < 6 && dy > 4)
+        want = 0;
+    if (want < run.heading)
+        keys |= SKI_K_LEFT;
+    else if (want > run.heading)
+        keys |= SKI_K_RIGHT;
+    if (mouse_buttons & 1)
+        keys |= SKI_K_TUCK;
+    if (mouse_buttons & 2)
+        keys |= SKI_K_PLOUGH;
+    return keys;
+}
+
+/* A pad (the first plugged in): the stick steers, forwards tucks and back ploughs; its first button tucks, its
+   second ploughs. */
+static unsigned pad_keys(void)
+{
+    struct glos_pads p;
+    unsigned keys = 0;
+    int i;
+    memset(&p, 0, sizeof p);
+    p.size = sizeof p;
+    if (glos_pads(&p, 0) != 0)
+        return 0;
+    for (i = 0; i < GLOS_PADS && !p.pad[i].present; i++)
+        ;
+    if (i == GLOS_PADS)
+        return 0;
+    if (p.pad[i].lx < -40)
+        keys |= SKI_K_LEFT;
+    if (p.pad[i].lx > 40)
+        keys |= SKI_K_RIGHT;
+    if (p.pad[i].ly < -40 || (p.pad[i].buttons & 1))
+        keys |= SKI_K_TUCK;
+    if (p.pad[i].ly > 40 || (p.pad[i].buttons & 2))
+        keys |= SKI_K_PLOUGH;
+    return keys;
+}
+
 static unsigned keys_held(void)
 {
     struct glos_keys k;
-    unsigned keys = 0;
+    unsigned keys = 0, pad;
     memset(&k, 0, sizeof k);
     k.size = sizeof k;
     if (glos_keys(&k) != 0)
@@ -300,7 +383,14 @@ static unsigned keys_held(void)
         keys |= SKI_K_TUCK;
     if (GLOS_KEY_DOWN(&k, GUI_K_DOWN) || GLOS_KEY_DOWN(&k, 0x1F))       /* (S) */
         keys |= SKI_K_PLOUGH;
-    return keys;
+    pad = pad_keys();
+    if (keys || pad) {                          /* (the keys or the pad: the mouse no longer steers) */
+        if (mouse_on)
+            say("mouse steers no longer");
+        mouse_on = 0;
+        return keys | pad;
+    }
+    return mouse_on ? mouse_keys() : 0;
 }
 
 static unsigned keys_now;               /* (the keys of the step drawn: the skier's pose) */
@@ -852,7 +942,7 @@ static void build(void)
     m = gui_menu(bar, GUI_T("&Jacket"));
     for (i = 0; i < 5; i++)
         gui_menu_command(m, C_JACKET + i);
-    canvas = gui_canvas(win->root, FW + SW, FH, draw, NULL);
+    canvas = gui_canvas(win->root, FW + SW, FH, draw, field_event);
 }
 
 int main(int argc, char **argv)
@@ -881,6 +971,7 @@ int main(int argc, char **argv)
             until = atol(p);
             while ((p = strchr(p, ',')) != NULL && nuntils < 8)
                 untils[nuntils++] = atol(++p);
+            suite = 1;                  /* (a run of the player's too: every step that is due made, held at those) */
         }
         else if (!strcmp(argv[i], "-table") && i + 1 < argc)
             snprintf(table_path, sizeof table_path, "%s", argv[++i]);

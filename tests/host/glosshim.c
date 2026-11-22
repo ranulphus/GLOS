@@ -350,11 +350,13 @@ int glos_audio_devices(struct glos_audio_device *out, unsigned room, unsigned *c
     return 0;
 }
 
-/* (The pads: none plugged in.) */
+/* (The pads: none plugged in, but for the first while a script's `pad` has it there.) */
+static struct glos_pad script_pad;
 int glos_pads(struct glos_pads *p, int events)
 {
     (void)events;
     memset(p->pad, 0, sizeof p->pad);
+    p->pad[0] = script_pad;
     return 0;
 }
 
@@ -1927,6 +1929,18 @@ static int step(void)
             return 1;
         } else if (!strcmp(cmd, "pause")) {
             H.clock += (unsigned)atoi(word(&p, b, sizeof b) ? b : "0");
+            return 1;
+        } else if (!strcmp(cmd, "pad")) {       /* pad LX LY BUTTONS | pad off: the first pad, held so (Loop A's: glos
+                                                   joy pad=0,...: a USB pad as if plugged in) */
+            if (!word(&p, b, sizeof b))
+                fail("pad: what?");
+            memset(&script_pad, 0, sizeof script_pad);
+            if (strcmp(b, "off")) {
+                script_pad.present = 1;
+                script_pad.lx = atoi(b);
+                script_pad.ly = word(&p, b, sizeof b) ? atoi(b) : 0;
+                script_pad.buttons = word(&p, b, sizeof b) ? (unsigned)strtoul(b, NULL, 0) : 0;
+            }
             return 1;
         } else if (!strcmp(cmd, "within")) {    /* (Loop A's: how long the next `said` waits; here work is done
                                                    before the clock moves) */

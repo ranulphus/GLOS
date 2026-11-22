@@ -21,6 +21,10 @@ until you have pushed it somewhere else. Turn early, and use the side fans to st
 | J | Look for a game on the network and join it, or leave it |
 | Esc | Leave |
 
+**A game pad** drives too: the left stick turns the craft (left and right) and drives the fans (forwards and
+back); the right stick, or the shoulder buttons, the side fans; the first button (A on an Xbox pad) boosts,
+the second (B) sets the craft down.
+
 Your craft is orange with a white cabin, and you see it from behind. Nothing is shot and nobody is destroyed:
 craft bump each other and the walls. A craft pushed into the water is back at its dock three seconds later.
 Quays are reached by their ramps; you can drop off a quay's edge, not climb it.

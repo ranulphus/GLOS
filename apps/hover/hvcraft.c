@@ -33,8 +33,10 @@
  * HVCRAFT.CFG beside the program keeps the last game and arena, a name, and whether the game opens to the
  * network whenever it starts.
  *
+ * A pad drives it too (pad_held: the left stick, the right stick or the shoulder buttons, A boosts, B sets down).
+ *
  * Not yet (the plan's rest): the lobby (the games found as a list, names, the craft's colour); a joiner's own
- * craft moved at once by its own controls; pads and the mouse; full screen; the computer's strengths chosen; names over the craft; an arrow to the flag or the lamp. */
+ * craft moved at once by its own controls; the mouse; full screen; the computer's strengths chosen; names over the craft; an arrow to the flag or the lamp. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -319,6 +321,41 @@ static void overlay(int w, int h)
     glEnable(GL_DEPTH_TEST);
 }
 
+/* A pad (the first plugged in): the left stick turns the craft and drives the fans forwards and back; the right
+   stick, or the shoulder buttons, the side fans; the first button boosts, the second sets the craft down. (An Xbox
+   pad's A, B, LB and RB.) */
+static unsigned pad_held(void)
+{
+    struct glos_pads p;
+    unsigned c = 0;
+    int i;
+    memset(&p, 0, sizeof p);
+    p.size = sizeof p;
+    if (glos_pads(&p, 0) != 0)
+        return 0;
+    for (i = 0; i < GLOS_PADS && !p.pad[i].present; i++)
+        ;
+    if (i == GLOS_PADS)
+        return 0;
+    if (p.pad[i].lx < -40)
+        c |= HV_C_LEFT;
+    if (p.pad[i].lx > 40)
+        c |= HV_C_RIGHT;
+    if (p.pad[i].ly < -40)
+        c |= HV_C_FWD;
+    if (p.pad[i].ly > 40)
+        c |= HV_C_BACK;
+    if (p.pad[i].rx < -40 || (p.pad[i].buttons & 0x10))
+        c |= HV_C_SLIDE_L;
+    if (p.pad[i].rx > 40 || (p.pad[i].buttons & 0x20))
+        c |= HV_C_SLIDE_R;
+    if (p.pad[i].buttons & 1)
+        c |= HV_C_BOOST;
+    if (p.pad[i].buttons & 2)
+        c |= HV_C_DOWN;
+    return c;
+}
+
 static unsigned keys_held(void)
 {
     struct glos_keys k;
@@ -343,7 +380,7 @@ static unsigned keys_held(void)
         c |= HV_C_BOOST;
     if (GLOS_KEY_DOWN(&k, 0x39))                                /* Space */
         c |= HV_C_DOWN;
-    return c;
+    return c | pad_held();
 }
 
 static void title(glos_handle win)

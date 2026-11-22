@@ -7502,6 +7502,9 @@ HOVER_AT = {                            # the line HVCRAFT -demo says at step 45
 }
 
 
+HOVER_PAD = "HVCRAFT at 90 score=0:0 craft0=2736,361,256 craft1=3563,637 lamp=-1 own=0"     # (hv_test hold 3 65 90)
+
+
 def hover_case(profile, vcard, card):
     """The hovercraft game (phase F; apps/hover, apps/shared/hvgame.c) on a desktop: HVCRAFT -demo, every craft
     the computer's, for each of the four kinds of game to step 450: the game's state it says there is the one
@@ -7573,6 +7576,16 @@ def hover_case(profile, vcard, card):
                                                                            sorted(mo.items())[:3], sorted(mj.items())[:3]))
         rc, o, _ = agent.ssh("C:\\TEST\\HVCRAFT.EXE -demo -join -until 300", timeout=400)
         checks["net-nobody"] = rc == 5 and "HVCRAFT net nobody" in o
+        # A pad (USB's, as if plugged in: glos joy pad=): the first pad's stick held forwards and its first button
+        # (the boost) from the start, the player's craft driven by it, the computer's the rest: the game at step 90
+        # is the one the core gives for those controls held (hv_test hold 3 65 90)
+        agent.ssh("glos joy pad=0,128,0,128,128,1")
+        rc, o, _ = agent.ssh("C:\\TEST\\HVCRAFT.EXE -kind 3 -until 90", timeout=400)
+        agent.ssh("glos joy pad=0,off")
+        at = [l.strip() for l in o.replace("\r", "").split("\n") if l.startswith("HVCRAFT at ")]
+        checks["pad"] = rc == 0 and bool(at) and at[0] == HOVER_PAD
+        if not checks["pad"]:
+            print("    %s pad: %s" % (tag, at[0] if at else o.strip()[-200:]))
         # a picture while a game plays
         h = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\HVCRAFT.EXE -demo -kind 0 -until 1500"],
                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
@@ -7599,7 +7612,7 @@ def hover_case(profile, vcard, card):
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
     text = agent.wait()
-    checks["apps"] = text.count("prog=HVCRAFT.EXE") >= 8
+    checks["apps"] = text.count("prog=HVCRAFT.EXE") >= 9
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
     checks["done"] = "GLOS-EXIT code=0" in text
     bad = [k for k, v in checks.items() if not v]
@@ -8199,6 +8212,12 @@ class GuiDriver:
                 self.point(w["x"] + int(args[1]), w["y"] + int(args[2]))
             elif cmd == "pause":
                 time.sleep(int(args[0]) / 1000.0)
+            elif cmd == "pad":                  # pad LX LY BUTTONS | pad off: the first pad, as if a USB pad were
+                if args[0] == "off":            # plugged in and held so (glos joy pad=0,...)
+                    self.agent.ssh("glos joy pad=0,off")
+                else:
+                    self.agent.ssh("glos joy pad=0,%d,%d,128,128,%x" % (int(args[0]) + 128, int(args[1]) + 128,
+                                                                         int(args[2], 0)))     # (0-255, 128 the centre)
             elif cmd == "within":               # within SECONDS: the next `said` waits so long, not two minutes
                 self.within = int(args[0])      # (a job on a real drive: a floppy written and read back)
             elif cmd == "settle":               # until no DOS program runs: one that had the PC's own screen has given

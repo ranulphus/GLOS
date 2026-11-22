@@ -1,0 +1,42 @@
+# Fall Line by a pad and by the mouse (apps/ski/ski.c; the plan's controls): mountain 7, the run held at three
+# steps (-until) while the controls change, so that every PC skis the same run. A pad's stick held to the left
+# from the start; then to the right and forwards (a tuck); then the pad let go and the pointer put to the
+# skier's left and below: the mouse steers, the skier turns towards it. (The pad stays plugged in, centred, until
+# the end, and the script waits out GLOS's notifications of it being plugged in and unplugged: they are not the
+# game's.)
+run SKI.EXE -until 120,240,360 -speed 4 -table C:\\OUT\\SKIPAD.DAT -day 20261121
+wait "Fall Line"
+key ctrl+g
+wait "A Mountain's Number"
+key ctrl+a
+type 7\n
+gone "A Mountain's Number"
+pad -100 0 0
+pause 7000
+key enter
+said SKI started
+pause 1000
+within 120
+said SKI at 120 x=416 y=113 speed=16 score=0 gates=0/0 falls=0
+pad 100 -100 0
+key esc
+said SKI resumed
+pause 1000
+within 120
+said SKI at 240 x=490 y=191 speed=79 score=0 gates=0/0 falls=0
+pad 0 0 0
+move "Fall Line" 120 330
+said SKI mouse steers
+key esc
+said SKI resumed
+pause 1000
+within 120
+said SKI at 360 x=419 y=380 speed=163 score=0 gates=0/0 falls=0
+shot mouse "Fall Line"
+key esc
+said SKI resumed
+key alt+f4
+gone "Fall Line"
+pad off
+pause 7000
+expect SKI end

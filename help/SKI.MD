@@ -15,6 +15,11 @@ The fall line is the way straight down a slope. A fall costs you time, never the
 | F2 | The same mountain again |
 | F3 | A new mountain |
 
+**A game pad** steers too: the stick turns the skis, forwards on it (or the first button) tucks, back on it
+(or the second button) ploughs. **The mouse** steers once you move it over the slope: the skier turns
+towards the pointer, the left button tucks and the right one ploughs. A key or the pad takes over from the
+mouse again.
+
 - The nearer the skis point to straight down, the faster you go. Skis across the slope stop you.
 - **The snow:** the piste in the middle is fast; the powder at its sides is slow; in the forest it is slower
   still. Pale blue patches are **ice**: fast, and the skis hardly hold, so turn before it.

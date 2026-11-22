@@ -493,15 +493,17 @@ int main(int argc, char **argv)
     static unsigned short dist[HV_GRID][HV_GRID];
     char why[160] = "";
     int r;
-    if (argc == 4 && !strcmp(argv[1], "demo")) {        /* hv_test demo KIND STEPS: what HVCRAFT -demo says at that step */
+    if ((argc == 4 && !strcmp(argv[1], "demo")) || (argc == 5 && !strcmp(argv[1], "hold"))) {
+        /* hv_test demo KIND STEPS: what HVCRAFT -demo says at that step; hv_test hold KIND CONTROLS STEPS: the same
+           with the player's craft held at those controls all the while (a pad held so: the suite's) */
         static struct hv_game d;
-        int i;
+        int i, hold = argc == 5;
         if (hv_arena_read(&a, HV_BASIN, sizeof HV_BASIN - 1, why, sizeof why) != 0 || hv_game_start(&d, &a, atoi(argv[2]), HV_DEMO_CRAFT) != 0)
             return 2;
-        while ((long)d.steps < atol(argv[3])) {
+        while ((long)d.steps < atol(argv[hold ? 4 : 3])) {
             unsigned char keys[HV_CRAFT];
             for (i = 0; i < d.ncraft; i++)
-                keys[i] = (unsigned char)hv_auto(&d, i, HV_DEMO_STRENGTH);
+                keys[i] = (unsigned char)(hold && i == 0 ? (unsigned)atoi(argv[3]) : hv_auto(&d, i, HV_DEMO_STRENGTH));
             hv_game_step(&d, keys);
         }
         printf(HV_AT_LINE, d.steps, d.score[0], d.score[1], d.c[0].x, d.c[0].y, d.c[0].heading, d.c[1].x, d.c[1].y, d.lamp_holder, d.c[0].score);

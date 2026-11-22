@@ -1284,3 +1284,21 @@ The rest of Help's plan's first item (`docs/v1/apps/help.md`): the tour on GLOS'
   and the emulated desktops; the desk suite's `tour` case (`DESK_ONLY=tour`): a GLOS.CFG as the installer
   writes it, the desktop on, Help's tour started and the setting turned off; on again, the tip instead.
 - **Not yet:** a "show me" that opens the part (the Start menu itself); pictures in the tour's steps.
+
+## The two games: pads, and the mouse on the slope (2026-11-22)
+
+- **Fall Line** (`apps/ski/ski.c`): the first pad plugged in steers (its stick left and right; forwards or
+  its first button tucks, back or its second ploughs); the mouse steers once it moves over the slope, the
+  skier turning towards the pointer (the heading from where the skier is drawn to the pointer, in the
+  skier's seventeen steps), the left button tucking, the right ploughing; a key or the pad takes over again.
+  What is held is what a run records, so a ghost of a run by the mouse is skied again as it was.
+- **Cushion** (`apps/hover/hvcraft.c`): the first pad drives (the left stick turns and drives, the right
+  stick or the shoulder buttons the side fans, the first button boosts, the second sets down).
+- **Scripts' pads:** the GUI scripts' new `pad LX LY BUTTONS` / `pad off` (`tests/host/glosshim.c`; on Loop A
+  `glos joy pad=0,...`, a USB pad as if plugged in).
+- **Tests:** `ski-pad` (host and the emulated desktops): mountain 7 held at three steps while a pad's stick
+  goes left, then right with a tuck, then the mouse to the skier's left (said "mouse steers"); the hover
+  case: a pad held forwards with the boost from the start, the game at step 90 the core's for those controls
+  held (`hv_test hold 3 65 90`).
+- **Not yet:** the mouse in Cushion (the plan's: taken, it turns the craft); a second pad for a second player
+  on one PC (not in v1).
