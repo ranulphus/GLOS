@@ -5,7 +5,8 @@
 # size; back by Go to Page; the page's text copied; a phrase over two lines found and tinted, a word found
 # again and again through the file, round its end and backwards, and one that isn't there; a locked PDF and a file
 # that is none refused; a locked file that wants no password opened (its outline and its text as the plain one's);
-# one that wants a password: a wrong one, given up, and the right one.
+# one that wants a password: a wrong one, given up, and the right one. The second page is drawn ahead while the
+# first shows, and both come from the pages kept as they are turned.
 run PDF.EXE
 wait "PDF Viewer"
 key ctrl+o
@@ -14,10 +15,13 @@ type C:\\GLOS\\GUIDE.PDF\n
 said PDF opened GUIDE.PDF pages=2
 said PDF outline 3
 said PDF page 1 of 2 423x547 at 69%
+said PDF ahead page 2
 click "PDF Viewer" 60 86
 said PDF outline chose 3 page 2
+said PDF cached 2
 said PDF page 2 of 2 423x547 at 69%
 key ctrl+pgup
+said PDF cached 1
 said PDF page 1 of 2 423x547 at 69%
 key ctrl+pgdn
 said PDF page 2 of 2 423x547 at 69%

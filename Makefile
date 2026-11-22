@@ -349,7 +349,10 @@ build/host/libpdfbr32.a: $(addprefix third_party/bearssl/src/,$(addsuffix .c,$(P
 	      third_party/bearssl/src/$$f.c || exit 1; \
 	  done
 	$(Q)ar rcs $@ $(PDF_BR_OBJS)
-APP_DEPS_pdf := build/apps/PDFFONTS.DAT
+APP_DEPS_pdf := build/apps/PDFFONTS.DAT build/sdk/gloswrap.opt tools/wrapcheck.py
+# (the next page drawn ahead on a worker's thread: the C library under libglos's lock)
+APP_LINK_pdf := @build/sdk/gloswrap.opt -Wl,-Map,build/apps/PDF.map -Wl,--cref
+APP_AFTER_pdf := python3 tools/wrapcheck.py sdk/libglos/wrap.list build/apps/PDF.map
 # The Control Panel's Devices page: the PCI devices' names (tools/mkpciids.py made the file from the PCI ID
 # Project's list; THIRD_PARTY.md), beside the program.
 APP_LIBS_control := apps/shared/pciids.c loader/inflate.c

@@ -1492,3 +1492,21 @@ The plan's "folders backed up to an SFTP server: full, or only what changed sinc
   moves the guest's clock a day on (`glos time set`), and GLOS's own run of DISKS makes a set there.
 - **Not yet:** backups as ZIPs; sets thinned out; a set browsed file by file (Files' remote folders show a
   set's files).
+
+## The PDF Viewer: a cache of pages, the next drawn ahead (2026-11-22)
+
+The plan's "a page cache" and the notes' "drawing off the window's thread": the pages drawn are kept (four at
+most, 4.5 million pixels in all; the oldest let go first, never the page shown), by page and zoom, so that
+going back to one is at once (`PDF cached N`); after a page shows, the next one is drawn ahead on a worker's
+thread (the toolkit's tasks; `PDF ahead page N`), at the zoom it will have (the view's width as its own width
+gives it). The reader reads through one file and keeps the file's objects, so every call into it is under one
+lock (the window's thread waits, at worst, for the page being drawn ahead, which is the one it would draw);
+opening another file swaps the reader's file under it; a page drawn ahead for a file that has gone is dropped
+(a count of files). The found text's marks are taken out of a picture before it is left, so the cache keeps
+pages as they were drawn. PDF.EXE is now linked with libglos's lock round the C library (`gloswrap.opt`, checked
+by `wrapcheck.py`).
+
+- **Tests:** `pdf` (host) and `pdf-run` (the emulated Pentiums): the second page drawn ahead while the first
+  shows, then both served from the cache as they are turned; every other step as before.
+- **Not yet:** the page before drawn ahead too; a page drawn in parts as it comes (a slow page shows only
+  when whole); continuous and two-page views.

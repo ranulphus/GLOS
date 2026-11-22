@@ -50,8 +50,75 @@ static struct pdf *doc;
 static char path[260];
 static unsigned page;                   /* from 0 */
 static int zoom = 100, fit = 1;         /* percent (100: a point a pixel); fit: the zoom follows the view's width */
-static unsigned *bitmap;
+static unsigned *bitmap;                /* the page shown: one of the cache's pictures */
 static int bw, bh;
+
+/* (phase F) The pages drawn are kept (CACHED at most, CACHE_PIXELS in all), by page and zoom: going back to one
+   is at once. After a page is shown, the next is drawn ahead on a worker's thread (the toolkit's tasks). The
+   reader is one thread's at a time: it reads through `file`, and keeps the file's objects; every call into it
+   is under `reader` (the window's thread waits, at worst, for the page being drawn ahead, which is the one it
+   is likely to want). `gen` counts the files: a page drawn ahead for one that has gone is dropped. */
+#define CACHED 4
+#define CACHE_PIXELS 4500000ul
+static struct cached { unsigned page; int zoom; unsigned *px; int w, h; unsigned long ink, used; } cache[CACHED];
+static unsigned long cache_clock;
+static glos_handle reader;
+static unsigned gen;
+static struct gui_task *ahead;          /* the page being drawn ahead, or NULL */
+
+static void lock(void) { if (reader) glos_take(reader, 0xFFFFFFFFu); }
+static void unlock(void) { if (reader) glos_give(reader); }
+
+static int cache_find(unsigned pg, int z)
+{
+    int i;
+    for (i = 0; i < CACHED; i++)
+        if (cache[i].px && cache[i].page == pg && cache[i].zoom == z)
+            return i;
+    return -1;
+}
+
+static void cache_put(unsigned pg, int z, unsigned *px, int w, int h, unsigned long ink)   /* (px: the cache's now) */
+{
+    unsigned long total = (unsigned long)w * (unsigned long)h;
+    int i, k = -1;
+    for (i = 0; i < CACHED; i++)
+        total += cache[i].px ? (unsigned long)cache[i].w * (unsigned long)cache[i].h : 0;
+    for (;;) {                                  /* the oldest let go (never the page shown) until it fits */
+        int old = -1, empty = -1;
+        for (i = 0; i < CACHED; i++) {
+            if (!cache[i].px) {
+                empty = i;
+                continue;
+            }
+            if (cache[i].px != bitmap && (old < 0 || cache[i].used < cache[old].used))
+                old = i;
+        }
+        if (empty >= 0 && total <= CACHE_PIXELS) {
+            k = empty;
+            break;
+        }
+        if (old < 0)
+            break;
+        total -= (unsigned long)cache[old].w * (unsigned long)cache[old].h;
+        free(cache[old].px);
+        cache[old].px = NULL;
+    }
+    if (k < 0) {                                /* (no room: it is the shown one's alone, or let go) */
+        if (px != bitmap)
+            free(px);
+        return;
+    }
+    cache[k].page = pg, cache[k].zoom = z, cache[k].px = px, cache[k].w = w, cache[k].h = h, cache[k].ink = ink;
+    cache[k].used = ++cache_clock;
+}
+
+static void cache_clear(void)
+{
+    int i;
+    for (i = 0; i < CACHED; i++)
+        free(cache[i].px), cache[i].px = NULL;
+}
 static struct pdf_letter *letters;      /* a page's text (page `lpage`), read when first wanted */
 static unsigned nletters, lpage;
 static int have_letters;
@@ -299,66 +366,146 @@ static int view_width(void)
     return w > 0 ? w : view->r.w;
 }
 
-static void draw_page(void)             /* the page into its picture, at the zoom (or the view's width) */
+/* The zoom page pg is drawn at: the view's width (fit) or the user's, within MAX_PIXELS. (Under the lock.) */
+static int zoom_for(unsigned pg, double *w, double *h)
 {
-    struct pdf_canvas cv;
-    double w = 612, h = 792, scale;
-    unsigned *px;
-    unsigned long i, ink = 0;
-    if (!doc)
-        return;
-    pdf_page_size(doc, page, &w, &h);
+    int z = zoom;
+    *w = 612, *h = 792;
+    pdf_page_size(doc, pg, w, h);
     if (fit) {                                  /* as wide as the view (less its bar), 25% to 400% */
         int room = view_width() - GUI_SB - 4;
-        zoom = (int)((room > 100 ? room : 100) * 100 / w);
-        zoom = zoom < 25 ? 25 : zoom > 400 ? 400 : zoom;
+        z = (int)((room > 100 ? room : 100) * 100 / *w);
+        z = z < 25 ? 25 : z > 400 ? 400 : z;
     }
-    while (zoom > 25 && (long)(w * zoom / 100 + 1) * (long)(h * zoom / 100 + 1) > MAX_PIXELS)
-        zoom -= 5;
-    scale = zoom / 100.0;
+    while (z > 25 && (long)(*w * z / 100 + 1) * (long)(*h * z / 100 + 1) > MAX_PIXELS)
+        z -= 5;
+    return z;
+}
+
+/* Page pg drawn at z into a new picture (under the lock): it, or NULL (no memory). */
+static unsigned *draw(unsigned pg, int z, double w, double h, int *pw, int *ph, unsigned long *ink)
+{
+    struct pdf_canvas cv;
+    double scale = z / 100.0;
+    unsigned *px;
+    unsigned long i;
     cv.w = (int)(w * scale + 0.999), cv.h = (int)(h * scale + 0.999);
-    if (cv.w < 1 || cv.h < 1 || !(px = malloc((size_t)cv.w * (size_t)cv.h * sizeof *px))) {
-        gui_message(win, GUI_T("PDF Viewer"), GUI_T("There is not enough memory to draw the page at this size."), GUI_MB_OK);
-        say("refused memory");
-        return;
-    }
+    if (cv.w < 1 || cv.h < 1 || !(px = malloc((size_t)cv.w * (size_t)cv.h * sizeof *px)))
+        return NULL;
     memset(px, 0xFF, (size_t)cv.w * (size_t)cv.h * sizeof *px);
     cv.px = px;
-    gui_cview_cursor(view, GLOS_CURSOR_BUSY);
-    pdf_draw(doc, page, scale, 0, 0, &cv);
+    pdf_draw(doc, pg, scale, 0, 0, &cv);
     pdf_trim(doc, KEEP);
-    gui_cview_cursor(view, GLOS_CURSOR_ARROW);
+    *ink = 0;
     for (i = 0; i < (unsigned long)cv.w * (unsigned long)cv.h; i++)
-        px[i] &= 0xFFFFFF, ink += (px[i] & 0xFF) < 128;
-    gui_image_view_set(view, px, cv.w, cv.h, cv.w);
+        px[i] &= 0xFFFFFF, *ink += (px[i] & 0xFF) < 128;
+    *pw = cv.w, *ph = cv.h;
+    return px;
+}
+
+struct ahead_job { unsigned page, gen; int zoom; double w, h; unsigned *px; int pw, ph; unsigned long ink; };
+
+static void ahead_work(struct gui_task *t, void *arg)  /* (a worker's thread) */
+{
+    struct ahead_job *a = arg;
+    (void)t;
+    lock();
+    if (doc && a->gen == gen && !gui_task_cancelled(t))
+        a->px = draw(a->page, a->zoom, a->w, a->h, &a->pw, &a->ph, &a->ink);
+    unlock();
+}
+
+static void ahead_done(struct gui_window *owner, void *arg, int cancelled)
+{
+    struct ahead_job *a = arg;
+    (void)owner;
+    ahead = NULL;
+    if (a->px && !cancelled && a->gen == gen && cache_find(a->page, a->zoom) < 0) {
+        cache_put(a->page, a->zoom, a->px, a->pw, a->ph, a->ink);
+        say("ahead page %u", a->page + 1);
+    } else {
+        free(a->px);
+    }
+    free(a);
+}
+
+static void draw_ahead(void)            /* the next page, if it is not kept already and nothing is being drawn */
+{
+    struct ahead_job *a;
+    if (!doc || ahead || page + 1 >= pdf_pages(doc) || !(a = calloc(1, sizeof *a)))
+        return;
+    a->page = page + 1, a->gen = gen;
+    lock();
+    a->zoom = zoom_for(a->page, &a->w, &a->h);
+    unlock();
+    if (cache_find(a->page, a->zoom) >= 0 || !(ahead = gui_task_start(win, NULL, ahead_work, a, ahead_done, 0)))
+        free(a);
+}
+
+static void draw_page(void)             /* the page into its picture, at the zoom (or the view's width) */
+{
+    double w, h;
+    unsigned *px;
+    unsigned long ink = 0;
+    int k, pw = 0, ph = 0, z;
+    if (!doc)
+        return;
+    lock();
+    z = zoom_for(page, &w, &h);
+    unlock();
+    unmark();                                   /* (the picture shown as it was drawn: it is kept) */
+    if ((k = cache_find(page, z)) >= 0) {
+        px = cache[k].px, pw = cache[k].w, ph = cache[k].h, ink = cache[k].ink;
+        cache[k].used = ++cache_clock;
+        say("cached %u", page + 1);
+    } else {
+        gui_cview_cursor(view, GLOS_CURSOR_BUSY);
+        lock();
+        px = draw(page, z, w, h, &pw, &ph, &ink);
+        unlock();
+        gui_cview_cursor(view, GLOS_CURSOR_ARROW);
+        if (!px) {
+            gui_message(win, GUI_T("PDF Viewer"), GUI_T("There is not enough memory to draw the page at this size."), GUI_MB_OK);
+            say("refused memory");
+            return;
+        }
+    }
+    zoom = z;
+    gui_image_view_set(view, px, pw, ph, pw);
     gui_cview_zoom(view, 100);
     gui_cview_scroll(view, 0, 0);
-    marks_forget();
-    free(bitmap);
-    bitmap = px, bw = cv.w, bh = cv.h;
+    bitmap = px, bw = pw, bh = ph;
+    if (k < 0)
+        cache_put(page, z, px, pw, ph, ink);    /* (after: the page shown is never the one let go) */
     show_hit();                                 /* (what was found on this page: marked at this size too) */
     gui_damage(view);
     show_status();
-    say("page %u of %u %dx%d at %d%%", page + 1, pdf_pages(doc), cv.w, cv.h, zoom);
+    say("page %u of %u %dx%d at %d%%", page + 1, pdf_pages(doc), pw, ph, zoom);
     say("ink %lu", ink / 100);                  /* (hundreds of dark pixels: for a look at the log, not for a test: the
                                                    drawing's sums are floating point, and a shade's last step is the
                                                    compiler's) */
+    draw_ahead();
 }
 
-static void forget(void)                /* the file and its picture let go (the view is not touched) */
+static void forget(void)                /* the file and its pictures let go (the view is not touched) */
 {
     marks_forget();
     free(letters);
     letters = NULL, nletters = 0, have_letters = 0, hit = -1, sel_a = sel_b = -1;
     pdf_marks_free(toc, ntoc);
     toc = NULL, ntoc = 0;
-    free(bitmap);
+    if (ahead)
+        gui_task_cancel(ahead);                 /* (its page is dropped when it is done: gen has moved on) */
+    lock();
+    gen++;
+    cache_clear();
     bitmap = NULL;
     pdf_close(doc);
     doc = NULL;
     if (file)
         fclose(file);
     file = NULL;
+    unlock();
 }
 
 static void close_file(void)
@@ -376,8 +523,10 @@ static void load_outline(void)
 {
     struct gui_node *at[17], **nodes;
     unsigned i;
+    lock();
     if (pdf_outline(doc, &toc, &ntoc) != PDF_OK)
         toc = NULL, ntoc = 0;
+    unlock();
     if (ntoc && (nodes = malloc(ntoc * sizeof *nodes)) != NULL) {
         toc_filling = 1;
         for (i = 0; i < ntoc; i++) {
@@ -406,6 +555,7 @@ static int open_file(const char *name)
     if (f && fseek(f, 0, SEEK_END) == 0 && (size = ftell(f)) > 0) {
         FILE *was = file;
         unsigned long was_size = file_size;
+        lock();                                 /* (nothing drawn ahead from the file shown while `file` is this one) */
         file = f, file_size = (unsigned long)size;      /* (the reader reads through `file`) */
         d = pdf_open(file_read, NULL, file_size, &err);
         while (!d && err == PDF_E_LOCKED) {             /* it wants a password: asked for until it is right, or given up */
@@ -424,8 +574,11 @@ static int open_file(const char *name)
         }
         if (d) {
             file = was;
+            unlock();
             close_file();
+            lock();
             file = f, file_size = (unsigned long)size, doc = d;
+            unlock();
             snprintf(path, sizeof path, "%s", name);
             page = 0, fit = 1;
             say("opened %s pages=%u", gui_path_name(name), pdf_pages(doc));
@@ -434,6 +587,7 @@ static int open_file(const char *name)
             return 0;
         }
         file = was, file_size = was_size;
+        unlock();
     }
     if (f)
         fclose(f);
@@ -467,9 +621,13 @@ static int page_letters(unsigned n)     /* page n's letters, read (and kept unti
         return 0;
     free(letters);
     letters = NULL, nletters = 0, have_letters = 0;
-    if (pdf_text(doc, n, &letters, &nletters) != PDF_OK)
+    lock();
+    if (pdf_text(doc, n, &letters, &nletters) != PDF_OK) {
+        unlock();
         return -1;
+    }
     pdf_trim(doc, KEEP);
+    unlock();
     have_letters = 1, lpage = n;
     return 0;
 }
@@ -788,6 +946,7 @@ int main(int argc, char **argv)
             first = argv[i];
     pdf_draw_jpeg(a_jpeg);
     pdf_font_faces(a_face);
+    reader = glos_lock();                       /* (the reader's: the window's thread and the one drawing ahead) */
     build();
     show_status();
     gui_show(win, 1);
