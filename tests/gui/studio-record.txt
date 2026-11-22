@@ -1,18 +1,20 @@
 # MIDI Studio's recording (apps/studio; phase F's second part): the PC's keys as a piano, in the suite's -demo
 # time (F9: a second), into an empty song's track: C at the start, D a second later (960 ticks at 120 to the
 # minute), E a second after that; each a sixteenth long at least, on the sixteenths. Stop; the take is one
-# step of the history (undone, done again).
+# step of the history (undone, done again). The click on each beat meanwhile: five in its two seconds.
 run STUDIO.EXE -demo
 wait "MIDI Studio"
 key f7
-said STUDIO recording in=keys
+said STUDIO recording in=keys click=1 count=0
 key z
 key f9
+said STUDIO take at 1000
 key x
 key f9
+said STUDIO take at 2000
 key c
 key f7
-said STUDIO recorded 3 notes keys=60,62,64 at=0,960,1920
+said STUDIO recorded 3 notes keys=60,62,64 at=0,960,1920 clicks=5
 shot recorded "MIDI Studio"
 key ctrl+z
 said STUDIO undone 0

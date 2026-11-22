@@ -28,7 +28,7 @@
 #include "../shared/song.h"
 
 enum { C_NEW = 1, C_OPEN, C_SAVE, C_SAVEAS, C_EXIT, C_UNDO, C_REDO, C_DELETE, C_SELALL, C_TRACK, C_DRUMS, C_UNTRACK, C_INSTR,
-       C_MUTE, C_SOLO, C_PLAY, C_STOP, C_TEMPO, C_ZOOMIN, C_ZOOMOUT, C_RECORD };
+       C_MUTE, C_SOLO, C_PLAY, C_STOP, C_TEMPO, C_ZOOMIN, C_ZOOMOUT, C_RECORD, C_CLICK, C_COUNTIN };
 
 #define ROW 8                           /* a key's row on the roll: pixels */
 #define GRID (SONG_PPQ / 4)             /* notes are put and moved on sixteenths */
@@ -516,21 +516,78 @@ static int recording, rec_n;
 static glos_handle rec_in, rec_out;
 static unsigned rec_t0;
 static unsigned long rec_demo_ms;
+
+/* (phase F) The click and the count-in: a click on each beat while recording (GM's percussion channel: the
+   high wood block on a bar's first beat, the low one on the others; queued a moment ahead with GLOS's times,
+   which the kernel keeps), and, if asked for, a bar of clicks before the take (the song, if it plays, begins
+   after it). A beat is the song's first tempo's (a change of tempo in the song is not followed); a bar four. */
+static int click_on = 1, count_in;      /* (the user's: Record's Click and Count In) */
+static unsigned long count_ms;          /* this take's count-in: a bar, or 0 */
+static unsigned long next_beat;         /* the next beat to be queued, from the take's start (the count-in's first) */
+static int song_waits;                  /* the song begins when the count-in ends */
 static struct { unsigned char on, pc, force; unsigned long ms; } held[128];
 static struct step *rec_step;
 static char rec_keys[200], rec_ats[200];
 
-static unsigned long rec_now(void)
+static unsigned long rec_raw(void)     /* the take's time, its count-in's too */
 {
     unsigned long ms;
     if (demo)
-        return playing ? demo_ms : rec_demo_ms;
+        return playing ? demo_ms + count_ms : rec_demo_ms;
     if (!playing)
         return glos_ticks() - rec_t0;
     take();
     ms = mp_where(&mp);
     give();
-    return ms;
+    return ms + count_ms;
+}
+
+static unsigned long rec_now(void)     /* the song's time: where a note played now goes (0 in the count-in) */
+{
+    unsigned long raw = rec_raw();
+    return raw > count_ms ? raw - count_ms : 0;
+}
+
+static unsigned long beat_ms(void)
+{
+    unsigned t = song_tempo_at(song, 0);
+    return 60000ul / (t ? t : 120);
+}
+
+/* The clicks of the beats from now to a moment ahead queued; the song begun when the count-in is over. */
+static void click_poll(void)
+{
+    unsigned long raw, beat = beat_ms();
+    if (!recording)
+        return;
+    raw = rec_raw();
+    if (song_waits && raw >= count_ms) {
+        song_waits = 0;
+        play();                                 /* (its clock from here: rec_raw adds the count-in) */
+    }
+    while (next_beat * beat <= raw + 1500) {
+        unsigned long at = next_beat * beat;
+        int first = next_beat % 4 == 0;
+        glos_handle h = playing ? mp.port : rec_out;
+        if ((click_on || at < count_ms) && h && !demo) {
+            struct glos_midi_msg m[2];
+            memset(m, 0, sizeof m);
+            m[0].time = rec_t0 + (unsigned)at, m[0].status = 0x99, m[0].data1 = first ? 76 : 77, m[0].data2 = first ? 110 : 80;
+            m[1].time = m[0].time + 60, m[1].status = 0x89, m[1].data1 = m[0].data1;
+            take();
+            glos_midi_send(h, m, 2, NULL, NULL);
+            give();
+        }
+        next_beat++;
+    }
+}
+
+static unsigned clicks_heard(void)     /* (the suite's) the beats clicked so far: their times are past */
+{
+    unsigned long raw = rec_raw(), beat = beat_ms(), k, n = 0;
+    for (k = 0; k * beat <= raw; k++)
+        n += click_on || k * beat < count_ms;
+    return (unsigned)n;
 }
 
 static void rec_sound(unsigned status, unsigned key, unsigned force)
@@ -551,7 +608,7 @@ static void rec_on(unsigned key, unsigned force, int pc)
     if (!recording || key > 127 || held[key].on)
         return;
     held[key].on = 1, held[key].pc = (unsigned char)pc, held[key].force = (unsigned char)(force ? force : 100);
-    held[key].ms = rec_now();
+    held[key].ms = rec_now();                   /* (played in the count-in: at the song's start) */
     rec_sound(0x90, key, held[key].force);
 }
 
@@ -595,6 +652,7 @@ static void rec_poll(void)
     int i;
     memset(&k, 0, sizeof k);
     k.size = sizeof k;
+    click_poll();
     if (!recording || glos_keys(&k) != 0)
         return;
     for (i = 0; i < 24; i++) {
@@ -618,6 +676,8 @@ static void rec_event(const struct glos_ev *ev)         /* a message of the MIDI
         rec_off(m->data1 & 0x7F);
 }
 
+static unsigned rec_clicks;
+
 static void rec_stop(void)
 {
     unsigned i;
@@ -625,7 +685,9 @@ static void rec_stop(void)
         return;
     for (i = 0; i < 128; i++)
         rec_off(i);
+    rec_clicks = clicks_heard();
     recording = 0;
+    song_waits = 0;
     if (rec_in)
         glos_close(rec_in);
     if (rec_out)
@@ -635,7 +697,7 @@ static void rec_stop(void)
         stop_playing();
     step_end(rec_step, GUI_T("Record"));
     rec_step = NULL;
-    say("recorded %d notes keys=%s at=%s", rec_n, rec_keys[0] ? rec_keys : "-", rec_ats[0] ? rec_ats : "-");
+    say("recorded %d notes keys=%s at=%s clicks=%u", rec_n, rec_keys[0] ? rec_keys : "-", rec_ats[0] ? rec_ats : "-", rec_clicks);
     show_status();
 }
 
@@ -646,14 +708,18 @@ static void rec_start(void)
     rec_n = 0, rec_keys[0] = rec_ats[0] = 0;
     rec_step = step_begin();
     rec_in = demo ? 0 : glos_midi_in(GLOS_MIDI_PORT_MPU);   /* (none: the PC's keys alone) */
-    if (song_ticks(song))
+    count_ms = count_in ? 4 * beat_ms() : 0, next_beat = 0, song_waits = 0;
+    if (song_ticks(song) && !count_ms)
         play();                         /* (the song as it is, heard while the new notes are played) */
+    else if (song_ticks(song))
+        song_waits = 1;                 /* (... after the count-in) */
     if (!playing && !demo)
         rec_out = glos_midi_out(GLOS_MIDI_PORT_FM);
     rec_t0 = glos_ticks();
     rec_demo_ms = 0;
     recording = 1;
-    say("recording in=%s", rec_in ? "mpu+keys" : "keys");
+    click_poll();
+    say("recording in=%s click=%d count=%lu", rec_in ? "mpu+keys" : "keys", click_on, count_ms);
     gui_focus(roll);
 }
 
@@ -967,6 +1033,14 @@ static void command(struct gui_window *w, int id)
         else
             rec_start();
         break;
+    case C_CLICK:
+        click_on = !click_on;
+        say("click %d", click_on);
+        break;
+    case C_COUNTIN:
+        count_in = !count_in;
+        say("count in %d", count_in);
+        break;
     case C_STOP:
         if (recording)
             rec_stop();
@@ -999,6 +1073,10 @@ static void update(struct gui_window *w)
     gui_command_enable(w, C_UNTRACK, song->ntracks > 1);
     gui_command_enable(w, C_STOP, heard != NULL || recording);
     gui_command_check(w, C_RECORD, recording);
+    gui_command_check(w, C_CLICK, click_on);
+    gui_command_check(w, C_COUNTIN, count_in);
+    gui_command_enable(w, C_CLICK, !recording);
+    gui_command_enable(w, C_COUNTIN, !recording);
     gui_command_enable(w, C_ZOOMIN, zoom > 2);
     gui_command_enable(w, C_ZOOMOUT, zoom < 32);
     gui_command_check(w, C_MUTE, t->mute);
@@ -1031,6 +1109,8 @@ static int key(struct gui_window *w, struct gui_ev *e)
         give();
         rec_demo_ms += 1000;
         tick(NULL);
+        if (recording)
+            say("take at %lu", rec_raw());      /* (the suite's: each second as it is taken, before the next key) */
         return 1;
     }
     if (recording && !e->mods && pc_key(e->key) >= 0) {        /* (a key of the PC's piano: its note, however short
@@ -1086,6 +1166,8 @@ static void build(void)
     gui_command(win, C_PLAY, GUI_T("&Play"), "F5", gui_glyph("play"), GUI_T("Play from the start"));
     gui_command(win, C_STOP, GUI_T("&Stop"), "F6", gui_glyph("stop"), GUI_T("Stop"));
     gui_command(win, C_RECORD, GUI_T("&Record"), "F7", NULL, GUI_T("Record from a MIDI keyboard or the PC's keys"));
+    gui_command(win, C_CLICK, GUI_T("C&lick While Recording"), NULL, NULL, GUI_T("A click on each beat while recording"));
+    gui_command(win, C_COUNTIN, GUI_T("Count &In a Bar"), NULL, NULL, GUI_T("A bar of clicks before recording begins"));
     gui_command(win, C_TEMPO, GUI_T("&Tempo..."), NULL, NULL, NULL);
     gui_command(win, C_ZOOMIN, GUI_T("Zoom &In"), "Ctrl++", gui_glyph("zoom-in"), GUI_T("Zoom in"));
     gui_command(win, C_ZOOMOUT, GUI_T("Zoom &Out"), "Ctrl+-", gui_glyph("zoom-out"), GUI_T("Zoom out"));
@@ -1104,6 +1186,8 @@ static void build(void)
     gui_menu_command(m, C_INSTR), gui_menu_command(m, C_MUTE), gui_menu_command(m, C_SOLO);
     m = gui_menu(bar, GUI_T("Tra&nsport"));
     gui_menu_command(m, C_PLAY), gui_menu_command(m, C_STOP), gui_menu_command(m, C_RECORD);
+    gui_menu_sep(m);
+    gui_menu_command(m, C_CLICK), gui_menu_command(m, C_COUNTIN);
     gui_menu_sep(m);
     gui_menu_command(m, C_TEMPO);
     m = gui_menu(bar, GUI_T("&View"));

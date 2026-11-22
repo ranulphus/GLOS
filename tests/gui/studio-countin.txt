@@ -1,0 +1,25 @@
+# MIDI Studio's count-in (apps/studio; phase F): Transport's Count In a Bar, then recording in the suite's
+# -demo time (F9: a second): a bar of four beats at 120 to the minute is two seconds, so the C played after
+# them is at the song's start and the D a second later at 960 ticks; seven clicks in the take's three seconds.
+run STUDIO.EXE -demo
+wait "MIDI Studio"
+key alt+n
+key i
+said STUDIO count in 1
+key f7
+said STUDIO recording in=keys click=1 count=2000
+key f9
+said STUDIO take at 1000
+key f9
+said STUDIO take at 2000
+key z
+key f9
+said STUDIO take at 3000
+key x
+key f7
+said STUDIO recorded 2 notes keys=60,62 at=0,960 clicks=7
+key alt+f4
+wait "MIDI Studio"
+key alt+n
+gone "MIDI Studio"
+expect STUDIO end

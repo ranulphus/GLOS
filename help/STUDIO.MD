@@ -29,3 +29,7 @@ plugged into the sound card's MIDI port (an MPU-401), or the **PC's keys** as a 
 Z S X D C V G B H N J M is the octave from middle C, the row Q 2 W 3 E R 5 T 6 Y 7 U the one above. Each note
 lands where you played it, on the nearest sixteenth. **F7** or **F6** stops; **Ctrl+Z** takes the whole take
 away again.
+
+While recording, a **click** sounds each beat (a wood block, higher on a bar's first beat). **Transport, Click
+While Recording** turns it off; **Transport, Count In a Bar** gives a bar of clicks before the take begins (the
+song, if it has notes, starts after it).

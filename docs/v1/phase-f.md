@@ -1566,3 +1566,19 @@ client asks by GET alone.
   address with `src=glos&q=hello+there`), its POST form refused; `html_test`'s form. (Disk Tools' image of
   C:\WEB: two pages more.)
 - **Not yet:** POST; check boxes and radio buttons; a list's own choices; fields typed in the page itself.
+
+## MIDI Studio: the click and the count-in (2026-11-22)
+
+The notes' "a count-in and a click" (the plan's "the metronome's click"): while recording, a click each beat on
+General MIDI's percussion channel (the high wood block on a bar's first beat, the low one on the others), queued
+up to 1.5 seconds ahead with GLOS's times (AUDIO's messages carry them; the kernel plays them on its tick, so a
+busy window does not make the click stumble), on the port that plays the song or the FM synth. **Transport,
+Count In a Bar** gives four beats before the take: the song (if it has notes) starts after them, and a note
+played in the count-in lands at the song's start. A beat is the song's first tempo's (a change of tempo in the
+song is not followed); a bar is four. **Click While Recording** turns the click off (the count-in's clicks
+stay). The plan had the click as a sound of the mixer's; percussion notes need no sample and follow the synth
+chosen.
+
+- **Tests:** `studio-record` (five clicks in its two seconds), `studio-countin` (host and the emulated
+  desktops): the count-in's two seconds at 120, the C at 0 and the D at 960 ticks after it, seven clicks.
+- **Not yet:** the click following the song's tempo changes and its time signature.
