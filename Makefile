@@ -162,7 +162,7 @@ host-test-run: build/host/libpdfbr32.a
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/inflate_test tests/host/inflate_test.c loader/inflate.c \
 	  && build/host/inflate_test `python3 tests/host/inflate_cases.py build/host/inflate build/kernel/GLOSK.BIN`
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/pciids_test tests/host/pciids_test.c apps/shared/pciids.c \
-	  loader/inflate.c && build/host/pciids_test apps/control/pciids/PCIIDS.DAT
+	  loader/inflate.c && build/host/pciids_test apps/control/pciids/PCIIDS.DAT apps/control/usbids/USBIDS.DAT
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/deflate_test tests/host/deflate_test.c \
 	  apps/shared/deflate.c loader/inflate.c \
 	  && build/host/deflate_test `python3 tests/host/deflate_cases.py make build/host/deflate` \
@@ -357,8 +357,11 @@ APP_AFTER_pdf := python3 tools/wrapcheck.py sdk/libglos/wrap.list build/apps/PDF
 # Project's list; THIRD_PARTY.md), beside the program.
 APP_LIBS_control := apps/shared/pciids.c loader/inflate.c
 APP_HOST_LIBS_control := apps/shared/pciids.c loader/inflate.c
-APP_DEPS_control := build/apps/PCIIDS.DAT
+APP_DEPS_control := build/apps/PCIIDS.DAT build/apps/USBIDS.DAT
 build/apps/PCIIDS.DAT: apps/control/pciids/PCIIDS.DAT
+	@mkdir -p build/apps
+	$(Q)cp $< $@
+build/apps/USBIDS.DAT: apps/control/usbids/USBIDS.DAT
 	@mkdir -p build/apps
 	$(Q)cp $< $@
 build/apps/PDFFONTS.DAT: $(wildcard apps/pdf/fonts/*.TTF) tools/mkpdffonts.py
@@ -380,12 +383,12 @@ GUI_SCRIPTS := $(wildcard tests/gui/*.txt)
 gui-goldens:
 	$(Q)$(DEV) $(MAKE) -s gui-goldens-run
 gui-goldens-run: build/host/guitest $(addprefix build/host/,$(APPS)) build/apps/PDFFONTS.DAT build/apps/HELP.DAT \
-                 build/apps/PCIIDS.DAT
+                 build/apps/PCIIDS.DAT build/apps/USBIDS.DAT
 	@rm -rf build/host/gui build/host/gui-drives && mkdir -p build/host/gui
 	@set -e; for t in $(GUI_SCRIPTS); do n=$$(basename $$t .txt); \
 	  if head -1 $$t | grep -q '^#loopa-run-only'; then continue; fi; prog=$$(awk '$$1=="run"{print tolower($$2); exit}' $$t); \
 	  prog=$${prog%.exe}; mkdir -p build/host/gui/$$n; for b in 8 16 32; do rm -rf build/host/gui-drives; \
-	    cp -r tests/gui/drives build/host/gui-drives; cp sdk/gui/fonts/SMOOTH.DAT sdk/gui/fonts/FONTS.DAT sdk/gui/fonts/ICONS.DAT build/apps/PDFFONTS.DAT build/apps/HELP.DAT build/apps/PCIIDS.DAT build/host/gui-drives/C/GLOS/; \
+	    cp -r tests/gui/drives build/host/gui-drives; cp sdk/gui/fonts/SMOOTH.DAT sdk/gui/fonts/FONTS.DAT sdk/gui/fonts/ICONS.DAT build/apps/PDFFONTS.DAT build/apps/HELP.DAT build/apps/PCIIDS.DAT build/apps/USBIDS.DAT build/host/gui-drives/C/GLOS/; \
 	    mkdir -p build/host/gui-drives/A build/host/gui-drives/C/HX build/host/gui-drives/C/OUT build/host/gui-drives/C/TEST; \
 	    GLOS_HOST_DRIVES=build/host/gui-drives build/host/$$prog $$t build/host/gui/$$n $$b > build/host/gui/$$n-$$b.log \
 	      || { echo "gui-goldens: $$n at $$b bits:"; cat build/host/gui/$$n-$$b.log; exit 1; }; done; \
@@ -1160,7 +1163,8 @@ build/dj/GUITEST.EXE: tests/dos/guitest.c build/sdk/libgui.a build/sdk/libglos.a
 	$(Q)python3 tools/glosmark.py $@
 # The native apps for DOS: build/apps/NAME.EXE.
 APP_EXES := $(foreach a,$(APPS),build/apps/$(shell echo $(a) | tr a-z A-Z).EXE)
-# An app with threads of its own (the toolkit's tasks: Files' copying, Images' filmstrip, Notepad's Find in Files) is linked with the C library's lock
+# An app with threads of its own (the toolkit's tasks: Files' copying, Images' filmstrip, Notepad's Find in Files, the Games
+# Library's scan) is linked with the C library's lock
 # (@build/sdk/gloswrap.opt, as GUITEST is), and its map is checked for callers that went round the lock.
 APP_DEPS_files := build/sdk/gloswrap.opt tools/wrapcheck.py
 APP_LINK_files := @build/sdk/gloswrap.opt -Wl,-Map,build/apps/FILES.map -Wl,--cref
@@ -1177,6 +1181,9 @@ APP_AFTER_studio := python3 tools/wrapcheck.py sdk/libglos/wrap.list build/apps/
 APP_DEPS_images := build/sdk/gloswrap.opt tools/wrapcheck.py
 APP_LINK_images := @build/sdk/gloswrap.opt -Wl,-Map,build/apps/IMAGES.map -Wl,--cref
 APP_AFTER_images := python3 tools/wrapcheck.py sdk/libglos/wrap.list build/apps/IMAGES.map
+APP_DEPS_games := build/sdk/gloswrap.opt tools/wrapcheck.py
+APP_LINK_games := @build/sdk/gloswrap.opt -Wl,-Map,build/apps/GAMES.map -Wl,--cref
+APP_AFTER_games := python3 tools/wrapcheck.py sdk/libglos/wrap.list build/apps/GAMES.map
 define app_exe
 build/apps/$(1).EXE: $$(wildcard apps/$(2)/*.c apps/$(2)/*.h) build/sdk/libgui.a build/sdk/libglos.a tools/glosmark.py $$(APP_LIBS_$(2)) $$(APP_DEPS_$(2))
 	@mkdir -p build/apps

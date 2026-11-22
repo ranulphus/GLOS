@@ -1,6 +1,7 @@
 /* CONTROL's Devices page (phase F; the owner asked for it, 2026-11-21): every device GLOS finds, as a tree by
  * kind, read from SYS's STAT GLOS_STAT_DEVICES (API 2.12; kernel/drv/devlist.c says how its lines are written)
- * every two seconds. A PCI device's name is found in PCIIDS.DAT beside the program (the PCI ID Project's list:
+ * every two seconds. A PCI device's name is found in PCIIDS.DAT beside the program (the PCI ID Project's list;
+ * a USB device's in USBIDS.DAT, the list of USB IDs, in the same form:
  * tools/mkpciids.py, apps/shared/pciids.c); USB devices hang under their controller. Under the tree, the chosen
  * one: its name, where it is, what serves it in plain words, its resources, its numbers and what its driver
  * says of it.
@@ -39,8 +40,8 @@ static int ndv;
 static struct gui_window *d_win;
 static struct gui_widget *d_tree, *d_info, *d_button, *d_field;
 static char d_sig[2048], d_shown[INFO * 120];
-static struct pci_name names[40];
-static int nnames, names_read, d_usb = -1, d_btn = -1;      /* d_btn: the button as last set (-1: not yet) */
+static struct pci_name names[40], unames[24];   /* (PCI's from PCIIDS.DAT; USB's from USBIDS.DAT, in the same form) */
+static int nnames, names_read, nunames, d_usb = -1, d_btn = -1;      /* d_btn: the button as last set */
 
 /* The button: Turn off or Turn on, usable or not (set only when that changes: no drawing for nothing). */
 static void button(int listed, int can)
@@ -175,10 +176,11 @@ static void short_vendor(const char *v, char *out, size_t room)
 
 static const struct pci_name *name_of(const struct dev *d)
 {
-    int i;
-    for (i = 0; i < nnames; i++)
-        if (names[i].vendor == d->vendor && names[i].device == d->device)
-            return &names[i];
+    const struct pci_name *t = d->usb ? unames : names;
+    int i, n = d->usb ? nunames : nnames;
+    for (i = 0; i < n; i++)
+        if (t[i].vendor == d->vendor && t[i].device == d->device)
+            return &t[i];
     return NULL;
 }
 
@@ -193,9 +195,27 @@ static void find_names(void)
         }
     if (!more && names_read)
         return;
-    k = pciids_lookup_file(gui_open_beside("PCIIDS.DAT"), names, nnames);
-    names_read = 1;
-    printf("CONTROL devices names=%d of %d\n", k, nnames);
+    if (more || !names_read) {
+        k = pciids_lookup_file(gui_open_beside("PCIIDS.DAT"), names, nnames);
+        names_read = 1;
+        printf("CONTROL devices names=%d of %d\n", k, nnames);
+        fflush(stdout);
+    }
+}
+
+/* The USB devices' names (USBIDS.DAT: the list of USB IDs), the same way. */
+static void find_usb_names(void)
+{
+    int i, k, more = 0;
+    for (i = 0; i < ndv; i++)
+        if (dv[i].usb && dv[i].vendor && !name_of(&dv[i]) && nunames < (int)(sizeof unames / sizeof unames[0])) {
+            unames[nunames].vendor = (unsigned short)dv[i].vendor, unames[nunames].device = (unsigned short)dv[i].device;
+            nunames++, more = 1;
+        }
+    if (!more)
+        return;
+    k = pciids_lookup_file(gui_open_beside("USBIDS.DAT"), unames, nunames);
+    printf("CONTROL devices usb-names=%d of %d\n", k, nunames);
     fflush(stdout);
 }
 
@@ -226,7 +246,19 @@ static void label_of(struct dev *d)
             snprintf(d->label, sizeof d->label, "%s %04x:%04x", class_name(d->cls), d->vendor, d->device);
         }
     } else if (d->usb) {
-        snprintf(d->label, sizeof d->label, "%s %04x:%04x", usb_kind(d->driver), d->vendor, d->device);
+        n = name_of(d);
+        if (n && n->device_name[0]) {           /* (the list's name, its vendor's shortened; else what it is, and ids) */
+            short_vendor(n->vendor_name, sv, sizeof sv);
+            if (!strncmp(n->device_name, sv, strlen(sv)))
+                snprintf(d->label, sizeof d->label, "%s", n->device_name);
+            else
+                snprintf(d->label, sizeof d->label, "%s %s", sv, n->device_name);
+        } else if (n && n->vendor_name[0]) {
+            short_vendor(n->vendor_name, sv, sizeof sv);
+            snprintf(d->label, sizeof d->label, "%s %s %04x", sv, usb_kind(d->driver), d->device);
+        } else {
+            snprintf(d->label, sizeof d->label, "%s %04x:%04x", usb_kind(d->driver), d->vendor, d->device);
+        }
     } else if (!strncmp(d->id, "com", 3)) {
         snprintf(d->label, sizeof d->label, GUI_T("Serial port (%s)"), d->name);
     } else if (!strncmp(d->id, "lpt", 3)) {
@@ -461,6 +493,7 @@ void devices_poll(void)
         text[length < sizeof text - 1 ? length : sizeof text - 1] = 0;
         parse(text);
         find_names();
+        find_usb_names();
         sig[0] = 0;
         for (i = 0; i < ndv && n + 48 < sizeof sig; i++) {
             label_of(&dv[i]);

@@ -37,7 +37,8 @@ The Devices page lists every device of the PC that GLOS finds, by kind: display,
 what is plugged into each controller), storage, ports, the keyboard and mouse, GLOS's own devices for DOS
 programs (its Sound Blaster), bridges and the PC's system devices. Choose one to read, under the list:
 
-- its name and maker (PCI devices are named from the PCI ID Project's list, PCIIDS.DAT beside GLOS);
+- its name and maker (PCI devices are named from the PCI ID Project's list, PCIIDS.DAT beside GLOS, and USB
+  devices from the list of USB IDs, USBIDS.DAT);
 - where it is (its PCI place, its USB port, or built into the PC);
 - what serves it: **Working** (one of GLOS's drivers has it), **Turned off** (left to DOS), **Not working**
   (GLOS's driver could not use it, and why), **DOS's** (GLOS has no driver of its own for it: DOS's drivers

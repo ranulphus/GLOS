@@ -4119,7 +4119,7 @@ def win_case(profile, vcard, card, bits, bits2):
     agent = Agent("win-" + tag, profile, card, ["--card", vcard]
         + (["--sound", "sb16", "--pre", "SET BLASTER=A220 I5 D1 H5 T6"] if sound else []) + [
         "--file", "build/dj/WINTEST.EXE=/TEST/WINTEST.EXE", "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE",
-        "--file", "build/apps/CONTROL.EXE=/TEST/CONTROL.EXE", "--file", "build/apps/PCIIDS.DAT=/TEST/PCIIDS.DAT",  # (the clock's double press opens it: phase D)
+        "--file", "build/apps/CONTROL.EXE=/TEST/CONTROL.EXE", "--file", "build/apps/PCIIDS.DAT=/TEST/PCIIDS.DAT", "--file", "build/apps/USBIDS.DAT=/TEST/USBIDS.DAT",  # (the clock's double press opens it: phase D)
         "--file", "build/apps/MIXER.EXE=/TEST/MIXER.EXE",      # (... and the volume icon's the Mixer: phase F)
         "--cmd", "SERSAY HX-START win", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
         "--cmd", "VECCHK check", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"], timeout=2400)
@@ -7805,7 +7805,7 @@ def saver_case(profile, vcard, card):
     agent = Agent("saver-" + tag, profile, card, ["--card", vcard, "--file", "build/apps/STARS.SCR=/TEST/STARS.SCR",
         "--file", "build/apps/PIPES.SCR=/TEST/PIPES.SCR", "--file", "build/apps/TEXT.SCR=/TEST/TEXT.SCR",
         "--file", "build/apps/OBJECTS.SCR=/TEST/OBJECTS.SCR", "--file", "build/apps/MAZE.SCR=/TEST/MAZE.SCR",
-        "--file", "build/apps/CONTROL.EXE=/TEST/CONTROL.EXE", "--file", "build/apps/PCIIDS.DAT=/TEST/PCIIDS.DAT", "--cmd", "SERSAY HX-START saver", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
+        "--file", "build/apps/CONTROL.EXE=/TEST/CONTROL.EXE", "--file", "build/apps/PCIIDS.DAT=/TEST/PCIIDS.DAT", "--file", "build/apps/USBIDS.DAT=/TEST/USBIDS.DAT", "--cmd", "SERSAY HX-START saver", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
     agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
                    "-o", "ControlPersist=600"]
     out = os.path.join(ROOT, "out", "saver-" + tag)
@@ -11499,6 +11499,7 @@ def native_case(profile, vcard, card, bits):
                        "build/apps/PDFFONTS.DAT=/TEST/PDFFONTS.DAT",        # (the PDF Viewer's stand-in fonts)
                        "build/apps/HELP.DAT=/TEST/HELP.DAT",                # (the user guide: Help, and any app's F1)
                        "build/apps/PCIIDS.DAT=/TEST/PCIIDS.DAT",            # (the Control Panel's names for PCI devices)
+                       "build/apps/USBIDS.DAT=/TEST/USBIDS.DAT",            # (... and USB devices)
                        "tests/gui/drives/C/GLOS/GLOS.CFG=/TEST/GLOS.CFG"])   # (the Control Panel's, beside GLOS.EXE)
 
 
@@ -11612,7 +11613,7 @@ def control_case(profile, vcard, card):
     open(os.path.join(ROOT, script), "w").write("\n".join(lines) + "\n")
     agent = Agent("control-" + tag, profile, card, ["--card", vcard, "--sound", "sb16",
         "--pre", "SET BLASTER=A220 I5 D1 H5 T6", "--file", "%s=/TEST/GLOS.CFG" % os.path.relpath(cfg, ROOT),
-        "--file", "build/apps/CONTROL.EXE=/TEST/CONTROL.EXE", "--file", "build/apps/PCIIDS.DAT=/TEST/PCIIDS.DAT",
+        "--file", "build/apps/CONTROL.EXE=/TEST/CONTROL.EXE", "--file", "build/apps/PCIIDS.DAT=/TEST/PCIIDS.DAT", "--file", "build/apps/USBIDS.DAT=/TEST/USBIDS.DAT",
         "--cmd", "SERSAY HX-START control", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "VMODE",
         "--cmd", "SERSAY HX-DONE 0"], timeout=2400)
     agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),

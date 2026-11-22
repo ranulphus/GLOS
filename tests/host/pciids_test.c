@@ -1,6 +1,7 @@
-/* pciids_test FILE: apps/shared/pciids.c against the packed list the Control Panel ships (PCIIDS.DAT): the
+/* pciids_test FILE [USBFILE]: apps/shared/pciids.c against the packed list the Control Panel ships (PCIIDS.DAT): the
    names of the devices the benches and Loop A's machines have; a vendor it knows with a device it doesn't; one
-   it doesn't know; a file that is not one; damaged copies of it never read past their ends (with ASan). */
+   it doesn't know; a file that is not one; damaged copies of it never read past their ends (with ASan). And
+   USBIDS.DAT's names for a pad and a receiver, and a vendor's with a device it hasn't. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,6 +40,17 @@ int main(int argc, char **argv)
     CHECK(!strcmp(w[6].vendor_name, "Intel Corporation") && !w[6].device_name[0], "a device it hasn't: %s", w[6].device_name);
     CHECK(!w[7].vendor_name[0] && !w[7].device_name[0], "a vendor it hasn't");
     CHECK(pciids_lookup("/nonexistent/PCIIDS.DAT", w, 8) == -1 && !w[0].vendor_name[0], "no file");
+    if (argc > 2) {                             /* (USBIDS.DAT: the list of USB IDs, in the same form) */
+        static struct pci_name u[3];
+        u[0].vendor = 0x045e, u[0].device = 0x028e, u[1].vendor = 0x046d, u[1].device = 0xc52b;
+        u[2].vendor = 0x0002, u[2].device = 0xffff;
+        r = pciids_lookup(argv[2], u, 3);
+        CHECK(r == 3 && !strcmp(u[0].vendor_name, "Microsoft Corp.") && !strcmp(u[0].device_name, "Xbox360 Controller"),
+              "usb 045e:028e %d %s / %s", r, u[0].vendor_name, u[0].device_name);
+        CHECK(!strcmp(u[1].vendor_name, "Logitech, Inc.") && !strcmp(u[1].device_name, "Unifying Receiver"),
+              "usb 046d:c52b %s / %s", u[1].vendor_name, u[1].device_name);
+        CHECK(!strcmp(u[2].vendor_name, "Ingram") && !u[2].device_name[0], "usb 0002:ffff %s", u[2].vendor_name);
+    }
     /* a file that is not one, and damaged copies */
     f = fopen(argv[1], "rb");
     fseek(f, 0, SEEK_END);

@@ -279,17 +279,121 @@ static int a_list(void *ctx, const char *dir, struct gamelib_entry **out)
     return n;
 }
 
-static void scan(void)
+/* (phase F) The scan off the window's thread: the folders' listings are the slow part (a DOS call or more each).
+   The walk depends on them alone, not on what the library holds, so a worker scans an empty library of its own
+   and keeps every listing it read; the window's thread then scans the library itself from those, at once. A
+   folder taken out of the library meanwhile is not gone through. */
+struct listing { char *dir; struct gamelib_entry *e; int n; };
+struct scan_job {
+    char folder[GAMELIB_FOLDERS][128];
+    unsigned nfolders;
+    struct listing *ls;
+    int nls, room;
+};
+static struct gui_task *scanning;
+static int scan_again;                  /* (a scan asked for while one ran: another after it) */
+
+static int recorded(void *ctx, const char *dir, struct gamelib_entry **out)    /* (the worker's) */
 {
+    struct scan_job *j = ctx;
+    int n = a_list(NULL, dir, out);
+    struct listing *l;
+    if (j->nls == j->room) {
+        int room = j->room ? j->room * 2 : 64;
+        struct listing *m = realloc(j->ls, (size_t)room * sizeof *m);
+        if (!m)
+            return n;
+        j->ls = m, j->room = room;
+    }
+    l = &j->ls[j->nls];
+    l->n = n, l->e = NULL;
+    if (!(l->dir = malloc(strlen(dir) + 1)))
+        return n;
+    strcpy(l->dir, dir);
+    if (n > 0 && !(l->e = malloc((size_t)n * sizeof *l->e))) {
+        free(l->dir);
+        return n;
+    }
+    if (n > 0)
+        memcpy(l->e, *out, (size_t)n * sizeof *l->e);
+    j->nls++;
+    return n;
+}
+
+static int replayed(void *ctx, const char *dir, struct gamelib_entry **out)    /* (the window's) */
+{
+    struct scan_job *j = ctx;
+    int i;
+    for (i = 0; i < j->nls; i++)
+        if (!strcmp(j->ls[i].dir, dir)) {
+            if (j->ls[i].n < 0)
+                return -1;
+            if (!(*out = malloc((size_t)(j->ls[i].n ? j->ls[i].n : 1) * sizeof **out)))
+                return -1;
+            if (j->ls[i].n)
+                memcpy(*out, j->ls[i].e, (size_t)j->ls[i].n * sizeof **out);
+            return j->ls[i].n;
+        }
+    return a_list(NULL, dir, out);              /* (not read by the worker: read now) */
+}
+
+static void scan_work(struct gui_task *t, void *arg)
+{
+    struct scan_job *j = arg;
+    struct gamelib scratch;
     unsigned i;
+    gamelib_init(&scratch);
+    for (i = 0; i < j->nfolders && !(t && gui_task_cancelled(t)); i++)
+        gamelib_scan(&scratch, j->folder[i], recorded, j);
+    gamelib_free(&scratch);
+}
+
+static void scan(void);
+
+static void scan_done(struct gui_window *owner, void *arg, int cancelled)
+{
+    struct scan_job *j = arg;
+    unsigned i, k;
     int added = 0, n;
-    gui_set_text(status, GUI_T("Looking for games..."));
-    for (i = 0; i < lib.nfolders; i++)
-        if ((n = gamelib_scan(&lib, lib.folder[i], a_list, NULL)) > 0)
+    (void)owner;
+    scanning = NULL;
+    for (i = 0; !cancelled && i < j->nfolders; i++) {
+        for (k = 0; k < lib.nfolders && strcmp(lib.folder[k], j->folder[i]); k++)
+            ;
+        if (k < lib.nfolders && (n = gamelib_scan(&lib, j->folder[i], replayed, j)) > 0)
             added += n;
+    }
+    for (n = 0; n < j->nls; n++)
+        free(j->ls[n].dir), free(j->ls[n].e);
+    free(j->ls);
+    free(j);
     say("scanned folders=%u games=%u added=%d", lib.nfolders, lib.n, added);
     keep();
     reorder();
+    if (norder && !current())
+        gui_vlist_set(list, 0), show_page();
+    if (scan_again) {
+        scan_again = 0;
+        scan();
+    }
+}
+
+static void scan(void)
+{
+    struct scan_job *j;
+    if (scanning) {
+        scan_again = 1;
+        return;
+    }
+    if (!(j = calloc(1, sizeof *j)))
+        return;
+    memcpy(j->folder, lib.folder, sizeof j->folder);
+    j->nfolders = lib.nfolders;
+    gui_set_text(status, GUI_T("Looking for games..."));
+    if (!(scanning = gui_task_start(win, NULL, scan_work, j, scan_done, 0))) {
+        scan_work(NULL, j);                     /* (no threads to be had: here) */
+        scan_done(win, j, 0);
+    }
 }
 
 /* ---- playing */

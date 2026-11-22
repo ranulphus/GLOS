@@ -1510,3 +1510,29 @@ by `wrapcheck.py`).
   shows, then both served from the cache as they are turned; every other step as before.
 - **Not yet:** the page before drawn ahead too; a page drawn in parts as it comes (a slow page shows only
   when whole); continuous and two-page views.
+
+## The Games Library: the scan off the window's thread (2026-11-22)
+
+The notes' "the scan in the background": the folders' listings are the scan's slow part (a DOS call or more
+each), and its walk depends on them alone, not on what the library holds. So a worker (the toolkit's tasks)
+scans an empty library of its own and keeps every listing it reads; the window's thread then scans the
+library itself from those listings, at once, and the window is never still while the disk is read. A scan
+asked for while one runs follows it; a folder taken out meanwhile is not gone through. GAMES.EXE is linked
+with libglos's lock round the C library.
+
+- **Tests:** the Games scripts as before (`games`, `games-profile`, `games-run`: the scan's line comes from
+  the worker's end now), and the games suite.
+- **Not yet:** folders watched (a game copied in is found when the library is next opened, or by Look for
+  Games).
+
+## The Devices page: names for USB devices (2026-11-22)
+
+The page's "Not yet: names for USB devices (usb.ids)": the list of USB IDs (`usb.ids`, maintained by Stephen
+J. Gowdy; GPL-2.0-or-later or BSD-3-Clause, the same choice as pci.ids, and GLOS takes the BSD option as it does
+there: `apps/control/usbids/LICENSE`, THIRD_PARTY.md) is packed by `tools/mkpciids.py` into USBIDS.DAT in
+PCIIDS.DAT's form (vendors and devices, 237 KB), read by the same `pciids.c`. A USB device is shown as its
+vendor and device (the pad: "Microsoft Xbox360 Controller"), or what it is and its numbers where the list has
+none. USBIDS.DAT goes where PCIIDS.DAT goes (the installer, the suites' disks, bench-update).
+
+- **Tests:** `pciids_test` (host) reads USBIDS.DAT too (a pad, a receiver, a vendor with a device it hasn't);
+  `control-devices` (host) chooses the pad under its controller (`CONTROL devices usb-names=4 of 4`).

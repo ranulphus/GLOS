@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""mkpciids.py PCI.IDS OUT: the Devices page's names for PCI devices (apps/shared/pciids.c reads them).
+"""mkpciids.py PCI.IDS OUT: the Devices page's names for PCI devices (apps/shared/pciids.c reads them); and the same
+from usb.ids for USB devices (USBIDS.DAT: the list of USB IDs has the same form, http://www.linux-usb.org/usb.ids).
 
 From the PCI ID Project's list (pci.ids; https://pci-ids.ucw.cz/, used under its 3-clause BSD licence option:
 THIRD_PARTY.md): its header's lines (who keeps it, its version, its copyright), then the vendors and their
