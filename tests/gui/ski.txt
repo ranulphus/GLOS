@@ -68,7 +68,7 @@ wait "A Mountain's Number"
 key esc
 gone "A Mountain's Number"
 said SKI number left
-key alt+j
+key alt+s
 key b
 said SKI jacket 1
 shot blue "Fall Line"

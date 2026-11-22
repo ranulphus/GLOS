@@ -1582,3 +1582,18 @@ chosen.
 - **Tests:** `studio-record` (five clicks in its two seconds), `studio-countin` (host and the emulated
   desktops): the count-in's two seconds at 120, the C at 0 and the D at 960 ticks after it, seven clicks.
 - **Not yet:** the click following the song's tempo changes and its time signature.
+
+## Fall Line: four figures (2026-11-22)
+
+The owner's answer of the day (the question tool): a few figures to choose from, each with its jacket's colour.
+Four, drawn by rule as the first was (apps/ski/art.c), seen from above in each of the 32 headings and the three
+poses: the **skier** (as built: a bobble hat), the **racer** (a helmet with its visor, narrower, the skis closer
+and the poles bent back), the **snowboarder** (one board, the body along it and the beanie to the side the
+rider faces; ploughing, the board turned nearly across the way), the **sit-skier** (one wide ski under a seat,
+the legs forward, a helmet, two outriggers in the hands whose tails go out to brake). Each has its own fallen
+picture. The **Skier** menu (the Jacket menu before) chooses the figure, then the jacket; the figure is kept in
+the tables' file as a line of its own (`F n`: a reader of before passes it over). The run is the same whichever
+figure: the figures are pictures only.
+
+- **Tests:** `ski-figures` (host and the emulated desktops): the demonstration held at step 240 on mountain 7,
+  each figure there in turn (pictures); `ski` (the menu's new name); `ski_test`'s round trip keeps the figure.

@@ -204,55 +204,136 @@ static void things(void)
     colour(a, SHADOW), ellipse(a, 8, 4, 7, 3);
 }
 
-/* The skier seen from above, the skis pointing along o (32nds of a turn clockwise from straight down). Places
-   are said along the skis and across them, in 1/16 pixel from the skier's middle. */
-static void skier(struct art *a, int pose, int o, unsigned jacket)
+/* The figures seen from above, heading along o (32nds of a turn clockwise from straight down). Places are said
+   along the heading and across it, in 1/16 pixel from the figure's middle. Four figures (the owner's choice of
+   2026-11-22: a few to choose from), each in the jacket's colour: the skier (a bobble hat), the racer (a helmet,
+   narrower, poles bent back), the snowboarder (one board, standing across it; braking: the board turned
+   across), the sit-skier (one ski under a seat, two short outriggers in the hands). */
+#define PX(along, across) (cx + ((along) * dx + (across) * px) / 1024)
+#define PY(along, across) (cy + ((along) * dy + (across) * py) / 1024)
+#define HELMET 0xCCCCCCu
+#define DARK   0x333333u
+#define POLE   0x808080u
+
+static void skier(struct art *a, int pose, int o, unsigned jacket, int racer)
 {
     int dx = sin32(o), dy = cos32(o);   /* along the skis, 1024ths */
     int px = dy, py = -dx;              /* across them */
-    int cx = 15 * 16, cy = 15 * 16, side, head = pose == POSE_TUCK ? 48 : 16;
-#define PX(along, across) (cx + ((along) * dx + (across) * px) / 1024)
-#define PY(along, across) (cy + ((along) * dy + (across) * py) / 1024)
+    int cx = 15 * 16, cy = 15 * 16, side, head = pose == POSE_TUCK ? 48 : 16, gap = racer ? 40 : 48;
     begin(a, 31, 31, 15, 15);
-    colour(a, 0x333333u);               /* the skis: side by side, or in a plough their tips together */
+    colour(a, DARK);                    /* the skis: side by side, or in a plough their tips together */
     for (side = -1; side <= 1; side += 2) {
-        int back = (pose == POSE_PLOUGH ? 88 : 48) * side, front = (pose == POSE_PLOUGH ? 16 : 48) * side;
+        int back = (pose == POSE_PLOUGH ? 88 : gap) * side, front = (pose == POSE_PLOUGH ? 16 : gap) * side;
         line(a, PX(-144, back), PY(-144, back), PX(160, front), PY(160, front), 2);
     }
-    if (pose != POSE_TUCK) {            /* the poles, held out and back (tucked: under the arms, not seen) */
-        colour(a, 0x808080u);
+    if (pose != POSE_TUCK) {            /* the poles, held out and back (tucked: under the arms, not seen); the
+                                           racer's bent back along the body */
+        colour(a, POLE);
         for (side = -1; side <= 1; side += 2)
-            line(a, PX(16, side * 96), PY(16, side * 96), PX(-112, side * 120), PY(-112, side * 120), 1);
+            if (racer)
+                line(a, PX(8, side * 72), PY(8, side * 72), PX(-128, side * 80), PY(-128, side * 80), 1);
+            else
+                line(a, PX(16, side * 96), PY(16, side * 96), PX(-112, side * 120), PY(-112, side * 120), 1);
     }
     colour(a, jacket);                  /* the body and the arms */
-    ellipse(a, PX(0, 0) / 16, PY(0, 0) / 16, pose == POSE_TUCK ? 4 : 5, pose == POSE_TUCK ? 4 : 5);
+    ellipse(a, PX(0, 0) / 16, PY(0, 0) / 16, pose == POSE_TUCK || racer ? 4 : 5, pose == POSE_TUCK || racer ? 4 : 5);
     if (pose != POSE_TUCK)
         for (side = -1; side <= 1; side += 2)
-            line(a, PX(0, side * 48), PY(0, side * 48), PX(16, side * 96), PY(16, side * 96), 3);
-    colour(a, 0x333333u);               /* the hat */
-    ellipse(a, PX(head, 0) / 16, PY(head, 0) / 16, 2, 2);
-    colour(a, SNOW);                    /* ... and its bobble */
-    rect(a, PX(head, 0) / 16, PY(head, 0) / 16, 1, 1);
-#undef PX
-#undef PY
+            line(a, PX(0, side * 48), PY(0, side * 48), PX(16, side * (racer ? 72 : 96)), PY(16, side * (racer ? 72 : 96)), 3);
+    if (racer) {                        /* the helmet, its visor at the front */
+        colour(a, HELMET);
+        ellipse(a, PX(head, 0) / 16, PY(head, 0) / 16, 3, 3);
+        colour(a, DARK);
+        rect(a, PX(head + 40, 0) / 16, PY(head + 40, 0) / 16, 1, 1);
+    } else {
+        colour(a, DARK);                /* the hat */
+        ellipse(a, PX(head, 0) / 16, PY(head, 0) / 16, 2, 2);
+        colour(a, SNOW);                /* ... and its bobble */
+        rect(a, PX(head, 0) / 16, PY(head, 0) / 16, 1, 1);
+    }
 }
 
-void art_make(unsigned jacket)
+static void boarder(struct art *a, int pose, int o, unsigned jacket)
+{
+    int b = pose == POSE_PLOUGH ? o + 7 : o;    /* braking: the board turned nearly across the way */
+    int dx = sin32(o), dy = cos32(o), px = dy, py = -dx;
+    int bx = sin32(b), by = cos32(b), qx = by, qy = -bx;        /* along the board, and across it */
+    int cx = 15 * 16, cy = 15 * 16, side, crouch = pose == POSE_TUCK, reach = crouch ? 40 : 56;
+    (void)px, (void)py;
+    begin(a, 31, 31, 15, 15);
+    colour(a, DARK);                    /* the board: long, wide, round at its ends */
+    line(a, cx - 184 * bx / 1024, cy - 184 * by / 1024, cx + 184 * bx / 1024, cy + 184 * by / 1024, 5);
+    colour(a, jacket);                  /* the body along the board, shoulders over the feet; the arms out at its ends */
+    line(a, cx - reach * bx / 1024, cy - reach * by / 1024, cx + reach * bx / 1024, cy + reach * by / 1024, crouch ? 5 : 4);
+    if (!crouch)
+        for (side = -1; side <= 1; side += 2)
+            line(a, cx + side * 56 * bx / 1024, cy + side * 56 * by / 1024, cx + side * 104 * bx / 1024 + 32 * qx / 1024,
+                 cy + side * 104 * by / 1024 + 32 * qy / 1024, 2);
+    colour(a, DARK);                    /* the beanie: over the middle, a little to the side the rider faces */
+    ellipse(a, (cx + 24 * qx / 1024) / 16, (cy + 24 * qy / 1024) / 16, 2, 2);
+}
+
+static void sitter(struct art *a, int pose, int o, unsigned jacket)
+{
+    int dx = sin32(o), dy = cos32(o), px = dy, py = -dx;
+    int cx = 15 * 16, cy = 15 * 16, side, out = pose == POSE_PLOUGH ? 112 : pose == POSE_TUCK ? 72 : 96;
+    begin(a, 31, 31, 15, 15);
+    colour(a, DARK);                    /* the ski, long and wide, under the seat */
+    line(a, PX(-160, 0), PY(-160, 0), PX(176, 0), PY(176, 0), 3);
+    colour(a, POLE);                    /* the outriggers: short skis on the hands' sticks; braking, their tails out */
+    for (side = -1; side <= 1; side += 2) {
+        line(a, PX(16, side * 40), PY(16, side * 40), PX(16, side * out), PY(16, side * out), 1);
+        line(a, PX(-40, side * (out + (pose == POSE_PLOUGH ? 24 : 0))), PY(-40, side * (out + (pose == POSE_PLOUGH ? 24 : 0))),
+             PX(72, side * out), PY(72, side * out), 2);
+    }
+    colour(a, 0x666666u);               /* the seat's frame */
+    ellipse(a, PX(-24, 0) / 16, PY(-24, 0) / 16, 4, 4);
+    colour(a, jacket);                  /* the body in the seat, the legs forward along the ski */
+    ellipse(a, PX(-16, 0) / 16, PY(-16, 0) / 16, pose == POSE_TUCK ? 3 : 4, pose == POSE_TUCK ? 3 : 4);
+    line(a, PX(0, 0), PY(0, 0), PX(80, 0), PY(80, 0), 4);
+    colour(a, HELMET);                  /* the helmet */
+    ellipse(a, PX(-32, 0) / 16, PY(-32, 0) / 16, 2, 2);
+}
+
+static void figure(struct art *a, int fig, int pose, int o, unsigned jacket)
+{
+    if (fig == FIGURE_BOARDER)
+        boarder(a, pose, o, jacket);
+    else if (fig == FIGURE_SITTER)
+        sitter(a, pose, o, jacket);
+    else
+        skier(a, pose, o, jacket, fig == FIGURE_RACER);
+}
+
+void art_make(int fig, unsigned jacket)
 {
     struct art *a;
     int pose, o;
     things();
     for (pose = 0; pose < POSE_COUNT; pose++)
         for (o = 0; o < 32; o++)
-            skier(&art_skier[pose][o], pose, o, jacket);
-    a = &art_thing[ART_FALLEN];         /* down: the skis crossed, the skier beside them */
+            figure(&art_skier[pose][o], fig, pose, o, jacket);
+    a = &art_thing[ART_FALLEN];         /* down: what it rides crossed or on its side, the figure beside it */
     begin(a, 31, 31, 15, 15);
-    colour(a, 0x333333u);
-    line(a, 4 * 16, 8 * 16, 26 * 16, 22 * 16, 2), line(a, 6 * 16, 24 * 16, 24 * 16, 6 * 16, 2);
+    colour(a, DARK);
+    if (fig == FIGURE_BOARDER) {
+        line(a, 5 * 16, 22 * 16, 25 * 16, 8 * 16, 4);
+    } else if (fig == FIGURE_SITTER) {
+        line(a, 4 * 16, 20 * 16, 26 * 16, 12 * 16, 3);
+        colour(a, POLE), line(a, 8 * 16, 6 * 16, 14 * 16, 4 * 16, 2), line(a, 18 * 16, 26 * 16, 24 * 16, 24 * 16, 2);
+    } else {
+        line(a, 4 * 16, 8 * 16, 26 * 16, 22 * 16, 2), line(a, 6 * 16, 24 * 16, 24 * 16, 6 * 16, 2);
+    }
     colour(a, jacket), ellipse(a, 15, 17, 7, 4);
-    colour(a, 0x333333u), ellipse(a, 23, 15, 2, 2);
-    colour(a, SNOW), rect(a, 23, 15, 1, 1);
+    if (fig == FIGURE_RACER || fig == FIGURE_SITTER) {
+        colour(a, HELMET), ellipse(a, 23, 15, 3, 3);
+    } else {
+        colour(a, DARK), ellipse(a, 23, 15, 2, 2);
+        colour(a, SNOW), rect(a, 23, 15, 1, 1);
+    }
 }
+#undef PX
+#undef PY
 
 void art_draw(struct gfx_surface *s, const struct art *a, int x, int y)
 {

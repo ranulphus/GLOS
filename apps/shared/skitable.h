@@ -27,6 +27,7 @@ struct ski_tables {
     int day_date;                       /* the day those are of */
     char player[20];                    /* the name last put in a table, and the choices last made */
     int grade_last, mode_last, jacket;
+    int figure;                         /* (2026-11-22) the figure chosen: 0 the skier ... (the game's FIGURE_) */
 };
 
 void skitables_init(struct ski_tables *t);

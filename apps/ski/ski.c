@@ -51,7 +51,7 @@
 #define GAME_NAME "Fall Line"           /* (the owner's choice, 2026-11-21) */
 
 enum { C_AGAIN = 1, C_NEW, C_DAY, C_NUMBER, C_WATCH, C_TABLES, C_PAUSE, C_EXIT, C_SLALOM, C_FREE, C_GREEN, C_BLUE, C_RED, C_BLACK,
-       C_SOUND, C_JACKET };             /* (C_JACKET + n: the jackets) */
+       C_SOUND, C_JACKET, C_FIGURE = C_JACKET + 8 };     /* (C_JACKET + n: the jackets; C_FIGURE + n: the figures) */
 enum { P_READY, P_RUN, P_PAUSED, P_DONE };
 
 #define FW 480                          /* the field */
@@ -62,6 +62,8 @@ enum { P_READY, P_RUN, P_PAUSED, P_DONE };
 
 static const char *const grade_name[4] = { GUI_N("Green"), GUI_N("Blue"), GUI_N("Red"), GUI_N("Black") };
 static const unsigned grade_rgb[4] = { 0x339933u, 0x3366CCu, 0xCC0000u, 0x333333u };
+static const char *const figures[FIGURE_COUNT] = { GUI_N("&Skier"), GUI_N("R&acer"), GUI_N("Sn&owboarder"),
+                                                   GUI_N("Si&t-skier") };   /* (the owner's: a few to choose) */
 static const struct { const char *name; unsigned rgb; } jackets[5] = {
     { GUI_N("&Red"), 0xFF3333u }, { GUI_N("&Blue"), 0x3366FFu }, { GUI_N("&Green"), 0x33CC33u }, { GUI_N("&Yellow"), 0xFFCC00u },
     { GUI_N("&Purple"), 0x9933CCu } };
@@ -71,7 +73,7 @@ static struct gui_widget *canvas;
 static struct skirun run;
 static int phase = P_READY, watching;   /* watching: the careful skier has the skis */
 static unsigned seed = 1;
-static int grade = SKI_BLUE, mode = SKI_SLALOM, of_day, jacket;
+static int grade = SKI_BLUE, mode = SKI_SLALOM, of_day, jacket, figure;
 static unsigned last_ms, acc;           /* the frame's clock: milliseconds times sixty not yet made steps of */
 static long until = -1;                 /* the suite's: the picture held at this step ... */
 static long untils[8];                  /* ... and at these after it, each when the one before is let go */
@@ -134,7 +136,7 @@ static void tables_load(void)
 static void tables_keep(void)
 {
     FILE *f;
-    tables.grade_last = grade, tables.mode_last = mode, tables.jacket = jacket;
+    tables.grade_last = grade, tables.mode_last = mode, tables.jacket = jacket, tables.figure = figure;
     if (!table_path[0] || !(f = gui_fopen(table_path, "w")))
         return;
     skitables_write(&tables, f);
@@ -797,9 +799,17 @@ static unsigned new_seed(void)
 static void command(struct gui_window *w, int id)
 {
     (void)w;
+    if (id >= C_FIGURE && id < C_FIGURE + FIGURE_COUNT) {
+        figure = id - C_FIGURE;
+        art_make(figure, jackets[jacket].rgb);
+        tables_keep();
+        gui_damage(canvas);
+        say("figure %d", figure);
+        return;
+    }
     if (id >= C_JACKET && id < C_JACKET + 5) {
         jacket = id - C_JACKET;
-        art_make(jackets[jacket].rgb);
+        art_make(figure, jackets[jacket].rgb);
         tables_keep();
         gui_damage(canvas);
         say("jacket %d", jacket);
@@ -869,6 +879,8 @@ static void update(struct gui_window *w)
         gui_command_check(w, C_GREEN + i, grade == i);
     for (i = 0; i < 5; i++)
         gui_command_check(w, C_JACKET + i, jacket == i);
+    for (i = 0; i < FIGURE_COUNT; i++)
+        gui_command_check(w, C_FIGURE + i, figure == i);
     gui_command_check(w, C_DAY, of_day);
     gui_command_check(w, C_SOUND, sound_on);
     gui_command_enable(w, C_PAUSE, phase == P_RUN || phase == P_PAUSED);
@@ -926,6 +938,8 @@ static void build(void)
     }
     for (i = 0; i < 5; i++)
         gui_command(win, C_JACKET + i, GUI_T(jackets[i].name), NULL, NULL, NULL);
+    for (i = 0; i < FIGURE_COUNT; i++)
+        gui_command(win, C_FIGURE + i, GUI_T(figures[i]), NULL, NULL, NULL);
     bar = gui_menubar(win);
     m = gui_menu(bar, GUI_T("&Game"));
     gui_menu_command(m, C_AGAIN), gui_menu_command(m, C_PAUSE), gui_menu_command(m, C_WATCH);
@@ -940,7 +954,10 @@ static void build(void)
     gui_menu_sep(m);
     for (i = 0; i < 4; i++)
         gui_menu_command(m, C_GREEN + i);
-    m = gui_menu(bar, GUI_T("&Jacket"));
+    m = gui_menu(bar, GUI_T("&Skier"));         /* the figure, then its jacket */
+    for (i = 0; i < FIGURE_COUNT; i++)
+        gui_menu_command(m, C_FIGURE + i);
+    gui_menu_sep(m);
     for (i = 0; i < 5; i++)
         gui_menu_command(m, C_JACKET + i);
     canvas = gui_canvas(win->root, FW + SW, FH, draw, field_event);
@@ -984,13 +1001,14 @@ int main(int argc, char **argv)
     tables_load();
     ghost_load();
     grade = tables.grade_last, mode = tables.mode_last, jacket = tables.jacket < 5 ? tables.jacket : 0;
+    figure = tables.figure < FIGURE_COUNT ? tables.figure : 0;
     if (!demo)
         seed = new_seed();
     if (demo_grade >= 0)
         grade = demo_grade;
     if (demo)
         mode = free_run ? SKI_FREE : SKI_SLALOM;
-    art_make(jackets[jacket].rgb);
+    art_make(figure, jackets[jacket].rgb);
     build();
     ready();
     gui_show(win, 1);

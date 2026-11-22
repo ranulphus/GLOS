@@ -118,4 +118,4 @@ reader's messages do for v1); two players on one PC.
 ## For the owner (answered 2026-11-21)
 
 - **The name: Cushion.** No pickups, as planned (the owner's answers by the question tool).
-- Still open: the setting (harbour yards and basins, as built, or something else with walls and floors).
+- **The setting (answered 2026-11-22): the harbour**, yards and basins, as built.

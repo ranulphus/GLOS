@@ -26,7 +26,9 @@ extern struct art art_thing[ART_COUNT];
 extern struct art art_skier[POSE_COUNT][32];    /* by pose, and by where the skis point: 32nds of a turn, clockwise
                                                    from straight down the slope */
 
-void art_make(unsigned jacket);         /* every picture (again, for another jacket) */
+enum { FIGURE_SKIER, FIGURE_RACER, FIGURE_BOARDER, FIGURE_SITTER, FIGURE_COUNT };      /* (the owner's: 2026-11-22) */
+
+void art_make(int figure, unsigned jacket);     /* every picture (again, for another figure or jacket) */
 void art_draw(struct gfx_surface *s, const struct art *a, int x, int y);
 void art_draw_plain(struct gfx_surface *s, const struct art *a, int x, int y, unsigned rgb);   /* its shape, in one colour */
 

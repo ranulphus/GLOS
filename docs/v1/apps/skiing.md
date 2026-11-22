@@ -108,5 +108,5 @@ points below.
 ## For the owner (answered 2026-11-21)
 
 - **The name: Fall Line.** A fall costs time only, as planned (the owner's answers by the question tool).
-- Still open: the skier's figure (one figure whose jacket's colour is chosen, as built, or a few to choose
-  from).
+- **The skier (answered 2026-11-22): a few figures to choose from**, each with its jacket's colour (the owner,
+  by the question tool, over one figure as built).

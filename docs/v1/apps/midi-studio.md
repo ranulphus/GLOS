@@ -103,7 +103,7 @@ programs can play.
 
 ## Open points
 
-- **USB MIDI:** the owner's MIDI keyboard(s), to capture their descriptors (as the pads' J0) before the USB MIDI
-  driver is written.
+- **USB MIDI (answered 2026-11-22): after v1.** The owner has no USB MIDI keyboard for a bench; Studio keeps the
+  PC's keys and an MPU-401's input, and the USB MIDI class driver waits for a keyboard to test on.
 - **An MPU-401:** the Pentium III bench's C-Media CM8738 has an MPU-401 UART (route, phase H). bench-g400's
   Crystal chip shows none.

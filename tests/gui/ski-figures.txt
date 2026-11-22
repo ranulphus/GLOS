@@ -1,0 +1,27 @@
+# Fall Line's figures (the owner's choice of 2026-11-22: a few to choose from): the demonstration held on
+# mountain 7 at step 240, and the Skier menu's figures there in turn, in the red jacket: the racer, the
+# snowboarder, the sit-skier; then the skier again.
+run SKI.EXE -demo 7 -grade 2 -until 240 -speed 4 -table C:\\OUT\\SKIFIG.DAT -day 20261121
+wait "Fall Line"
+said SKI ready seed=7 grade=2 mode=0 day=0
+said SKI started watching
+pause 1500
+said SKI at 240 x=435 y=827 speed=232 score=0 gates=1/0 falls=0
+key alt+s
+key a
+said SKI figure 1
+shot racer "Fall Line"
+key alt+s
+key o
+said SKI figure 2
+shot boarder "Fall Line"
+key alt+s
+key t
+said SKI figure 3
+shot sitter "Fall Line"
+key alt+s
+key s
+said SKI figure 0
+key alt+f4
+gone "Fall Line"
+expect SKI end
