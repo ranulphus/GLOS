@@ -1364,3 +1364,18 @@ keys" (`docs/v1/apps/midi-studio.md`), as recording: **F7** (Transport, Record).
   at 0, 960 and 1920 ticks; undone and done again. The MPU-401's input waits for a bench with a keyboard.
 - **Not yet:** step entry at a cursor (a note a key press, the cursor moving on); a count-in and a click; USB
   MIDI keyboards (the USB MIDI class on GLOS's stack); velocity from the PC's keys.
+
+## The PDF Viewer: choosing text with the mouse (2026-11-22)
+
+The text tool the page's text wanted (the left button moves the page): **Select Text** (Edit, Ctrl+T). While
+it is on, the view's left button is the app's (the image view's `GUI_CV_TOOLS`) and the pointer is the text
+cursor; a press and a drag choose the letters from the one nearest the press to the one nearest the pointer,
+in the order the page's words show them (`letter_near`: inside a letter's box, or the nearest, the line below
+further than a letter beside), tinted as what is found is (`show_hit_at` without the scroll). **Copy** takes
+what is chosen, or the page's text when nothing is. The choice goes with the page, a search and the file.
+
+- **Tests:** `pdf-select` (host and the emulated Pentiums, no pictures: they are the host's alone for PDFs):
+  the guide's first page at its actual size, a drag across "GLOS reads PDF files" (20 letters, said), Copy
+  20 bytes.
+- **Not yet:** a choice over two pages; double and triple clicks for a word and a line; Shift and the arrow
+  keys.

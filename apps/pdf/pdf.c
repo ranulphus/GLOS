@@ -34,7 +34,7 @@
 #include "../shared/picfile.h"
 
 enum { C_OPEN = 1, C_EXIT, C_PREV, C_NEXT, C_FIRST, C_LAST, C_GOTO, C_ZOOMIN, C_ZOOMOUT, C_ACTUAL, C_FITW, C_COPY, C_FIND, C_FINDNEXT,
-       C_FINDPREV, C_OUTLINE };
+       C_FINDPREV, C_OUTLINE , C_SELECT};
 
 #define MAX_PIXELS 3000000l
 #define KEEP (2ul << 20)                /* the file's objects kept between pages: bytes */
@@ -58,6 +58,9 @@ static int have_letters;
 static char needle[100];                /* what was last looked for */
 static long hit = -1;                   /* what was found on this page: its first letter, and how many */
 static unsigned hit_len;
+static int text_tool;                   /* Select Text: the left button chooses the page's text (else it moves the page) */
+static long sel_a = -1, sel_b = -1;     /* ... where the choosing began and where it is: letters of this page's (-1: none) */
+static int choosing;                    /* the button is down choosing */
 static struct { int x, y, w, h; unsigned *was; } marks[24];    /* the parts of the picture tinted for it */
 static int nmarks;
 
@@ -171,7 +174,10 @@ static void letter_box(const struct pdf_letter *l, double scale, int *x0, int *y
     *x0 = (int)floor(lo_x), *y0 = (int)floor(lo_y), *x1 = (int)ceil(hi_x), *y1 = (int)ceil(hi_y);
 }
 
-static void show_hit(void)              /* what was found: tinted, a mark a line of it, and scrolled into sight */
+static void show_hit_at(int scroll);
+static void show_hit(void) { show_hit_at(1); }
+
+static void show_hit_at(int scroll)     /* what was found (or chosen): tinted, a mark a line of it, and scrolled into sight */
 {
     int rx0 = 0, ry0 = 0, rx1 = 0, ry1 = 0, have = 0, fx = 0, fy = 0, first = 1;
     unsigned i;
@@ -196,8 +202,79 @@ static void show_hit(void)              /* what was found: tinted, a mark a line
     }
     if (have)
         mark(rx0, ry0, rx1, ry1);
-    gui_cview_scroll(view, fx > view->r.w - 80 ? fx - 40 : 0, fy > view->r.h / 3 ? fy - view->r.h / 3 : 0);
+    if (scroll)
+        gui_cview_scroll(view, fx > view->r.w - 80 ? fx - 40 : 0, fy > view->r.h / 3 ? fy - view->r.h / 3 : 0);
     gui_damage(view);
+}
+
+/* ---- text chosen with the mouse (Select Text): the letters from where the button went down to where it is, in
+   the order the page's words show them, tinted as what is found is; Copy takes them. */
+
+static long letter_near(int x, int y)   /* the page's letter at the picture's point, or the nearest */
+{
+    long best = -1;
+    double best_d = 1e18;
+    unsigned i;
+    for (i = 0; i < nletters; i++) {
+        int x0, y0, x1, y1;
+        double cx, cy, d;
+        if (letters[i].u == '\n')
+            continue;
+        letter_box(&letters[i], zoom / 100.0, &x0, &y0, &x1, &y1);
+        if (x >= x0 && x < x1 && y >= y0 && y < y1)
+            return (long)i;
+        cx = x < x0 ? x0 - x : x >= x1 ? x - x1 + 1 : 0;
+        cy = y < y0 ? y0 - y : y >= y1 ? y - y1 + 1 : 0;
+        d = cx * cx + cy * cy * 4;              /* (the line below is further than a letter beside) */
+        if (d < best_d)
+            best_d = d, best = (long)i;
+    }
+    return best;
+}
+
+static void show_sel(void)
+{
+    if (sel_a < 0 || sel_b < 0)
+        return;
+    hit = sel_a < sel_b ? sel_a : sel_b;
+    hit_len = (unsigned)((sel_a < sel_b ? sel_b - sel_a : sel_a - sel_b) + 1);
+    show_hit_at(0);
+}
+
+static int page_letters(unsigned n);
+
+static int view_mouse(struct gui_widget *w, struct gui_ev *e, int x, int y)
+{
+    long k;
+    (void)w;
+    if (!text_tool || !doc)
+        return 0;                               /* (the button moves the page, as ever) */
+    if (e->type == GUI_EV_PRESS && e->button == 1) {
+        if (page_letters(page) != 0 || !nletters)
+            return 1;
+        k = letter_near(x, y);
+        sel_a = sel_b = k;
+        choosing = k >= 0;
+        show_sel();
+        return 1;
+    }
+    if (e->type == GUI_EV_MOVE && choosing) {
+        k = letter_near(x, y);
+        if (k >= 0 && k != sel_b) {
+            sel_b = k;
+            show_sel();
+        }
+        return 1;
+    }
+    if (e->type == GUI_EV_RELEASE && choosing) {
+        unsigned long n = 0;
+        char *t = hit >= 0 ? pdf_text_utf8(letters, (unsigned)hit, (unsigned)hit + hit_len, &n) : NULL;
+        choosing = 0;
+        say("chose %u letters: %.60s", hit_len, t ? t : "");    /* (the suite's: what was chosen, its start) */
+        free(t);
+        return 1;
+    }
+    return e->type == GUI_EV_PRESS || e->type == GUI_EV_RELEASE || e->type == GUI_EV_MOVE;
 }
 
 /* ---- the page shown */
@@ -272,7 +349,7 @@ static void forget(void)                /* the file and its picture let go (the 
 {
     marks_forget();
     free(letters);
-    letters = NULL, nletters = 0, have_letters = 0, hit = -1;
+    letters = NULL, nletters = 0, have_letters = 0, hit = -1, sel_a = sel_b = -1;
     pdf_marks_free(toc, ntoc);
     toc = NULL, ntoc = 0;
     free(bitmap);
@@ -377,7 +454,7 @@ static void go(long to)
     to = to < 0 ? 0 : to >= (long)pdf_pages(doc) ? (long)pdf_pages(doc) - 1 : to;
     if ((unsigned)to != page) {
         page = (unsigned)to;
-        hit = -1;
+        hit = -1, sel_a = sel_b = -1;
         draw_page();
     }
 }
@@ -426,11 +503,11 @@ static void find_next(int back)
             }
         }
         if (tried == 0)
-            hit = -1;
+            hit = -1, sel_a = sel_b = -1;
         p = back ? (p ? p - 1 : pages - 1) : (p + 1 < pages ? p + 1 : 0);
     }
     gui_cview_cursor(view, GLOS_CURSOR_ARROW);
-    hit = -1;
+    hit = -1, sel_a = sel_b = -1;
     unmark();
     gui_damage(view);
     say("not found %s", needle);
@@ -448,7 +525,7 @@ static void find(void)
         return;
     if (strcmp(what, needle)) {                 /* (another text: from this page's top) */
         snprintf(needle, sizeof needle, "%s", what);
-        hit = -1;
+        hit = -1, sel_a = sel_b = -1;
         unmark();
     }
     find_next(0);
@@ -456,8 +533,9 @@ static void find(void)
 
 static void copy_text(void)
 {
-    unsigned long n = 0;
+    unsigned long n = 0, from = 0, count;
     char *t;
+    int some;
     if (!doc || page_letters(page) != 0)
         return;
     if (!nletters) {
@@ -465,11 +543,15 @@ static void copy_text(void)
         say("copied 0");
         return;
     }
-    if (!(t = pdf_text_utf8(letters, 0, nletters, &n)))
+    some = sel_a >= 0 && sel_b >= 0 && hit >= 0;       /* (the text chosen with the mouse, or the page's) */
+    count = nletters;
+    if (some)
+        from = (unsigned long)hit, count = hit_len;
+    if (!(t = pdf_text_utf8(letters, (unsigned)from, (unsigned)(from + count), &n)))
         return;
     gui_clip_set(t, n);
     free(t);
-    gui_set_text(status, GUI_T("The page's text was copied."));
+    gui_set_text(status, some ? GUI_T("The chosen text was copied.") : GUI_T("The page's text was copied."));
     say("copied %lu", n);
 }
 
@@ -586,6 +668,13 @@ static void command(struct gui_window *w, int id)
     case C_COPY:
         copy_text();
         break;
+    case C_SELECT:                              /* the mouse chooses text, or moves the page again */
+        text_tool = !text_tool;
+        gui_cview_style(view, GUI_CV_CENTRE | GUI_CV_RING | (text_tool ? GUI_CV_TOOLS : 0), 0);   /* (the left button: the
+                                                   app's, not the view's pan) */
+        gui_cview_cursor(view, text_tool ? GLOS_CURSOR_TEXT : GLOS_CURSOR_MOVE);
+        say("select text %s", text_tool ? "on" : "off");
+        break;
     case C_FIND:
         find();
         break;
@@ -615,6 +704,7 @@ static void update(struct gui_window *w)
     gui_command_enable(w, C_FITW, doc != NULL);
     gui_command_check(w, C_FITW, fit);
     gui_command_enable(w, C_COPY, doc != NULL);
+    gui_command_check(w, C_SELECT, text_tool);
     gui_command_enable(w, C_FIND, doc != NULL);
     gui_command_enable(w, C_FINDNEXT, doc && needle[0]);
     gui_command_enable(w, C_FINDPREV, doc && needle[0]);
@@ -641,7 +731,9 @@ static void build(void)
     gui_command(win, C_ZOOMOUT, GUI_T("Zoom &Out"), "Ctrl+-", gui_glyph("zoom-out"), GUI_T("Zoom out"));
     gui_command(win, C_ACTUAL, GUI_T("&Actual Size"), "Ctrl+1", NULL, NULL);
     gui_command(win, C_FITW, GUI_T("Fit &Width"), "Ctrl+2", NULL, NULL);
-    gui_command(win, C_COPY, GUI_T("&Copy Page Text"), "Ctrl+C", gui_glyph("copy"), GUI_T("Copy this page's text"));
+    gui_command(win, C_COPY, GUI_T("&Copy"), "Ctrl+C", gui_glyph("copy"), GUI_T("Copy the text chosen, or the page's"));
+    gui_command(win, C_SELECT, GUI_T("&Select Text"), "Ctrl+T", gui_glyph("select"),
+                GUI_T("The mouse chooses text to copy (else it moves the page)"));
     gui_command(win, C_FIND, GUI_T("&Find..."), "Ctrl+F", gui_glyph("find"), GUI_T("Find text in the file"));
     gui_command(win, C_FINDNEXT, GUI_T("Find &Next"), "F3", NULL, NULL);
     gui_command(win, C_FINDPREV, GUI_T("Find &Previous"), "Shift+F3", NULL, NULL);
@@ -652,7 +744,7 @@ static void build(void)
     gui_menu_sep(m);
     gui_menu_command(m, C_EXIT);
     m = gui_menu(bar, GUI_T("&Edit"));
-    gui_menu_command(m, C_COPY);
+    gui_menu_command(m, C_COPY), gui_menu_command(m, C_SELECT);
     gui_menu_sep(m);
     gui_menu_command(m, C_FIND), gui_menu_command(m, C_FINDNEXT), gui_menu_command(m, C_FINDPREV);
     m = gui_menu(bar, GUI_T("&View"));
@@ -678,6 +770,7 @@ static void build(void)
     tree = gui_tree(split);
     gui_on(tree, outline_on, 0);
     view = gui_image_view(split);
+    gui_cview_on_event(view, view_mouse);       /* (Select Text: the mouse chooses text there) */
     gui_split_fold(split, 1);                   /* (no outline until a file has one) */
     status = gui_status(win);
 }

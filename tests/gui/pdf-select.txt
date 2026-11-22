@@ -1,0 +1,25 @@
+#pentium (the PDF Viewer's floor is a Pentium)
+# The PDF Viewer's Select Text (apps/pdf; phase F's second part): the first page of tests/gui/mkpdf.py's PDF at
+# its actual size, the text tool on, a drag across a line's words: those letters chosen and tinted; Copy takes
+# them, not the page.
+run PDF.EXE
+wait "PDF Viewer"
+key ctrl+o
+wait "Open"
+type C:\\GLOS\\GUIDE.PDF\n
+said PDF opened GUIDE.PDF pages=2
+said PDF outline 3
+said PDF page 1 of 2 423x547 at 69%
+key ctrl+1
+said PDF page 1 of 2 612x792 at 100%
+key ctrl+t
+said PDF select text on
+drag "PDF Viewer" 250 173 355 173
+said PDF chose 20 letters: GLOS reads PDF files
+key ctrl+c
+said PDF copied 20
+key ctrl+t
+said PDF select text off
+key alt+f4
+gone "PDF Viewer"
+expect PDF end
