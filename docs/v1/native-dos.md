@@ -634,8 +634,9 @@ bootinfo); and the ways out (`glos exit` back to DOS, DOWN, /ROUNDTRIP).
   environment of PATH and COMSPEC (GLOS's own COMMAND.COM in `\GLOS`); GLOS.CFG's `[shell]` is read (its `options`
   carry flags: `/ROUNDTRIP` gives NB1's round trip). `loopa-nboot`'s NB2 cases (bf6, 486): SSH up, VER, `dir
   C:\GLOS`, a file written and read back on C:, GLOS's COMMAND.COM run as a job; GLOS.CFG read by the kernel
-  through the DOS server; nothing unanswered. Open: the console (NB3); the disk cache under `fsv.c` (today the
-  native volume's I/O goes past the cache, which a program's INT 13h on the same disk would see stale).
+  through the DOS server; nothing unanswered. The C: volume's I/O goes past the disk cache; its writes tell the
+  cache which sectors to forget (`cache_forget`), so a program's INT 13h through the cache never reads them stale
+  (its reads are only not cached: the cache under `fsv.c` itself is later work). Open then: the console (NB3).
 - **NB3, waits and the console:** the HLT-and-again wait; lcon and the shell's terminal typing into GLOS's DOS;
   INT 2Fh answered; Ctrl-C into sessions' programs. **Built 2026-11-22:** keys come as they come to DOS: the VM's
   keyboard (the PC's, lcon's and the shell's typing, `glos type` and `glos key`) into the BIOS's INT 09h and its
