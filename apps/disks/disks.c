@@ -9,15 +9,19 @@
  *   - a floppy formatted (its file system made new: the disk as its drive formats it);
  *   - a hard disk's partitions listed;
  *   - an image (or a floppy) looked inside: its folders and files, which can be copied out;
- *   - a new image made of a folder's files.
+ *   - a new image made of a folder's files;
+ *   - a folder backed up to another computer over SFTP (everything, or what changed since the last), and a
+ *     backup restored (apps/shared/backup.c's sets; bknet.c: a saved session's or an address's computer). The
+ *     same from the command line, for the schedule: DISKS -backup FOLDER COMPUTER WHERE [-changes] and
+ *     DISKS -restore COMPUTER WHERE SET|newest FOLDER (no window; the lines below, and the exit code).
  * The long ones run as the toolkit's tasks, with their progress shown and a Cancel that stops them cleanly.
  *
  * The volume code is apps/shared/fatimg.c (FAT12 and FAT16), the sector jobs apps/shared/diskjob.c, new volumes
  * the kernel's own kernel/disk/fatfmt.c: all three are tested on the host against mtools and fsck.fat.
  *
  * Not yet (docs/v1/phase-f.md): a full format and floppies of another size than their drive's (both need the
- * BIOS's track format, which GLOS_FS_SECTORS has not got), images in parts for disks over 2 GB, backups over
- * SFTP, images opened as folders in Files.
+ * BIOS's track format, which GLOS_FS_SECTORS has not got), images in parts for disks over 2 GB, backups as
+ * ZIPs and their schedule, images opened as folders in Files.
  *
  * The suite's lines (tests/gui/disks.txt, disks-floppy.txt): "DISKS ..." on the output. */
 #include <stdarg.h>
@@ -34,11 +38,13 @@
 #endif
 
 #include "../../kernel/disk/disk.h"
+#include "../shared/backup.h"
 #include "../shared/diskjob.h"
 #include "../shared/fatimg.h"
+#include "bknet.h"
 
-enum { C_TOIMAGE = 1, C_FROMIMAGE, C_CHECK, C_FORMAT, C_INSIDE, C_REFRESH, C_OPEN, C_NEW, C_EXIT };
-enum { J_READ = 1, J_WRITE, J_CHECK, J_FORMAT, J_NEW, J_EXTRACT };
+enum { C_TOIMAGE = 1, C_FROMIMAGE, C_CHECK, C_FORMAT, C_INSIDE, C_REFRESH, C_OPEN, C_NEW, C_EXIT, C_BACKUP, C_RESTORE };
+enum { J_READ = 1, J_WRITE, J_CHECK, J_FORMAT, J_NEW, J_EXTRACT, J_BACKUP, J_SETS, J_RESTORE };
 enum { L_NOT = 0, L_VOLUME, L_NONE, L_OTHER, L_UNREAD = -1 };  /* what a look at a disk found */
 
 #define E_OWN 0x100                     /* dev_io: GLOS refused (the disk it runs from) */
@@ -375,6 +381,11 @@ struct job {
     char base[260];                     /* files out of a volume: the folder they are in, and their entries */
     struct fatimg_entry *items;
     int nitems;
+    /* A backup's (J_BACKUP: from the folder `from`; J_SETS: the sets listed; J_RESTORE: a set into `path`): */
+    char computer[100], where[200], set[BK_SET];
+    int changes, nsets, err;
+    char (*sets)[BK_SET];
+    struct bk_job bk;
 };
 static struct job *running;             /* one job at a time */
 
@@ -745,11 +756,136 @@ static int out_entry(struct job *j, const char *vdir, const struct fatimg_entry 
     return 0;
 }
 
+/* ---- backups on another computer (bknet.c, apps/shared/backup.c): one connection kept while Disk Tools runs, a
+   job's at a time; its questions (a host met first, a password) put on the window's thread */
+
+#define SETS_MOST 200
+static struct remote *conn;
+static char conn_to[100];
+
+struct ask {
+    struct job *j;
+    int password, again, answer;
+    const char *user, *host, *fingerprint;
+    char *out;
+    unsigned room;
+    glos_handle sig;
+};
+
+static void ask_ui(void *data)
+{
+    struct ask *a = data;
+    char t[400];
+    if (a->password) {
+        snprintf(t, sizeof t, a->again ? GUI_T("That was not it. The password of %s on %s:")
+                 : GUI_T("The password of %s on %s:"), a->user, a->host);
+        a->out[0] = 0;
+        a->answer = gui_ask_secret(win, GUI_T("Password"), t, a->out, (int)a->room);
+    } else {
+        snprintf(t, sizeof t, GUI_T("This PC has not met %s before. Its key's fingerprint is\n%s\nIs that the right computer?"),
+                 a->host, a->fingerprint);
+        a->answer = gui_message(win, GUI_T("Disk Tools"), t, GUI_MB_YESNO) == GUI_YES;
+    }
+    glos_signal_set(a->sig, 1);
+}
+
+static int ask(struct ask *a)                   /* (the job's thread) put, and its answer waited for */
+{
+    int which;
+    a->answer = 0;
+    if (!a->j->t || !(a->sig = glos_signal(0)))
+        return 0;
+    gui_task_post(a->j->t, ask_ui, a);
+    glos_wait(&a->sig, 1, 0xFFFFFFFFu, &which);
+    glos_close(a->sig);
+    return a->answer;
+}
+
+static int ask_host(void *ctx, const char *host, const char *fingerprint)
+{
+    struct ask a;
+    memset(&a, 0, sizeof a);
+    a.j = ctx, a.host = host, a.fingerprint = fingerprint;
+    say("backup new-host %s", host);
+    return ask(&a);
+}
+
+static int ask_password(void *ctx, const char *user, const char *host, int again, char *out, unsigned room)
+{
+    struct ask a;
+    memset(&a, 0, sizeof a);
+    a.j = ctx, a.password = 1, a.again = again, a.user = user, a.host = host, a.out = out, a.room = room;
+    say("backup password %s", again ? "again" : "asked");
+    return ask(&a);
+}
+
+static const struct remote_ui asking = { ask_host, ask_password };
+
+static int bk_tick(void *ctx, const char *path, unsigned long long done, unsigned long long total)
+{
+    struct job *j = ctx;
+    char text[160];
+    if (!j->t)
+        return 0;
+    if (path[0])
+        snprintf(text, sizeof text, GUI_T("%s (%lu of %lu KB)"), path, (unsigned long)(done >> 10), (unsigned long)(total >> 10));
+    else
+        snprintf(text, sizeof text, GUI_T("The list of files"));
+    gui_task_progress(j->t, (int)(done >> 10), (int)(total >> 10) ? (int)(total >> 10) : 1, text);
+    return gui_task_cancelled(j->t);
+}
+
+/* A backup's job, on its thread (or headless, with no task): connected (again, if the last one went), then done. */
+static void bk_work(struct job *j)
+{
+    struct bk_store st;
+    char temp[300];
+    if (conn && strcmp(conn_to, j->computer)) {
+        remote_close(conn);
+        conn = NULL;
+    }
+    if (!conn) {
+        conn = bknet_open(j->computer, j->t ? &asking : NULL, j, &j->err, j->why, sizeof j->why);
+        snprintf(conn_to, sizeof conn_to, "%s", j->computer);
+        if (!conn) {
+            j->rc = BK_E_STORE;
+            if (!j->why[0])
+                snprintf(j->why, sizeof j->why, "%s", remote_error(j->err));
+            return;
+        }
+    }
+    bknet_store(&st, conn);
+    gui_path_join(temp, sizeof temp, glos_home(), "BACKUP.TMP");
+    memset(&j->bk, 0, sizeof j->bk);
+    j->bk.store = &st, j->bk.where = j->where, j->bk.temp = temp, j->bk.changes = j->changes;
+    j->bk.progress = bk_tick, j->bk.ctx = j;
+    if (j->kind == J_BACKUP)
+        j->rc = bk_backup(&j->bk, j->from);
+    else if (j->kind == J_RESTORE)
+        j->rc = bk_restore(&j->bk, j->set, j->path);
+    else {
+        j->nsets = (j->sets = malloc(SETS_MOST * sizeof *j->sets)) ? bk_sets(&st, j->where, j->sets, SETS_MOST) : -1;
+        j->rc = j->nsets < 0 ? BK_E_NONE : BK_OK;
+        if (j->nsets < 0)
+            snprintf(j->why, sizeof j->why, "there is no folder %s there", j->where);
+    }
+    if (j->bk.why[0] && !j->why[0])
+        snprintf(j->why, sizeof j->why, "%s", j->bk.why);
+    if (j->rc == BK_E_STORE) {                  /* (the connection may have gone: a new one next time) */
+        remote_close(conn);
+        conn = NULL;
+    }
+}
+
 static void work(struct gui_task *t, void *arg)
 {
     struct job *j = arg;
     int i;
     j->t = t;
+    if (j->kind == J_BACKUP || j->kind == J_SETS || j->kind == J_RESTORE) {
+        bk_work(j);
+        return;
+    }
     switch (j->kind) {
     case J_READ: j->rc = diskjob_to_file(dev_io, &j->bios, j->sectors, j->run, j->f, tick, j, &j->r); break;
     case J_WRITE: j->rc = diskjob_from_file(dev_io, &j->bios, j->sectors, j->run, j->f, 1, tick, j, &j->r); break;
@@ -776,11 +912,28 @@ static void bad_text(const struct diskjob_report *r, char *out, size_t room)    
         snprintf(out + at, room - at, " ...");
 }
 
+static void restore_choose(void);
+static struct { char computer[100], where[200]; char (*sets)[BK_SET]; int n; } listed;    /* (J_SETS's, for the next) */
+
+static void bk_say(const struct job *j)         /* (headless too) what a backup's job came to */
+{
+    if (j->kind == J_BACKUP && j->rc == BK_OK)
+        say("backup set=%s files=%u copied=%u kept=%u failed=%u folders=%u bytes=%llu", j->bk.set, j->bk.files,
+            j->bk.copied, j->bk.kept, j->bk.failed, j->bk.folders, j->bk.bytes);
+    else if (j->kind == J_RESTORE && j->rc == BK_OK)
+        say("restored set=%s files=%u copied=%u failed=%u folders=%u to %s", j->bk.set, j->bk.files, j->bk.copied,
+            j->bk.failed, j->bk.folders, j->path);
+    else if (j->kind == J_SETS && j->rc == BK_OK)
+        say("sets %d newest=%s", j->nsets, j->nsets > 0 ? j->sets[0] : "-");
+    else
+        say("%s failed %d %s", j->kind == J_BACKUP ? "backup" : j->kind == J_RESTORE ? "restore" : "sets", j->rc, j->why);
+}
+
 static void job_done(struct gui_window *owner, void *arg, int cancelled)
 {
     struct job *j = arg;
     char name[40] = "", text[600], bad[200];
-    int file_bad = 0, row = gui_list_get(dlist);
+    int file_bad = 0, row = gui_list_get(dlist), choose = 0;
     (void)owner;
     if (j->f)
         file_bad = fclose(j->f) != 0;
@@ -844,6 +997,30 @@ static void job_done(struct gui_window *owner, void *arg, int cancelled)
             say("failed format %s", j->why);
         snprintf(text, sizeof text, j->rc == 0 ? GUI_T("%s is formatted: an empty disk.") : GUI_T("%s was not formatted. %s"), name, j->why);
         gui_message(win, GUI_T("The Disk Formatted"), text, GUI_MB_OK);
+    } else if (j->kind == J_BACKUP || j->kind == J_RESTORE || j->kind == J_SETS) {
+        bk_say(j);
+        if (j->kind == J_SETS && j->rc == BK_OK) {
+            free(listed.sets);
+            listed.sets = j->sets, listed.n = j->nsets, j->sets = NULL;
+            snprintf(listed.computer, sizeof listed.computer, "%s", j->computer);
+            snprintf(listed.where, sizeof listed.where, "%s", j->where);
+            choose = 1;
+        } else if (j->rc != BK_OK) {
+            snprintf(text, sizeof text, j->kind == J_BACKUP ? GUI_T("The backup was not made. %s.")
+                     : j->kind == J_RESTORE ? GUI_T("The backup was not restored whole. %s.")
+                     : GUI_T("The backups could not be listed. %s."), j->why);
+            gui_message(win, GUI_T("Backups"), text, GUI_MB_OK);
+        } else if (j->kind == J_BACKUP) {
+            snprintf(text, sizeof text, GUI_T("The folder %s is backed up to %s, as %s: %u files copied (%lu KB)%s%s."),
+                     j->from, j->computer, j->bk.set, j->bk.copied, (unsigned long)(j->bk.bytes >> 10),
+                     j->bk.kept ? GUI_T(", the rest unchanged since the last") : "",
+                     j->bk.failed ? GUI_T("; some files could not be read") : "");
+            gui_message(win, GUI_T("Backed Up"), text, GUI_MB_OK);
+        } else {
+            snprintf(text, sizeof text, GUI_T("The backup %s is in %s: %u files%s."), j->bk.set, j->path, j->bk.copied,
+                     j->bk.failed ? GUI_T(" (some could not be had)") : "");
+            gui_message(win, GUI_T("Restored"), text, GUI_MB_OK);
+        }
     } else if (j->kind == J_NEW) {
         if (j->rc != 0 || file_bad) {
             gui_unlink(j->path);
@@ -871,8 +1048,11 @@ static void job_done(struct gui_window *owner, void *arg, int cancelled)
         }
     }
     free(j->items);
+    free(j->sets);
     free(j);
     running = NULL;
+    if (choose)                                 /* (the sets listed: which one, and where to) */
+        restore_choose();
 }
 
 static void job_start(struct job *j, const char *title)
@@ -1190,6 +1370,205 @@ static void new_from_folder(void)
     job_start(j, GUI_T("Making the Image"));
 }
 
+/* ---- backups: the dialogs */
+
+static struct gui_widget *b_folder, *b_computer, *b_where, *b_what, *b_sets, *b_to;
+static struct { char folder[260], computer[100], where[200], to[260]; int what, set; } b_got;
+
+static void where_for(const char *folder, char *out, size_t room)      /* glos-backups/ and the folder's name */
+{
+    const char *name = gui_path_name(folder);
+    snprintf(out, room, "glos-backups/%s", name && name[0] && strcmp(name, "\\") ? name : "C");
+}
+
+static int b_check(struct gui_window *owner)    /* the computer named rightly: 1 */
+{
+    char host[64], user[32], key[100];
+    unsigned port;
+    if (bknet_computer(b_got.computer, host, sizeof host, &port, user, sizeof user, key, sizeof key) == 0 && b_got.where[0])
+        return 1;
+    say("backup no computer \"%s\" where \"%s\"", b_got.computer, b_got.where);
+    gui_message(owner, GUI_T("Backups"), GUI_T("Name the computer by a saved session of the Terminal's, or as "
+                                             "user@computer:port, and the folder there."), GUI_MB_OK);
+    return 0;
+}
+
+static void backup_done(struct gui_widget *b, int what)
+{
+    (void)what;                                 /* (the button's own number is b->id) */
+    if (b->id == 3) {
+        char p[260], w[200];
+        snprintf(p, sizeof p, "%s", gui_get_text(b_folder));
+        if (gui_folder_dialog(b->win, GUI_T("The Folder to Back Up"), p, sizeof p)) {
+            gui_set_text(b_folder, p);
+            where_for(p, w, sizeof w);
+            gui_set_text(b_where, w);
+        }
+        return;
+    }
+    if (b->id == 1) {
+        snprintf(b_got.folder, sizeof b_got.folder, "%s", b_folder ? gui_get_text(b_folder) : "");
+        snprintf(b_got.computer, sizeof b_got.computer, "%s", gui_get_text(b_computer));
+        snprintf(b_got.where, sizeof b_got.where, "%s", gui_get_text(b_where));
+        b_got.what = b_what ? gui_value(b_what) : 0;
+        if (b_folder && !gui_is_dir(b_got.folder)) {    /* (said with the dialog still there, to be put right) */
+            say("no folder %s", b_got.folder);
+            gui_message(b->win, GUI_T("No Such Folder"), GUI_T("There is no such folder."), GUI_MB_OK);
+            return;
+        }
+        if (!b_check(b->win))
+            return;
+    }
+    gui_end_modal(b->win, b->id == 1 ? GUI_OK : GUI_CANCEL_R);
+}
+
+static void computer_row(struct gui_widget *form)       /* the computer: a saved session's name, or an address */
+{
+    char names[16][24];
+    int n = bknet_sessions(names, 16);
+    b_computer = gui_field(gui_row(form, GUI_T("&Computer:"), NULL), 30);
+    gui_tip(b_computer, GUI_T("A saved session's name (the Terminal's Sessions), or user@computer:port"));
+    gui_set_text(b_computer, b_got.computer[0] ? b_got.computer : n > 0 ? names[0] : "");
+}
+
+static void backup_ask(void)
+{
+    struct gui_window *dlg;
+    struct gui_widget *box, *form, *line;
+    struct job *j;
+    char w[200];
+    dlg = gui_window(GUI_T("Back Up a Folder"), 460, 0, GUI_W_DIALOG);
+    dlg->owner = win;
+    box = gui_vbox(dlg->root, 6, 8);
+    form = gui_form(box);
+    line = gui_row(form, GUI_T("&Folder:"), NULL);
+    b_folder = gui_field(line, 30);
+    gui_set_text(b_folder, b_got.folder[0] ? b_got.folder : "C:\\");
+    gui_button(line, GUI_T("C&hoose..."), backup_done, 3);
+    computer_row(form);
+    b_where = gui_field(gui_row(form, GUI_T("Folder &there:"), NULL), 30);
+    where_for(gui_get_text(b_folder), w, sizeof w);
+    gui_set_text(b_where, b_got.where[0] ? b_got.where : w);
+    b_what = gui_choice(gui_row(form, GUI_T("&What:"), NULL), 24);
+    gui_choice_add(b_what, GUI_T("Every file"));
+    gui_choice_add(b_what, GUI_T("What changed since the last"));
+    gui_set_value(b_what, b_got.what);
+    line = gui_hbox(box, 6, 0);
+    gui_space(line, 0, 0);
+    gui_button(line, GUI_T("OK"), backup_done, 1)->flags |= GUI_DEFAULT;
+    gui_button(line, GUI_T("Cancel"), backup_done, 2)->flags |= GUI_CANCEL;
+    gui_focus(b_folder);
+    if (gui_modal(dlg) != GUI_OK) {
+        say("backup left");
+        return;
+    }
+    b_folder = b_what = NULL;
+    if (!(j = job_new(J_BACKUP, NULL)))
+        return;
+    snprintf(j->from, sizeof j->from, "%s", b_got.folder);
+    snprintf(j->computer, sizeof j->computer, "%s", b_got.computer);
+    snprintf(j->where, sizeof j->where, "%s", b_got.where);
+    j->changes = b_got.what == 1;
+    job_start(j, GUI_T("Backing Up"));
+}
+
+static void restore_ask(void)                   /* the computer and the folder there: its sets listed (J_SETS) */
+{
+    struct gui_window *dlg;
+    struct gui_widget *box, *form, *line;
+    struct job *j;
+    dlg = gui_window(GUI_T("Restore a Backup"), 460, 0, GUI_W_DIALOG);
+    dlg->owner = win;
+    box = gui_vbox(dlg->root, 6, 8);
+    form = gui_form(box);
+    computer_row(form);
+    b_where = gui_field(gui_row(form, GUI_T("Folder &there:"), NULL), 30);
+    gui_set_text(b_where, b_got.where[0] ? b_got.where : "glos-backups/");
+    line = gui_hbox(box, 6, 0);
+    gui_space(line, 0, 0);
+    gui_button(line, GUI_T("OK"), backup_done, 1)->flags |= GUI_DEFAULT;
+    gui_button(line, GUI_T("Cancel"), backup_done, 2)->flags |= GUI_CANCEL;
+    gui_focus(b_computer);
+    b_folder = b_what = NULL;
+    if (gui_modal(dlg) != GUI_OK) {
+        say("restore left");
+        return;
+    }
+    if (!(j = job_new(J_SETS, NULL)))
+        return;
+    snprintf(j->computer, sizeof j->computer, "%s", b_got.computer);
+    snprintf(j->where, sizeof j->where, "%s", b_got.where);
+    job_start(j, GUI_T("Looking for Backups"));
+}
+
+static void sets_done(struct gui_widget *b, int what)
+{
+    (void)what;
+    if (b->id == 3) {
+        char p[260];
+        snprintf(p, sizeof p, "%s", gui_get_text(b_to));
+        if (gui_folder_dialog(b->win, GUI_T("Restore Into"), p, sizeof p))
+            gui_set_text(b_to, p);
+        return;
+    }
+    if (b->id == 1) {
+        b_got.set = gui_list_get(b_sets);
+        snprintf(b_got.to, sizeof b_got.to, "%s", gui_get_text(b_to));
+    }
+    gui_end_modal(b->win, b->id == 1 ? GUI_OK : GUI_CANCEL_R);
+}
+
+static void restore_choose(void)                /* one of the sets listed, and where to */
+{
+    static const char *const heads[] = { GUI_N("Backup made") };
+    static const int widths[] = { 300 };
+    struct gui_window *dlg;
+    struct gui_widget *box, *line;
+    struct job *j;
+    int i;
+    if (!listed.n) {
+        gui_message(win, GUI_T("Backups"), GUI_T("There are no backups in that folder."), GUI_MB_OK);
+        return;
+    }
+    dlg = gui_window(GUI_T("Restore a Backup"), 400, 0, GUI_W_DIALOG);
+    dlg->owner = win;
+    box = gui_vbox(dlg->root, 6, 8);
+    gui_label(box, GUI_T("&Backups, the newest first:"));
+    b_sets = gui_list(box, 1, heads, widths);
+    gui_size(b_sets, 0, 140);
+    for (i = 0; i < listed.n; i++) {            /* (20261122-163000: 2026-11-22 16:30:00) */
+        char t[48];
+        const char *c[1];
+        const char *n = listed.sets[i];
+        snprintf(t, sizeof t, "%.4s-%.2s-%.2s %.2s:%.2s:%.2s%s", n, n + 4, n + 6, n + 9, n + 11, n + 13, n + 15);
+        c[0] = t;
+        gui_list_add(b_sets, c, NULL, NULL);
+    }
+    gui_list_set(b_sets, 0);
+    line = gui_row(gui_form(box), GUI_T("&Into:"), NULL);
+    b_to = gui_field(line, 26);
+    gui_set_text(b_to, b_got.to[0] ? b_got.to : "C:\\RESTORED");
+    gui_button(line, GUI_T("C&hoose..."), sets_done, 3);
+    gui_label(box, GUI_T("Files there of the same names are written over."));
+    line = gui_hbox(box, 6, 0);
+    gui_space(line, 0, 0);
+    gui_button(line, GUI_T("Restore"), sets_done, 1)->flags |= GUI_DEFAULT;
+    gui_button(line, GUI_T("Cancel"), sets_done, 2)->flags |= GUI_CANCEL;
+    gui_focus(b_sets);
+    say("sets shown %d", listed.n);
+    if (gui_modal(dlg) != GUI_OK || b_got.set < 0 || b_got.set >= listed.n || !b_got.to[0]) {
+        say("restore left");
+        return;
+    }
+    if (!(j = job_new(J_RESTORE, NULL)))
+        return;
+    snprintf(j->computer, sizeof j->computer, "%s", listed.computer);
+    snprintf(j->where, sizeof j->where, "%s", listed.where);
+    snprintf(j->set, sizeof j->set, "%s", listed.sets[b_got.set]);
+    snprintf(j->path, sizeof j->path, "%s", b_got.to);
+    job_start(j, GUI_T("Restoring"));
+}
+
 static void command(struct gui_window *w, int id)
 {
     struct disk *d = current();
@@ -1232,6 +1611,8 @@ static void command(struct gui_window *w, int id)
         break;
     case C_OPEN: open_image(); break;
     case C_NEW: new_from_folder(); break;
+    case C_BACKUP: backup_ask(); break;
+    case C_RESTORE: restore_ask(); break;
     case C_EXIT:
         im_close();
         gui_close(win);
@@ -1249,6 +1630,8 @@ static void update(struct gui_window *w)
     gui_command_enable(w, C_INSIDE, d && is_floppy(d) && !running);
     gui_command_enable(w, C_OPEN, !running);
     gui_command_enable(w, C_NEW, !running);
+    gui_command_enable(w, C_BACKUP, !running);
+    gui_command_enable(w, C_RESTORE, !running);
 }
 
 static void dlist_on(struct gui_widget *w, int what)
@@ -1291,6 +1674,9 @@ static void build(void)
     gui_command(win, C_OPEN, GUI_T("&Open an Image..."), "Ctrl+O", gui_glyph("open"), GUI_T("Look inside an image file"));
     gui_command(win, C_NEW, GUI_T("&New Image from a Folder..."), "Ctrl+N", gui_glyph("new"), GUI_T("Make an image of a folder's files"));
     gui_command(win, C_EXIT, GUI_T("E&xit"), "Alt+F4", NULL, NULL);
+    gui_command(win, C_BACKUP, GUI_T("&Back Up a Folder..."), "Ctrl+B", gui_glyph("upload"),
+                GUI_T("Copy a folder to another computer"));
+    gui_command(win, C_RESTORE, GUI_T("&Restore a Backup..."), "Ctrl+R", NULL, GUI_T("Copy a backup back to this PC"));
     bar = gui_menubar(win);
     m = gui_menu(bar, GUI_T("&Disk"));
     gui_menu_command(m, C_TOIMAGE), gui_menu_command(m, C_FROMIMAGE);
@@ -1302,6 +1688,8 @@ static void build(void)
     gui_menu_command(m, C_EXIT);
     m = gui_menu(bar, GUI_T("&Image"));
     gui_menu_command(m, C_OPEN), gui_menu_command(m, C_NEW);
+    m = gui_menu(bar, GUI_T("&Backup"));
+    gui_menu_command(m, C_BACKUP), gui_menu_command(m, C_RESTORE);
     tb = gui_toolbar(win);
     gui_toolbar_command(tb, C_TOIMAGE), gui_toolbar_command(tb, C_FROMIMAGE), gui_toolbar_command(tb, C_CHECK);
     gui_toolbar_sep(tb);
@@ -1318,8 +1706,50 @@ static void build(void)
     gui_set_text(status, GUI_T("The disk GLOS runs from is never written"));
 }
 
+/* DISKS -backup FOLDER COMPUTER WHERE [-changes] / DISKS -restore COMPUTER WHERE SET|newest FOLDER: no window (a
+   computer not met before is not believed: Disk Tools' window, or SSH.EXE, meets it first). 0 done, 1 not. */
+static int headless(int argc, char **argv)
+{
+    struct job j;
+    int restore = !strcmp(argv[1], "-restore");
+    memset(&j, 0, sizeof j);
+    if (!restore && argc >= 5) {
+        j.kind = J_BACKUP;
+        snprintf(j.from, sizeof j.from, "%s", argv[2]);
+        snprintf(j.computer, sizeof j.computer, "%s", argv[3]);
+        snprintf(j.where, sizeof j.where, "%s", argv[4]);
+        j.changes = argc > 5 && !strcmp(argv[5], "-changes");
+    } else if (restore && argc >= 6) {
+        j.kind = J_SETS;
+        snprintf(j.computer, sizeof j.computer, "%s", argv[2]);
+        snprintf(j.where, sizeof j.where, "%s", argv[3]);
+        snprintf(j.path, sizeof j.path, "%s", argv[5]);
+        bk_work(&j);
+        bk_say(&j);
+        if (j.rc != BK_OK || j.nsets <= 0) {
+            free(j.sets);
+            if (conn)
+                remote_close(conn);
+            return 1;
+        }
+        snprintf(j.set, sizeof j.set, "%s", strcmp(argv[4], "newest") ? argv[4] : j.sets[0]);
+        free(j.sets), j.sets = NULL;
+        j.kind = J_RESTORE;
+    } else {
+        printf("DISKS -backup FOLDER COMPUTER WHERE [-changes]\nDISKS -restore COMPUTER WHERE SET|newest FOLDER\n");
+        return 2;
+    }
+    bk_work(&j);
+    bk_say(&j);
+    if (conn)
+        remote_close(conn);
+    return j.rc == BK_OK ? 0 : 1;
+}
+
 int main(int argc, char **argv)
 {
+    if (argc > 1 && (!strcmp(argv[1], "-backup") || !strcmp(argv[1], "-restore")))
+        return headless(argc, argv);
     if (gui_init(argc, argv) != 0) {
         printf("DISKS no GLOS\n");
         return 1;
@@ -1331,6 +1761,8 @@ int main(int argc, char **argv)
     gui_focus(dlist);
     say("disks %d", ndisks);
     gui_run();
+    if (conn)
+        remote_close(conn);
     printf("DISKS end\n");
     return 0;
 }

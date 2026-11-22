@@ -1,0 +1,24 @@
+# Disk Tools' backups (apps/disks; phase F): Back Up a Folder's dialog (the folder, the computer: a saved
+# session's name or an address, the folder there, every file or what changed); with no computer named it is
+# refused and said why; Restore a Backup's dialog, left. (The backups themselves: the sshc suite's backup part,
+# against OpenSSH; apps/shared/backup.c: backup_test.)
+run DISKS.EXE
+wait "Disk Tools"
+said DISKS disks 2
+key ctrl+b
+wait "Back Up a Folder"
+shot backup "Back Up a Folder"
+key enter
+said DISKS backup no computer "" where "glos-backups/C"
+key enter
+gone "Backups"
+key esc
+said DISKS backup left
+key ctrl+r
+wait "Restore a Backup"
+shot restore "Restore a Backup"
+key esc
+said DISKS restore left
+key alt+f4
+gone "Disk Tools"
+expect DISKS end

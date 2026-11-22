@@ -141,6 +141,8 @@ host-test-run: build/host/libpdfbr32.a
 	  -DGLOSSHIM_NO_MAIN \
 	  -o build/host/rich_test tests/host/rich_test.c tests/host/glosshim.c $(GUI_SRCS) \
 	  $(GFX_SRCS) kernel/lib/png.c $(CFG_SRCS) $(CP_SRCS) && build/host/rich_test
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/backup_test tests/host/backup_test.c apps/shared/backup.c \
+	  && rm -rf build/host/bk && mkdir -p build/host/bk && build/host/backup_test build/host/bk
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter -Itests/host/kstub -Ikernel/include -Iinclude \
 	  -o build/host/cfg_test tests/host/cfg_test.c $(CFG_SRCS) && build/host/cfg_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Ikernel/include -Iinclude -o build/host/fslist_test \
@@ -317,8 +319,10 @@ build/apps/HELP.DAT: $(HELP_PAGES) tools/mkhelp.py
 # kernel's own code (kernel/disk: with its boot code, as bytes).
 DISKS_SRCS := apps/shared/fatimg.c apps/shared/diskjob.c kernel/disk/fatfmt.c kernel/disk/mbr.c kernel/disk/fdboot.S \
               kernel/disk/mbrboot.S
-APP_HOST_LIBS_disks := $(DISKS_SRCS)
-APP_LIBS_disks := $(DISKS_SRCS)
+# (... and backups on another computer over SFTP: apps/shared/backup.c's sets, apps/disks/bknet.c's computer.)
+DISKS_NET := apps/shared/backup.c apps/shared/remote.c apps/shared/sessions.c
+APP_HOST_LIBS_disks := $(DISKS_SRCS) $(DISKS_NET) build/host/libsshc32.a
+APP_LIBS_disks := $(DISKS_SRCS) $(DISKS_NET) build/sdk/libsshc.a
 APP_DEPS_disks := build/sdk/gloswrap.opt tools/wrapcheck.py kernel/disk/disk.h
 APP_LINK_disks := @build/sdk/gloswrap.opt -Wl,-Map,build/apps/DISKS.map -Wl,--cref
 APP_AFTER_disks := python3 tools/wrapcheck.py sdk/libglos/wrap.list build/apps/DISKS.map
@@ -774,7 +778,7 @@ loopa-pkg: all build/apps/PKG.EXE build/host/mkcerts build/glos/CERTS.DAT build/
            check-deps
 	$(Q)python3 tests/loopa/jobs.py pkg -j $(JOBS)
 # M10 step D: the terminal's ssh, sftp and ssh-keygen against OpenSSH in a container (tests/sshd).
-loopa-sshc: all build/apps/TERM.EXE build/apps/FILES.EXE $(SSH_EXES) check-deps
+loopa-sshc: all build/apps/TERM.EXE build/apps/FILES.EXE build/apps/DISKS.EXE $(SSH_EXES) check-deps
 	$(Q)python3 tests/loopa/jobs.py sshc -j $(JOBS)
 # M9's exit: the toolkit, the settings, console jobs, the apps, the Control Panel.
 loopa-m9: loopa-gui loopa-config loopa-console loopa-native loopa-control

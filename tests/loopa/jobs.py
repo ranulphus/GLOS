@@ -10112,6 +10112,164 @@ class TelnetServer:
         self.s.close()
 
 
+def backup_case(profile, vcard, card, bits):
+    """Disk Tools' backups on another computer (phase F; apps/shared/backup.c, apps/disks/bknet.c), against OpenSSH
+    in a container: DISKS -backup by a saved session's name (everything: three files and an empty folder, the
+    bytes there by SHA-256); the folder changed (a file grown, one new, one gone) and backed up again (what
+    changed: two copied, one held by the set before), and once more by an address (nothing to copy); the newest
+    set and the first restored, each the folder as it was then (bytes, the file gone or not); a computer not met
+    before refused with no window to ask in. Then the same in Disk Tools' window: Back Up a Folder, Restore a
+    Backup, the set chosen, its files back."""
+    import hashlib
+    import threading
+    tag = "%s-%s" % (profile, vcard)
+    out = os.path.join(ROOT, "out", "backup-%s-files" % tag)
+    os.makedirs(out, exist_ok=True)
+    srv = SshdContainer("bk-" + tag, out)
+    p1, p2 = srv.ports
+    big = bytes((i * 2654435761 >> 11) & 255 for i in range(120000))
+    files = {"A.TXT": b"first words\r\n", "SUB/B.TXT": b"the second file\r\n", "SUB/DEEP/C.BIN": big}
+    for name, data in files.items():
+        open(os.path.join(out, name.replace("/", "_")), "wb").write(data)
+    open(os.path.join(out, "SESSIONS.CFG"), "w").write("[Box]\nhost = 10.0.2.2\nport = %d\nuser = glos\n" % p1)
+    open(os.path.join(out, "KNOWNHST.TXT"), "w").write("[10.0.2.2]:%d ssh-ed25519 %s\n" % (p1, srv.pub("hostkey")))
+    rel = lambda f: os.path.relpath(os.path.join(out, f), ROOT)
+    agent = Agent("backup-" + tag, profile, card, ["--card", vcard, "--file", "build/apps/DISKS.EXE=/TEST/DISKS.EXE",
+        "--file", "sdk/gui/fonts/SMOOTH.DAT=/TEST/SMOOTH.DAT", "--file", "sdk/gui/fonts/FONTS.DAT=/TEST/FONTS.DAT",
+        "--file", "sdk/gui/fonts/ICONS.DAT=/TEST/ICONS.DAT",
+        "--file", "%s=/TEST/SSH/ID_ED25" % rel("sshd/client"), "--file", "%s=/TEST/SSH/KNOWNHST.TXT" % rel("KNOWNHST.TXT"),
+        "--file", "%s=/TEST/SSH/SESSIONS.CFG" % rel("SESSIONS.CFG")]
+        + sum((["--file", "%s=/DATA/%s" % (rel(n.replace("/", "_")), n)] for n in files), []) + [
+        "--cmd", "SERSAY HX-START backup", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"],
+        timeout=3600)
+    agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
+                   "-o", "ControlPersist=600"]
+    checks, notes = {"listen": agent.listening()}, []
+    disks = "C:\\TEST\\DISKS.EXE "
+
+    def line(out_text, start):
+        for l in out_text.replace("\r", "").split("\n"):
+            if l.startswith(start):
+                return l
+        notes.append("no %r in %r" % (start, out_text[-300:]))
+        return ""
+
+    def fetch(path, dst):
+        f = subprocess.run(["scp", "-q", "-P", str(agent.port)] + agent.opts[agent.opts.index("-o"):]
+                           + ["glos@127.0.0.1:/" + path[0] + path[2:].replace("\\", "/"), dst], capture_output=True, timeout=120)
+        return open(dst, "rb").read() if f.returncode == 0 and os.path.exists(dst) else None
+
+    def run_disks():
+        p = subprocess.Popen(agent.opts + ["glos@127.0.0.1", disks.strip()], stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT)
+        p.said = bytearray()
+        threading.Thread(target=GuiDriver._listen, args=(p,), daemon=True).start()
+        return p
+
+    def said(p, start, limit=180):
+        t0 = time.time()
+        while time.time() - t0 < limit:
+            for l in bytes(p.said).decode("latin-1").replace("\r", "").split("\n"):
+                if l.startswith(start):
+                    return l
+            time.sleep(0.4)
+        notes.append("waited %ds for %r; it said %r" % (limit, start, bytes(p.said).decode("latin-1")[-300:]))
+        return ""
+
+    def keys(*specs):
+        agent.ssh("glos key " + gui_key_list(list(specs)))
+        time.sleep(1.0)
+
+    def typed(text):
+        agent.ssh("glos type " + text)
+        time.sleep(0.5)
+
+    dk = None
+    try:
+        agent.ssh("mkdir C:\\DATA\\EMPTY")
+        rc, o, _ = agent.ssh(disks + "-backup C:\\DATA Box glos-backups/DATA")
+        l1 = line(o, "DISKS backup set=")
+        first = l1.split()[2][4:] if l1 else ""
+        checks["full"] = rc == 0 and l1.endswith(" files=3 copied=3 kept=0 failed=0 folders=1 bytes=%d"
+                                                 % sum(len(v) for v in files.values()))
+        checks["full-there"] = srv.run("sha256sum glos-backups/DATA/%s/SUB/DEEP/C.BIN" % first).split()[:1] \
+            == [hashlib.sha256(big).hexdigest()] and "MANIFEST.TXT" in srv.run("ls glos-backups/DATA/%s" % first)
+        agent.ssh("echo more words>>C:\\DATA\\A.TXT")
+        agent.ssh("echo new>C:\\DATA\\NEW.TXT")
+        agent.ssh("del C:\\DATA\\SUB\\B.TXT")
+        rc, o, _ = agent.ssh(disks + "-backup C:\\DATA Box glos-backups/DATA -changes")
+        l2 = line(o, "DISKS backup set=")
+        checks["changes"] = rc == 0 and " files=3 copied=2 kept=1 failed=0 folders=1 " in l2 + " "
+        rc, o, _ = agent.ssh(disks + "-backup C:\\DATA glos@10.0.2.2:%d glos-backups/DATA -changes" % p1)
+        checks["address"] = rc == 0 and " files=3 copied=0 kept=3 failed=0 " in line(o, "DISKS backup set=") + " "
+        rc, o, _ = agent.ssh(disks + "-restore Box glos-backups/DATA newest C:\\BACK1")
+        checks["sets"] = line(o, "DISKS sets ").startswith("DISKS sets 3 newest=")
+        checks["newest"] = rc == 0 and " files=3 copied=3 failed=0 folders=1 to C:\\BACK1" in line(o, "DISKS restored set=")
+        a_now = agent.ssh("type C:\\DATA\\A.TXT")[1]
+        checks["newest-a"] = agent.ssh("type C:\\BACK1\\A.TXT")[1] == a_now and "more words" in a_now
+        checks["newest-new"] = agent.ssh("type C:\\BACK1\\NEW.TXT")[0] == 0
+        checks["newest-b-gone"] = agent.ssh("type C:\\BACK1\\SUB\\B.TXT")[0] != 0
+        checks["newest-c"] = fetch("C:\\BACK1\\SUB\\DEEP\\C.BIN", os.path.join(out, "c1.got")) == big
+        e = agent.ssh("dir C:\\BACK1\\EMPTY")      # (DIR's code is 1 for an empty folder, as DOS's: its words)
+        checks["newest-empty"] = "Directory of C:\\BACK1\\EMPTY" in e[1]
+        if not checks["newest-empty"] or not checks["newest-a"]:
+            notes.append("A now %r back %r; dir EMPTY %r" % (a_now, agent.ssh("type C:\\BACK1\\A.TXT")[1], e))
+        rc, o, _ = agent.ssh(disks + "-restore Box glos-backups/DATA %s C:\\BACK2" % first)
+        checks["first"] = rc == 0 and "copied=3 failed=0" in line(o, "DISKS restored set=%s " % first)
+        checks["first-files"] = agent.ssh("type C:\\BACK2\\A.TXT")[1].replace("\r", "") == "first words\n" \
+            and agent.ssh("type C:\\BACK2\\SUB\\B.TXT")[0] == 0 and agent.ssh("type C:\\BACK2\\NEW.TXT")[0] != 0
+        rc, o, _ = agent.ssh(disks + "-backup C:\\DATA glos@10.0.2.2:%d glos-backups/OTHER" % p2)
+        checks["unknown-host"] = rc == 1 and line(o, "DISKS backup failed").startswith("DISKS backup failed -2 ")
+        # The window: Back Up a Folder, then Restore a Backup
+        checks["on"] = agent.ssh("glos display on 640x480x%d" % bits)[0] == 0
+        t0 = time.time()
+        while time.time() - t0 < 60 and (" 640x480x%d " % bits) not in agent.ssh("glos display")[1]:
+            time.sleep(0.5)
+        dk = run_disks()
+        checks["shown"] = bool(said(dk, "DISKS disks"))
+        time.sleep(2)
+        keys("ctrl+b")
+        time.sleep(2)
+        keys("ctrl+a")
+        typed("C:\\\\DATA")
+        keys("alt+t", "ctrl+a")
+        typed("glos-backups/GUI")
+        keys("enter")
+        checks["gui-backup"] = " files=3 copied=3 kept=0 failed=0 folders=1 " in said(dk, "DISKS backup set=") + " "
+        time.sleep(2)
+        keys("enter")                           # (the message: Backed Up)
+        keys("ctrl+r")
+        time.sleep(2)
+        keys("enter")                           # (the computer and the folder there as before)
+        checks["gui-sets"] = said(dk, "DISKS sets ").startswith("DISKS sets 1 newest=") and bool(said(dk, "DISKS sets shown 1"))
+        time.sleep(2)
+        keys("alt+i", "ctrl+a")
+        typed("C:\\\\BACK3")
+        keys("enter")
+        checks["gui-restore"] = "copied=3 failed=0 folders=1 to C:\\BACK3" in said(dk, "DISKS restored set=")
+        time.sleep(2)
+        keys("enter")                           # (the message: Restored)
+        checks["gui-files"] = fetch("C:\\BACK3\\SUB\\DEEP\\C.BIN", os.path.join(out, "c3.got")) == big
+        keys("alt+f4")
+        checks["gui-end"] = bool(said(dk, "DISKS end", 60))
+        dk = None
+        agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    finally:
+        if dk:
+            dk.kill()
+    text = agent.wait()
+    srv.close()
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text
+    checks["done"] = "HX-DONE 0" in text
+    bad = [k for k, v in checks.items() if not v]
+    if bad:
+        for n in notes:
+            print("    %s %s" % (tag, n[:400]))
+    return "  %-22s %s%s" % ("backup-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 def telnet_case(profile, card):
     """TELNET.EXE (apps/ssh/telnetc.c, apps/shared/telnet.c; phase F: Telnet and raw sessions, as PuTTY has them)
     at an SSH login to GLOS's shell, against the suite's own servers on the host. A bulletin board's manners
@@ -11675,7 +11833,7 @@ def main():
     if a.suite == "sshc":
         cases = [c for c in SSHC_CASES if not a.profile or c[0] in a.profile]
         progs = [c for c in (("bf6", "ne2kpci"), ("486dx2", "ne2k")) if not a.profile or c[0] in a.profile]
-        only = os.environ.get("SSHC_ONLY", "")  # (SSHC_ONLY=term, prog, filesnet, telnet or serial: that part alone)
+        only = os.environ.get("SSHC_ONLY", "")  # (SSHC_ONLY=term, prog, filesnet, backup, telnet or serial: that part alone)
         res = []
         if only in ("", "term"):
             res += matrix(sshc_case, cases, a.jobs)
@@ -11683,6 +11841,8 @@ def main():
             res += matrix(sshprog_case, progs, a.jobs)
         if only in ("", "filesnet"):            # Files' remote folders (phase F)
             res += matrix(filesnet_case, cases, a.jobs)
+        if only in ("", "backup"):              # Disk Tools' backups on another computer (phase F)
+            res += matrix(backup_case, cases, a.jobs)
         if only in ("", "telnet"):              # TELNET.EXE (phase F)
             res += matrix(telnet_case, progs, a.jobs)
         if only in ("", "serial"):              # SERIAL.EXE and API 2.10's serial line (phase F)

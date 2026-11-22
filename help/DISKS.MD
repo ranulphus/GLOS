@@ -35,7 +35,28 @@ Everything Out** copies it all.
 **Image, New Image from a Folder** (Ctrl+N) makes a floppy image (360 KB to 2.88 MB) holding a folder's
 files, ready to write to a floppy or to give to an emulator.
 
+## Backups on another computer
+
+Disk Tools can keep copies of a folder on another computer, over SSH (SFTP), and bring them back.
+
+- **Backup, Back Up a Folder** (Ctrl+B): the **Folder** here; the **Computer**, by the name of a session
+  saved in the Terminal's Sessions (its address, user and key) or as `user@computer:port`; the **Folder
+  there** that keeps this folder's backups; and **What**: every file, or what changed since the last backup
+  (by size and date). Each backup is a folder there named by its date and time.
+- **Backup, Restore a Backup** (Ctrl+R): the computer and the folder there; then choose one of the backups
+  (the newest first) and the folder to put it in. Files of the same names there are written over.
+
+Every backup can be restored whole on its own, even one of what changed: it knows where the other files
+are. A backup that was stopped or failed is not listed.
+
+The computer must have been met before (Disk Tools asks the first time, as SSH does). From a batch file or a
+schedule, without a window:
+
+    DISKS -backup C:\DATA Box glos-backups/DATA -changes
+    DISKS -restore Box glos-backups/DATA newest C:\DATA
+
 ## Not yet
 
-Disks larger than 2 GB cannot be read to an image yet. A floppy of another size than its drive's (a 720 KB
+Disks larger than 2 GB cannot be read to an image yet. Backups are files, not ZIPs, and are not scheduled
+from Disk Tools itself yet. A floppy of another size than its drive's (a 720 KB
 disk in a 1.44 MB drive) is not read or written yet.

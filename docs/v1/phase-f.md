@@ -1452,3 +1452,35 @@ makes the page as it was; the setting holds for the pages after it until it is t
   (`WEB reader kept 5 of 16 blocks`), pictures of both. (Disk Tools' script images C:\WEB: its count again.)
 - **Not yet:** a narrower column and a larger letter for reading; the page's main part by its `<article>`
   or `<main>`; the setting kept between runs.
+
+## Disk Tools: backups on another computer (2026-11-22)
+
+The plan's "folders backed up to an SFTP server: full, or only what changed since the last (by size and date)
+... restore: browse a backup and copy files back" (`docs/v1/apps/disk-tools.md`), as files (ZIPs not yet).
+
+- **The sets** (`apps/shared/backup.c`): a folder's backups live in a folder there (`where`), a set each
+  run, `where/YYYYMMDD-HHMMSS/` (`-2` and on for a second's second), holding the files copied by that run.
+  Its `MANIFEST.TXT` names every file the folder had (its size, DOS date and time, and the set that holds its
+  bytes) and every empty folder. A run of what changed reads the newest complete set's manifest and copies
+  only the files whose size, date or time differ or that it lacks; any set is restored from its manifest
+  alone. The manifest goes last: a set without one (stopped, failed) is no backup and is never listed. The
+  folder here is walked with findfirst (one DOS call a file, not two). A file here that can't be read is
+  counted and passed over; the other computer failing ends the run. The other computer is a store of four
+  calls (mkdir, put, get, list).
+- **The computer** (`apps/disks/bknet.c`): a saved session's name (the Terminal's Sessions: host, port, user,
+  key) or `[user@]host[:port]`; SSH.EXE's key and known hosts (GLOSSSH, or SSH\ in GLOS's folder);
+  `remote.c`'s connection, kept while Disk Tools runs; its questions (a host met first, a password) asked on
+  the window's thread as Files asks them.
+- **Disk Tools:** Backup, **Back Up a Folder** (Ctrl+B) and **Restore a Backup** (Ctrl+R; the sets listed,
+  newest first, one chosen and where to), as its other jobs: progress, Cancel, a message at the end. Without a
+  window, for batch files and the schedule: `DISKS -backup FOLDER COMPUTER WHERE [-changes]`, `DISKS -restore
+  COMPUTER WHERE SET|newest FOLDER` (the exit code 0 or 1); a computer not met before is then refused.
+- **Tests:** `backup_test` (host; a store that is a folder here): everything, then what changed (a file grown,
+  one new, one gone, one only re-dated), sets newest first, the newest and the first restored with their
+  dates and an empty folder, a run stopped (no set), a store failing, no such set or folder. The sshc suite's
+  backup part (`SSHC_ONLY=backup`, bf6 and the 486, OpenSSH in a container): the same by DISKS's command line,
+  by a session and by an address, the bytes there and back by SHA-256, a computer not met refused; then Back
+  Up a Folder, Restore a Backup and the set chosen in the window. `disks-backup` (host and the emulated
+  desktops): the dialogs, a computer not named refused with the dialog kept.
+- **Not yet:** backups as ZIPs; a schedule chosen in Disk Tools (the SHELL SCHEDULE API can start `DISKS
+  -backup` now); sets thinned out; a set browsed file by file (Files' remote folders show a set's files).
