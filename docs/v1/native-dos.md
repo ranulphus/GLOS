@@ -414,10 +414,14 @@ Everything else (the files, the directories, the cache) is the kernel's, above 1
   (MS-DOS 5's layout, FAT32's cluster's high word in its reserved bytes), going on from where they were after
   other calls, several at once (`find_test`); `dtime.c`, 2Ah-2Dh: DOS's dates (1980-2099, leap years, the day of
   the week), a machine's own offset that its programs' 2Bh and 2Dh move, never GLOS's clock (`dtime_test`).
-  To check against MS-DOS 7.1: parts cut to 8.3 rather than
-  refused, the longest whole path (127 here), and 4Eh with nothing matching (12h here, or 02h). FCB parsing (29h) waits for MS-DOS 7.1 to
-  compare with: RBIL doesn't give its separators and terminators. Open: whether MS-DOS 7.1's table for 437 makes e acute E acute (as GLOS does now, and
-  Windows 98's short names) or E: checked against its COUNTRY.SYS with the owner's image (N7).
+  To check against MS-DOS 7.1 (now in `MSDOS_DIR`): parts cut to 8.3 rather than refused, the longest whole
+  path (127 here), 4Eh with nothing matching (12h here, or 02h), and FCB parsing (29h: RBIL doesn't give its
+  separators and terminators).
+- **Upper case in file names, answered 2026-11-22** from MS-DOS 7.1's own COUNTRY.SYS (the owner's Windows 98
+  SE): its filename upper-case tables (65h's 04h) follow no rule. In 437 (US and UK alike) e acute is E,
+  though 437 has E acute, and so is every accented letter but ü, ä, å, ç, æ, ö and ñ (Ü, Ä, Å, Ç, Æ, Ö, Ñ); in
+  850 they are the accented capitals, but ÿ is "_". GLOS's `dos_upper` differs there (437's e acute, 850's ÿ):
+  where its tables come from is the owner's to decide (they are Microsoft's data).
 
 ### What it answers
 
