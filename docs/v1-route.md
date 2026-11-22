@@ -552,6 +552,16 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
 
 ## Open faults (noted, not yet chased)
 
+- **The SB16's playback dead after a recording** (the fortieth gate, 2026-11-22, devserver:
+  `audio-486dx2-vbe`; not seen in three runs here). The Player's stream was never mixed (`periods=0` for its
+  246 seconds), and the stream that had been playing when the Sound Recorder began got nothing after it
+  stopped. **Mended**, GLOS's own fault (`kernel/drv/sb16.c`, `irq`): the card's interrupt status (mixer
+  register 82h) was read only while recording or MIDI was on, so an 8-bit block that ended as the recording
+  stopped raised its interrupt after `sb.rec` was cleared and was never acknowledged; the card held its line
+  up, the edge-triggered PIC saw no more edges, and the 16-bit playback's interrupts were lost from then on.
+  The status is read on every interrupt now, and each source acknowledged. The audio suite's local paths
+  also carry `LOOPA_SUFFIX` now, so copies run side by side don't share the take and the recording.
+
 - **Drive C: "not ready" in the middle of a settings write, on the 486DX2's profile** (the twenty-third gate,
   2026-11-20, devserver: `apps-486dx2-ne2k`). Ten small apps had started and ended, then `glos config set`
   wrote GLOS.CFG: the write stood in the BIOS for a minute or two (its own timeout, stretched by the traps of

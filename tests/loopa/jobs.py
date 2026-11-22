@@ -5085,7 +5085,8 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
 
         tone = start(app + "tone M 880 90")
         mix = start("C:\\TEST\\MIXER.EXE")
-        g = GuiDriver(agent, os.path.join(ROOT, "out", "audio-" + tag), 16, False, "C:\\TEST\\")
+        g = GuiDriver(agent, os.path.join(ROOT, "out", "audio-" + tag + os.environ.get("LOOPA_SUFFIX", "")), 16, False,
+                      "C:\\TEST\\")      # (the run's own folder: LOOPA_SUFFIX's copies side by side don't share it)
         checks["mixer-window"] = bool(g.until(lambda d: g.window("Mixer", d) is not None, 120))
         time.sleep(2)
         a = levels()
@@ -5129,7 +5130,7 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
         n_rec = int(m.group(1)) if m else 0
         checks["rec-said"] = (rc_rec == 0 and 22050 * 2 <= n_rec <= 22050 * 15
                               and "RECORDER saved TAKE.WAV %d pcm16" % n_rec in o_rec and "RECORDER end" in o_rec)
-        take = os.path.join(ROOT, "out", "audio-" + tag, "TAKE.WAV")
+        take = os.path.join(ROOT, "out", "audio-" + tag + os.environ.get("LOOPA_SUFFIX", ""), "TAKE.WAV")
         if os.path.exists(take):
             os.remove(take)
         p = subprocess.run(["scp", "-q", "-P", str(agent.port)] + agent.opts[agent.opts.index("-o"):]
@@ -5221,7 +5222,7 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
     text = agent.wait()
-    wav = os.path.join(ROOT, "out", "audio-" + tag, "audio.wav")
+    wav = os.path.join(ROOT, "out", "audio-" + tag + os.environ.get("LOOPA_SUFFIX", ""), "audio.wav")
     checks["recorded"] = os.path.exists(wav) and subprocess.run(
         [sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav, "--tone", "440", "--tone", "1000",
          "--tone", "784", "--tone", "523", "--tone", "1175", "--tone", "259",       # (the last two: the Player's;

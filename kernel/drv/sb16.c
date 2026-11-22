@@ -129,17 +129,23 @@ static void rec_half(void);
 /* The card's one interrupt is the 16-bit output's, the 8-bit input's and the MPU-401's: its mixer's register 82h
    says which (bit 1 the 16-bit, bit 0 the 8-bit, bit 2 the MPU-401); each is acknowledged by reading its own
    port. With nothing recording and the MPU-401 not GLOS's it is the output's, as before. */
+/* The card's interrupt: what raised it from the mixer chip's status register (82h), read every time, and each
+   source acknowledged. (It was read only while recording or MIDI was on: an 8-bit block that ended as a
+   recording stopped then raised its interrupt after sb.rec was cleared, was never acknowledged, and held the
+   card's line up, so that an edge-triggered PIC saw no more edges and playback stopped for good: the gate's
+   audio-486dx2-vbe, 2026-11-22, the Player's stream never mixed after the Sound Recorder had recorded. The
+   mixer's register is written with interrupts off everywhere else, so this read can't come between.) */
 static void irq(struct trapframe *tf)
 {
-    u8 st = 2;
-    if (sb.rec || sb.midi) {
-        outb((u16)(sb.base + 4), 0x82);
-        st = inb((u16)(sb.base + 5)) & 7;
-    }
+    u8 st;
+    outb((u16)(sb.base + 4), 0x82);
+    st = inb((u16)(sb.base + 5)) & 7;
+    if (!st)                                    /* (nothing said: the playback's, as a card without the register) */
+        st = 2;
     if (st & 4)                                 /* (the MPU-401's: over once its bytes are read) */
         midi_mpu_drain();
     if (st & 1) {
-        inb((u16)(sb.base + 0x0E));             /* (the 8-bit interrupt acknowledged) */
+        inb((u16)(sb.base + 0x0E));             /* (the 8-bit interrupt acknowledged, recording or not) */
         if (sb.rec)
             rec_half();
     }
