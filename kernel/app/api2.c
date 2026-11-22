@@ -6,6 +6,8 @@
  * EVENT that filters by area can take one from the middle (the ones queued
  * before it move up). The app's thread and the kernel's tick (interrupts
  * off) share it, so changes are made with interrupts off. */
+#include <string.h>
+
 #include "api2int.h"
 #include "clock.h"
 #include "display.h"
@@ -702,6 +704,19 @@ static int post_call(struct app *a, struct trapframe *tf)
     ev.a = q.a;
     ev.b = q.b;
     ev.c = q.c;
+    if (q.to && q.to != a->id) {                /* (2.13) another app's: one of the same program's alone */
+        struct app *t;
+        u32 f = irq_save();                     /* (it can't end between being found and being told) */
+        int r;
+        if (!(t = app_by_id(q.to)))
+            r = GLOS_E_NOT_FOUND;
+        else if (strcmp(t->prog, a->prog))
+            r = GLOS_E_REFUSED;
+        else
+            r = a2_post(t, &ev.ev, 0) != 0 ? GLOS_E_MEMORY : 0;
+        irq_restore(f);
+        return r ? a2_fail(tf, (u32)r) : a2_ok(tf, 0);
+    }
     return a2_post(a, &ev.ev, 0) != 0 ? a2_fail(tf, GLOS_E_MEMORY) : a2_ok(tf, 0);
 }
 

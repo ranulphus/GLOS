@@ -91,7 +91,7 @@ static void before(void)
 {
     struct glos_version v;
     struct { struct glos_version v; unsigned guard; } small;
-    struct glos_post p = { sizeof p, 1, 0, 0, 0 };
+    struct glos_post p = { sizeof p, 1, 0, 0, 0, 0 };
     unsigned t;
 
     check("present", glos_running(), 0);
@@ -207,6 +207,12 @@ static void events(void)
     check("event-post", n == (int)sizeof *p && p->ev.kind == GLOS_EV_POST && p->code == 7 && p->a == 1 && p->b == 2
           && p->c == 3 && p->ev.handle == 0, "n=%d kind=%x", n, n > 0 ? p->ev.kind : 0);
     check("event-none", glos_event(ev, sizeof ev, 0, 0) == 0, 0);
+    /* (2.13) to an app by its id: its own comes as any post; one that isn't there is not found */
+    check("post-to-self", glos_post_to(glos_app(), 17, 4, 5, 6) == 0, 0);
+    n = glos_event(ev, sizeof ev, 0, 0);
+    check("event-post-to", n == (int)sizeof *p && p->ev.kind == GLOS_EV_POST && p->code == 17 && p->a == 4 && p->c == 6,
+          "n=%d", n);
+    check("post-to-none", glos_post_to(0x7FFFFFF0u, 1, 0, 0, 0) == GLOS_E_NOT_FOUND, 0);
 
     glos_post(8, 0, 0, 0);
     memset(&w, 0, sizeof w);

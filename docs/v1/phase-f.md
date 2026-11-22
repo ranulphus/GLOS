@@ -1536,3 +1536,17 @@ none. USBIDS.DAT goes where PCIIDS.DAT goes (the installer, the suites' disks, b
 
 - **Tests:** `pciids_test` (host) reads USBIDS.DAT too (a pad, a receiver, a vendor with a device it hasn't);
   `control-devices` (host) chooses the pad under its controller (`CONTROL devices usb-names=4 of 4`).
+
+## Help: one window for every F1 (API 2.13) (2026-11-22)
+
+Help's "Not yet: one Help window for every F1 (each F1 starts another now)". API 2.13: CORE's POST takes a
+`to`, another app's id, for an app of the same program file alone (`glos_post_to`; `docs/v1/api-2.md`). A
+HELP.EXE started while another is open (F1 in a program, Help from the Start menu) finds it among the programs
+(PROGRAMS), hands it the page asked for (its name in the post's three words: `HELP_PAGE`) and ends; the one open
+comes to the front (first: the page's title after it means it has the keyboard) and shows the page. On a GLOS
+older than 2.13 each F1 has a Help of its own, as before (an older kernel would post to the caller).
+
+- **Tests:** APITEST's `post-to-self` and `post-to-none`; `help-f1` (the emulated desktops): F1 in Notepad,
+  Help moved to its first page, back in Notepad F1 again: the open Help shows Notepad's page (its first
+  page's title gone, so no second Help), then Alt+F4 closes it. (Seen on the way: the title changed before
+  the window came forward, and a fast PC's script sent Alt+F4 to Notepad in between.)

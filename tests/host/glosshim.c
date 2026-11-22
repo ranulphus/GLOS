@@ -2412,6 +2412,11 @@ int glos_post(unsigned code, unsigned a, unsigned b, unsigned c)
     return 0;
 }
 
+int glos_post_to(unsigned app, unsigned code, unsigned a, unsigned b, unsigned c)  /* (one app here: itself) */
+{
+    return app && app != glos_app() ? GLOS_E_NOT_FOUND : glos_post(code, a, b, c);
+}
+
 int glos_event(void *buf, unsigned room, unsigned wait_ms, unsigned areas)
 {
     if (dd_qh == dd_qt && dd_end_due) {         /* (the move's events given and answered: now the drop) */

@@ -208,7 +208,13 @@ int glos_event(void *buf, unsigned room, unsigned ms, unsigned areas)
 
 int glos_post(unsigned code, unsigned a, unsigned b, unsigned c)
 {
-    struct glos_post q = { sizeof q, code, a, b, c };
+    struct glos_post q = { sizeof q, code, a, b, c, 0 };
+    return raw(GLOS_CORE_POST, &q, 0);
+}
+
+int glos_post_to(unsigned app_id, unsigned code, unsigned a, unsigned b, unsigned c)
+{
+    struct glos_post q = { sizeof q, code, a, b, c, app_id };
     return raw(GLOS_CORE_POST, &q, 0);
 }
 

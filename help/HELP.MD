@@ -1,6 +1,7 @@
 # Using Help
 
-This is GLOS's guide. **F1** in any of GLOS's programs opens the guide at that program's page.
+This is GLOS's guide. **F1** in any of GLOS's programs opens the guide at that program's page. If Help is open
+already, it shows that page itself: there is only ever one Help.
 
 - **Contents** (Ctrl+T), at the left, lists every page. Choose one to read it.
 - **Links** in a page lead to other pages: press one, or reach it with Tab and press Enter.

@@ -54,7 +54,8 @@
 #define GLOS_API_H
 
 #define GLOS_MAJOR 2
-#define GLOS_MINOR 12           /* (2.12: SYS's STAT GLOS_STAT_DEVICES, the devices and what serves each;
+#define GLOS_MINOR 13           /* (2.13: CORE's POST to another app of the same program (glos_post's `to`);
+                                   2.12: SYS's STAT GLOS_STAT_DEVICES, the devices and what serves each;
                                    2.11: DRAW's CACHE takes a page of a video card's own memory;
                                    2.10: NET's SERIAL, a COM port as a connection;
                                    2.9: NET reaches this PC's own ports (127.0.0.1, its own address);
@@ -246,6 +247,10 @@ struct glos_ev_post {
 struct glos_post {
     unsigned size;
     unsigned code, a, b, c;
+    unsigned to;                /* (2.13) the app it is for: 0 (or the app's own id) the app itself; another's id
+                                   (PROGRAMS') if that app's program is the same file as the caller's (a second
+                                   HELP.EXE hands its page to the first): GLOS_E_NOT_FOUND no such app,
+                                   GLOS_E_REFUSED another program's */
 };
 
 /* TIMER */

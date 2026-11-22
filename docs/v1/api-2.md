@@ -443,6 +443,12 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
   starts (the loader copies it: bootinfo version 10). The shell's `DEVICES` (`glos devices`) prints the same.
   An older GLOS answers GLOS_E_ARGUMENT for the kind. Tests: APITEST's `sys-devices`; the ssh suite's
   `devices` case.
+- **2.13 (2026-11-22): a post to another copy of the program.** CORE's POST has a new field, `to`: another
+  app's id (PROGRAMS') that the event goes to, if that app's program is the same file as the caller's (else
+  GLOS_E_REFUSED; GLOS_E_NOT_FOUND if there is no such app); 0, or the app's own id, is the app itself, as
+  before. It comes as GLOS_EV_POST. Help's first use: a second HELP.EXE (F1 in another program) hands its
+  page to the Help already open, and ends (`glos_post_to`). An older GLOS reads the struct without `to`, and
+  posts to the caller. Tests: APITEST's `post-to-self`, `post-to-none`; the Help F1 script on Loop A.
 - **2.11 (2026-11-21): a write-combining page of a video card's own**, asked for by DOS-GL's Rage 128 layer,
   whose command words were each an uncached write. DRAW's CACHE, until now for the program's conventional
   memory alone, also takes memory of a video card's that the program has mapped (DPMI 0800h): 4 to 64 KB, a

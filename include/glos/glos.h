@@ -48,6 +48,8 @@ int glos_set_data(glos_handle h, unsigned prop, const void *data, unsigned lengt
    none came, or minus a GLOS_E_ code (-GLOS_E_ROOM: room too small, the event stays). */
 int glos_event(void *buf, unsigned room, unsigned ms, unsigned areas);
 int glos_post(unsigned code, unsigned a, unsigned b, unsigned c);
+int glos_post_to(unsigned app, unsigned code, unsigned a, unsigned b, unsigned c);     /* (2.13) to another app of
+                                                                                     the same program file */
 glos_handle glos_timer(unsigned ms, int repeat);        /* 0 if refused */
 
 unsigned glos_ticks(void);                              /* milliseconds since GLOS started (0 without GLOS) */

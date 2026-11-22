@@ -24,8 +24,11 @@
  *
  * A search's result opens its page with the line's first word chosen and scrolled to (gui_richview_find).
  *
+ * One Help for every F1: a HELP.EXE started while another is open hands it its page and ends (API 2.13's POST to
+ * another app of the same program).
+ *
  * Not yet: pictures in pages, the place in a page a link names (#part; the guide has no such links), a
- * dialog's own Help button, one Help window for every F1.
+ * dialog's own Help button.
  *
  * The suite's lines (tests/gui/help.txt): "HELP ..." on the output. */
 #include <ctype.h>
@@ -612,12 +615,65 @@ static void build(void)
     status = gui_status(win);
 }
 
+/* ---- one Help for every F1 (API 2.13's POST to another app of the same program): a HELP.EXE started while
+   another is open hands it the page asked for and ends; the one open shows it, in front. */
+
+#define HELP_PAGE 0x504C4548u           /* ("HELP") a page asked for: its name in a, b and c ("": the contents) */
+
+static int hand_over(const char *name)  /* 1: another Help took it */
+{
+    struct glos_version v;
+    struct glos_program *p;
+    unsigned n = 0, i, w[3];
+    size_t len = strcspn(name, ".");
+    memset(&v, 0, sizeof v);
+    v.size = sizeof v;
+    if (glos_version(&v) != 0 || v.major != GLOS_MAJOR || v.minor < 13 || !(p = malloc(64 * sizeof *p)))
+        return 0;                               /* (an older GLOS would post to this one: a Help of its own) */
+    if (glos_programs(p, 64 * sizeof *p, &n) != 0 && n == 0)
+        n = 0;
+    memset(w, 0, sizeof w);
+    memcpy(w, name, len < sizeof w ? len : sizeof w - 1);
+    for (i = 0; i < n && i < 64; i++)
+        if (p[i].kind == GLOS_PROG_APP && p[i].id != glos_app() && !strcasecmp(p[i].name, "HELP.EXE")
+            && glos_post_to(p[i].id, HELP_PAGE, w[0], w[1], w[2]) == 0) {
+            free(p);
+            return 1;
+        }
+    free(p);
+    return 0;
+}
+
+static void events(const struct glos_ev *ev)  /* (the one open) a page another HELP.EXE asked for */
+{
+    const struct glos_ev_post *p = (const struct glos_ev_post *)ev;
+    char name[13];
+    unsigned w[3];
+    int k;
+    if (ev->kind != GLOS_EV_POST || p->code != HELP_PAGE)
+        return;
+    w[0] = p->a, w[1] = p->b, w[2] = p->c;
+    memcpy(name, w, 12);
+    name[12] = 0;
+    k = name[0] ? page_named(name, strlen(name)) : -1;
+    say("asked %s", name[0] ? name : "-");
+    gui_show(win, 1);                           /* in front first (restored if it was minimised): the page's title
+                                                   after it says the window has the keyboard */
+    gui_focus(view);
+    show(k >= 0 ? k : 0, 0);
+}
+
 int main(int argc, char **argv)
 {
     int k = -1;
     if (gui_init(argc, argv) != 0) {
         printf("HELP no GLOS\n");
         return 1;
+    }
+    if ((argc < 2 || (argv[1][0] != '-' && argv[1][0] != '/')) && hand_over(argc > 1 ? argv[1] : "")) {
+        say("handed %s", argc > 1 ? argv[1] : "-");
+        printf("HELP end\n");
+        return 0;
     }
     if (load() != 0) {
         gui_message(NULL, GUI_T("Help"), GUI_T("The guide (HELP.DAT, beside GLOS's programs) is not there, or is not a guide."),
@@ -633,6 +689,7 @@ int main(int argc, char **argv)
     }
     build();
     contents();
+    gui_on_event(events);
     gui_show(win, 1);
     if (argc > 1 && argv[1][0] != '-' && argv[1][0] != '/')     /* HELP NAME: that program's page, if the guide has one */
         k = page_named(argv[1], strcspn(argv[1], "."));
