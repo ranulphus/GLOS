@@ -33,10 +33,11 @@
  * HVCRAFT.CFG beside the program keeps the last game and arena, a name, and whether the game opens to the
  * network whenever it starts.
  *
- * A pad drives it too (pad_held: the left stick, the right stick or the shoulder buttons, A boosts, B sets down).
+ * A pad drives it too (pad_held: the left stick, the right stick or the shoulder buttons, A boosts, B sets down),
+ * and the mouse (mouse_held: towards the pointer's side, the left button forwards, the right one boosts).
  *
  * Not yet (the plan's rest): the lobby (the games found as a list, names, the craft's colour); a joiner's own
- * craft moved at once by its own controls; the mouse; full screen; the computer's strengths chosen; names over the craft; an arrow to the flag or the lamp. */
+ * craft moved at once by its own controls; the mouse taken (captured) as a pointer that never leaves; full screen; the computer's strengths chosen; names over the craft; an arrow to the flag or the lamp. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -356,6 +357,39 @@ static unsigned pad_held(void)
     return c;
 }
 
+/* The mouse over the arena (once it has moved there, until a key or the pad is used): the craft turns towards
+   the pointer's side of the window (the middle sixth turns it no way), the left button drives the fans
+   forwards, the right one boosts. */
+static int mouse_on, mouse_x, mouse_w = 480;
+static unsigned mouse_buttons;
+
+static void mouse_event(const struct glos_ev_mouse *m, int w)
+{
+    if (!mouse_on && !m->button && abs(m->dx) + abs(m->dy) < 4)
+        return;                                 /* (the least nudge is no wish) */
+    if (!mouse_on) {
+        printf("HVCRAFT mouse drives\n");
+        fflush(stdout);
+    }
+    mouse_on = 1;
+    mouse_x = m->x, mouse_w = w;
+    mouse_buttons = m->buttons;
+}
+
+static unsigned mouse_held(void)
+{
+    unsigned c = 0;
+    if (mouse_x < mouse_w * 5 / 12)
+        c |= HV_C_LEFT;
+    else if (mouse_x > mouse_w * 7 / 12)
+        c |= HV_C_RIGHT;
+    if (mouse_buttons & 1)
+        c |= HV_C_FWD;
+    if (mouse_buttons & 2)
+        c |= HV_C_FWD | HV_C_BOOST;
+    return c;
+}
+
 static unsigned keys_held(void)
 {
     struct glos_keys k;
@@ -380,7 +414,16 @@ static unsigned keys_held(void)
         c |= HV_C_BOOST;
     if (GLOS_KEY_DOWN(&k, 0x39))                                /* Space */
         c |= HV_C_DOWN;
-    return c | pad_held();
+    c |= pad_held();
+    if (c) {                                    /* (the keys or the pad: the mouse no longer drives) */
+        if (mouse_on) {
+            printf("HVCRAFT mouse drives no longer\n");
+            fflush(stdout);
+        }
+        mouse_on = 0;
+        return c;
+    }
+    return mouse_on ? mouse_held() : 0;
 }
 
 static void title(glos_handle win)
@@ -643,6 +686,8 @@ int main(int argc, char **argv)
         while (glos_event(evbuf, sizeof evbuf, 0, 0) > 0) {
             if (ev->kind == GLOS_EV_END || ev->kind == GLOS_EV_CLOSE) {
                 on = 0;
+            } else if (ev->kind == GLOS_EV_MOUSE) {
+                mouse_event((const struct glos_ev_mouse *)evbuf, w);
             } else if (ev->kind == GLOS_EV_KEY) {
                 const struct glos_ev_key *k = (const struct glos_ev_key *)evbuf;
                 int mode = hvlink_mode();

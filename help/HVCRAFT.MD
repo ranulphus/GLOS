@@ -23,7 +23,9 @@ until you have pushed it somewhere else. Turn early, and use the side fans to st
 
 **A game pad** drives too: the left stick turns the craft (left and right) and drives the fans (forwards and
 back); the right stick, or the shoulder buttons, the side fans; the first button (A on an Xbox pad) boosts,
-the second (B) sets the craft down.
+the second (B) sets the craft down. **The mouse** drives once you move it over the arena: the craft turns
+towards the side of the window the pointer is on (in the middle it goes straight), the left button drives
+the fans forwards and the right one boosts. A key or the pad takes over from the mouse again.
 
 Your craft is orange with a white cabin, and you see it from behind. Nothing is shot and nobody is destroyed:
 craft bump each other and the walls. A craft pushed into the water is back at its dock three seconds later.

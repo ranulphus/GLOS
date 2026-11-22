@@ -7593,6 +7593,16 @@ def hover_case(profile, vcard, card):
         while time.time() - t0 < 120 and "prog=HVCRAFT.EXE" not in agent.log().split("HX-START hover")[-1].split("GLOS-APP start")[-1]:
             time.sleep(0.5)
         time.sleep(8)
+        # the mouse over the arena: the pointer moved into the game's window, which then drives by it (said)
+        text = agent.ssh("glos desk")[1].replace("\r", "")
+        ptr = re.search(r"pointer=(-?\d+),(-?\d+)", text)
+        win = re.search(r'^window \d+ shown(?: \w+)? at (-?\d+),(-?\d+) (\d+)x(\d+) "Cushion', text, re.M)
+        if ptr and win:
+            tx, ty = int(win.group(1)) + int(win.group(3)) // 4, int(win.group(2)) + 20 + int(win.group(4)) // 2
+            agent.ssh("glos mouse %d %d" % (tx - int(ptr.group(1)), ty - int(ptr.group(2))))
+            agent.ssh("glos mouse 12 6")
+        else:
+            info += " desk=%r" % text[:300]
         p = subprocess.run(agent.opts + ["glos@127.0.0.1", "glos shot"], capture_output=True, timeout=300)
         os.makedirs(out, exist_ok=True)
         open(os.path.join(out, "playing.png"), "wb").write(p.stdout)
@@ -7604,7 +7614,9 @@ def hover_case(profile, vcard, card):
         else:
             checks["picture"] = False
         try:
-            checks["played"] = h.wait(timeout=400) == 0
+            said_h = h.communicate(timeout=400)[0].decode("latin-1")
+            checks["played"] = h.returncode == 0
+            checks["mouse"] = "HVCRAFT mouse drives" in said_h
         except subprocess.TimeoutExpired:
             h.kill()
             checks["played"] = False

@@ -1300,5 +1300,8 @@ The rest of Help's plan's first item (`docs/v1/apps/help.md`): the tour on GLOS'
   goes left, then right with a tuck, then the mouse to the skier's left (said "mouse steers"); the hover
   case: a pad held forwards with the boost from the start, the game at step 90 the core's for those controls
   held (`hv_test hold 3 65 90`).
-- **Not yet:** the mouse in Cushion (the plan's: taken, it turns the craft); a second pad for a second player
-  on one PC (not in v1).
+- **Cushion's mouse:** once it moves over the arena, the craft turns towards the pointer's side of the window
+  (the middle sixth: straight on), the left button drives the fans forwards, the right one boosts; a key or
+  the pad takes over. The hover case moves the pointer into the window and hears "HVCRAFT mouse drives".
+- **Not yet:** the mouse taken (captured) so that it never leaves the window; a second pad for a second
+  player on one PC (not in v1).
