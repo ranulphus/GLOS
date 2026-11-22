@@ -43,6 +43,7 @@ typedef unsigned int   bi_u32;
 #define BI_F_OWNCMD      0x0800                 /* GLOS's own COMMAND.COM is beside GLOS.EXE (S4c) */
 #define BI_F_NOCARD      0x0400                 /* [net] card = off: no network card is looked for */
 #define BI_F_VERBOSE     0x0200                 /* /VERBOSE: the kernel's log lines on the text screen too */
+#define BI_F_NATIVE      0x1000                 /* GLOSLDR.SYS started GLOS: no DOS in the system VM (native boot) */
 
 /* glos_call() functions (the ARPL at bp_call_off, AX = fn, EBX = arg). */
 #define GLOS_CALL_LEAVE  1                      /* stop the VM, back to real mode; arg = exit code */

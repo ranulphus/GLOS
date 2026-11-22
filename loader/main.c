@@ -13,7 +13,12 @@
  * §2.2). The [shell] section of GLOS.CFG, next to GLOS.EXE, gives the same
  * settings as comspec=, autoexec=, console= and envsize=; its [program
  * NAME.EXT] sections, read in every mode, are profiles (§11.2).
- * Progress goes to COM1 as GLOS-BOOT lines; refusals as GLOS-REFUSE. */
+ * Progress goes to COM1 as GLOS-BOOT lines; refusals as GLOS-REFUSE.
+ *
+ * Built a second way, with -dNATIVE, it is GLOSLDR.SYS's loader (docs/v1/native-dos.md, native boot): no DOS
+ * under it (GLOS's boot sector loads it, loader/nprelude.S runs it), files by kernel/fs/fat.c over INT 13h and
+ * memory from loader/nlib.c, no refusal that asks DOS or its drivers, raw mode always, no DOS pointers in
+ * bootinfo (BI_F_NATIVE: the kernel's own DOS gives them); native_main() in place of main(). */
 #include <conio.h>
 #include <dos.h>
 #include <io.h>
@@ -98,7 +103,9 @@ static void say(const char *fmt, ...)
 static int refuse(const char *why)
 {
     say("GLOS-REFUSE reason=%s", why);
+#ifndef NATIVE
     printf("GLOS: cannot start: %s\n", why);
+#endif
     return 2;
 }
 
@@ -329,6 +336,7 @@ static void poke32(unsigned long p, unsigned long v) { *(unsigned long far *)phy
    here and then along PATH; a batch file runs under %COMSPEC% /C. */
 static char run_path[80];
 
+#ifndef NATIVE
 static int find_program(char **args)
 {
     static const char *const ext[] = { ".COM", ".EXE", ".BAT" };
@@ -382,6 +390,9 @@ static int find_program(char **args)
     stub_data.tail[n + 1] = 0x0D;
     return 0;
 }
+#else
+static int find_program(char **args) { (void)args; return -1; }
+#endif
 
 /* KEYS\name beside GLOS.EXE, into buf (at most max bytes); the length read. */
 static unsigned long read_key_file(const char *argv0, const char *name, void *buf, unsigned max)
@@ -459,9 +470,11 @@ static void disks_probe(void)
     struct bi_disk *d;
 
     memset(&r, 0, sizeof r);
+#ifndef NATIVE                                  /* (no DOS: no INT 2Fh, and no SMARTDRV) */
     r.x.ax = 0x4A10;
     int86(0x2F, &r, &r);
     bi.smartdrv = r.x.ax == 0xBABE;
+#endif
     for (i = 0; i < n && bi.n_disks < BI_DISKS; i++) {
         d = &bi.disks[bi.n_disks];
         segread(&sr);
@@ -590,6 +603,9 @@ static int glos_main(int argc, char **argv)
     /* Refusals (supervisor.md §2.1). */
     if (!cpu_is486()) return refuse("cpu");
     if (cpu_v86()) return refuse("v86");
+#ifdef NATIVE
+    bi.flags |= BI_F_NATIVE;
+#else
     r.x.ax = 0x1687; int86(0x2F, &r, &r);
     if (r.x.ax == 0) return refuse("dpmi");
     r.x.ax = 0x1600; int86(0x2F, &r, &r);
@@ -602,6 +618,7 @@ static int glos_main(int argc, char **argv)
             if (r.h.ah == 0) return refuse("vcpi");
         }
     }
+#endif
     bi.cpu_family = 4;
     if (cpu_id1(&eax_, &edx_)) {
         bi.cpu_family = (eax_ >> 8) & 15;
@@ -637,8 +654,12 @@ static int glos_main(int argc, char **argv)
         say("GLOS-BOOT step=kernel file=%lu total=%lu", hdr.file_size, bi.kernel_total);
 
     /* Memory, then A20. */
+#ifdef NATIVE
+    xms_mode = 0;                               /* (no DOS, no HIMEM: raw mode) */
+#else
     r.x.ax = 0x4300; int86(0x2F, &r, &r);
     xms_mode = r.h.al == 0x80;
+#endif
     bi.a20_initial = a20_on();
     if (xms_mode) {
         unsigned long pool;
@@ -751,6 +772,13 @@ static int glos_main(int argc, char **argv)
     bi.hostkey_len = read_key_file(argv[0], "HOSTKEY", bi.hostkey, sizeof bi.hostkey);
     bi.authkeys_len = read_key_file(argv[0], "AUTHKEYS", bi.authkeys, sizeof bi.authkeys);
     say("GLOS-BOOT step=keys seed=%lu hostkey=%lu authkeys=%lu", bi.seed_len, bi.hostkey_len, bi.authkeys_len);
+#ifdef NATIVE
+    bi.indos = bi.sda = bi.lol = 0;             /* (the kernel's own DOS's, when it makes them) */
+    bi.boot_drive = 3;                          /* (C:: the volume GLOS started from) */
+    segread(&sr);
+    bi.magic = BOOTINFO_MAGIC;
+    bi.version = BOOTINFO_VERSION;
+#else
     r.h.ah = 0x34; int86x(0x21, &r, &r, &sr);               /* InDOS flag */
     bi.indos = ((unsigned long)sr.es << 4) + r.x.bx;
     r.x.ax = 0x5D06; int86x(0x21, &r, &r, &sr);             /* swappable data area */
@@ -767,6 +795,7 @@ static int glos_main(int argc, char **argv)
         intdos(&b, &b);
         bi.boot_drive = b.h.dl >= 1 && b.h.dl <= 26 ? b.h.dl : 0;
     }
+#endif
     bi.size = sizeof bi;
     bi.cs_base = (unsigned long)FP_SEG(&stub_data) << 4;    /* 38h: the stub's segment */
     bi.ds_base = (unsigned long)sr.ds << 4;
@@ -822,6 +851,10 @@ static int glos_main(int argc, char **argv)
     ret = pm_enter((unsigned)&gdtr, bi.pd_phys, buf_phys, KERNEL_LINK + ((hdr.file_size + 3) & ~3UL), 0,
                    (bi.kernel_total - ((hdr.file_size + 3) & ~3UL)) >> 2, KERNEL_LINK + hdr.entry,
                    bi.ds_base + (unsigned)&bi);     /* (the image is there already: only its bss to clear) */
+#ifdef NATIVE
+    say("GLOS-BOOT step=back ret=%08lx", ret);   /* (NB1: the kernel doesn't resume the system VM yet) */
+    return (int)ret;
+#endif
     if (ret == 0x10000UL) {
         /* Running in the system VM (V86 mode) under the kernel. The image and
            the first page tables go back to DOS, and so does the rest of
@@ -1079,6 +1112,7 @@ static void read_cfg(const char *argv0, int shell_keys)
 
 /* Is the COMMAND.COM at path GLOS's own (apps/command/command.asm; docs/v1/shell.md, S4c)? It has the four
    letters of its call to the kernel in it. */
+#ifndef NATIVE
 static int own_cmd(const char *path)
 {
     static char head[1536];
@@ -1235,7 +1269,33 @@ static void shell_fallback(void)
     for (;;)                                            /* last resort: COMSPEC under all of GLOS.EXE */
         spawnl(P_WAIT, bi.comspec, bi.comspec, "/P", NULL);
 }
+#endif
 
+#ifdef NATIVE
+extern unsigned native_psp;
+extern unsigned char native_disk;
+int native_mount(void);
+
+/* GLOSLDR.SYS's (nstart.asm calls it): GLOS's files in \GLOS on the volume it started from, as if GLOS.EXE were
+   C:\GLOS\GLOS.EXE. */
+void __cdecl native_main(void)
+{
+    static char *argv[2] = { "C:\\GLOS\\GLOS.EXE", 0 };
+
+    _psp = native_psp;
+    outp(0x3FB, 0x80); outp(0x3F8, 1); outp(0x3F9, 0); outp(0x3FB, 0x03);
+    outp(0x3FA, 0xC7); outp(0x3FC, 0x03);
+    say("GLOS-BOOT step=start build=" GLOS_BUILD " native=1 disk=%02x psp=%04x", native_disk, native_psp);
+    if (native_mount() != 0) {
+        refuse("no-volume");
+        return;
+    }
+    bi.cache_mode = BI_CACHE_ON;
+    read_cfg(argv[0], 0);
+    bi.flags |= BI_F_ROUNDTRIP;                 /* (NB1: in and out again; the system VM's own DOS is NB2's) */
+    say("GLOS-EXIT code=%d", glos_main(1, argv));
+}
+#else
 int main(int argc, char **argv)
 {
     int code;
@@ -1262,3 +1322,4 @@ int main(int argc, char **argv)
         shell_fallback();
     return code;
 }
+#endif

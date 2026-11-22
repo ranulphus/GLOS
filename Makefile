@@ -84,7 +84,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: census rbil fat-test fat-test-run floppy loopa-floppy loopa-ndos loopa-joy loopa-int2f loopa-cache loopa-mem-page loopa-umaprobe loopa-umb sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
+.PHONY: census rbil fat-test fat-test-run floppy loopa-floppy loopa-ndos loopa-nboot native-loader loopa-joy loopa-int2f loopa-cache loopa-mem-page loopa-umaprobe loopa-umb sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN build/glos/COMMAND.COM
 
 help:
@@ -502,6 +502,47 @@ build/ow/GLOS.EXE: build/ow/obj16/main.obj build/ow/obj16/lowlevel.obj build/ow/
 	  file build/ow/obj16/main.obj,build/ow/obj16/lowlevel.obj,build/ow/obj16/stub.obj,build/ow/obj16/cfg.obj \
 	  file build/ow/obj16/tz.obj,build/ow/obj16/inflate.obj
 
+# ---- GLOSLDR.SYS: the same loader with no DOS under it (-dNATIVE; docs/v1/native-dos.md, native boot): GLOS's
+# boot sector loads it at 0060:0000h; its first 512 bytes (loader/nprelude.S) run the .EXE after them in place.
+NATIVE_OBJS := build/ow/native/nstart.obj build/ow/native/main.obj build/ow/native/nlib.obj build/ow/native/fat.obj \
+               build/ow/native/lowlevel.obj build/ow/native/stub.obj build/ow/native/cfg.obj build/ow/native/tz.obj \
+               build/ow/native/inflate.obj build/ow/native/cp.obj build/ow/native/cp_tables.obj
+NATIVE_FILES := build/ow/native/nstart.obj,build/ow/native/main.obj,build/ow/native/nlib.obj,build/ow/native/fat.obj,build/ow/native/lowlevel.obj,build/ow/native/stub.obj,build/ow/native/cfg.obj,build/ow/native/tz.obj,build/ow/native/inflate.obj,build/ow/native/cp.obj,build/ow/native/cp_tables.obj
+NWCC := $(WCC16) -bt=dos -ms -3 -os -s -zq -we -iinclude -dNATIVE
+build/ow/native/main.obj: loader/main.c loader/inflate.h include/glos/bootinfo.h include/glos/config.h build/build_id
+	@mkdir -p $(dir $@)
+	$(Q)echo "  WCC16   $< (native)"
+	$(Q)$(NWCC) -dGLOS_BUILD="\"$(BUILD_ID)\"" -dINFL_FAR=far -fo=$@ $<
+build/ow/native/nlib.obj build/ow/native/inflate.obj: build/ow/native/%.obj: loader/%.c loader/inflate.h kernel/fs/fat.h
+	@mkdir -p $(dir $@)
+	$(Q)echo "  WCC16   $< (native)"
+	$(Q)$(NWCC) -dINFL_FAR=far -fo=$@ $<
+build/ow/native/fat.obj: kernel/fs/fat.c kernel/fs/fat.h
+	@mkdir -p $(dir $@)
+	$(Q)echo "  WCC16   $< (native)"
+	$(Q)$(NWCC) -fo=$@ $<
+build/ow/native/cfg.obj build/ow/native/tz.obj build/ow/native/cp.obj build/ow/native/cp_tables.obj: build/ow/native/%.obj: sdk/config/%.c include/glos/config.h include/glos/cp.h
+	@mkdir -p $(dir $@)
+	$(Q)echo "  WCC16   $< (native)"
+	$(Q)$(NWCC) -fo=$@ $<
+build/ow/native/%.obj: loader/%.asm
+	@mkdir -p $(dir $@)
+	$(Q)echo "  WASM    $< (native)"
+	$(Q)$(OWENV) $(OWBIN)/wasm -q -fo=$@ $<
+build/ow/native/nprelude.bin: loader/nprelude.S
+	@mkdir -p $(dir $@)
+	$(Q)echo "  AS      $<"
+	$(Q)$(HOST_CC) -m32 -c -o build/ow/native/nprelude.o $<
+	$(Q)objcopy -O binary -j .text build/ow/native/nprelude.o $@
+build/ow/native/GLOSN.EXE: $(NATIVE_OBJS)
+	$(Q)echo "  WLINK   $@"
+	$(Q)$(WLINK) system dos option quiet option map=build/ow/native/GLOSN.map option start=_nstart name $@ \
+	  file $(NATIVE_FILES) library $(WATCOM)/lib286/dos/clibs.lib
+build/ow/GLOSLDR.SYS: build/ow/native/nprelude.bin build/ow/native/GLOSN.EXE
+	$(Q)echo "  GLOSLDR $@"
+	$(Q)cat build/ow/native/nprelude.bin build/ow/native/GLOSN.EXE > $@
+native-loader: build/ow/GLOSLDR.SYS
+
 # ---- DOS test programs (Open Watcom, small model): tests/dos/name.c -> build/ow/dos/NAME.EXE
 define dos_test
 build/ow/dos/$(1).EXE: tests/dos/$(2).c
@@ -709,6 +750,8 @@ loopa-api: all build/dj/APITEST.EXE build/dj/JOBTOOL.EXE build/dj/GDBME.EXE dosl
 # An app's own threads (phase B step 4): THRTEST through the agent.
 loopa-ndos: all dos-tests check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py ndos -j $(JOBS)
+loopa-nboot: all native-loader check-deps
+	$(Q)$(DEV) python3 tests/loopa/jobs.py nboot -j $(JOBS)
 loopa-thr: all dos-tests build/dj/THRTEST.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py thr -j $(JOBS)
 loopa-mem-page: all dos-tests build/dj/UMAPROBE.EXE build/dj/NESTRM.EXE check-deps

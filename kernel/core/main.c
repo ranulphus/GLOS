@@ -105,6 +105,10 @@ void kmain(struct bootinfo *loader_bi)
             cpu_has_cr4 ? "yes" : "absent", cpu_cr4_bits, (u32)probe);
     kfree(probe);
 
+    if (bi->flags & BI_F_NATIVE)                /* (GLOSLDR.SYS started it: no DOS under it; docs/v1/native-dos.md) */
+        kprintf("GLOS-NATIVE step=kernel disks=%u boot_drive=%u cfg=%s\n", bi->n_disks, bi->boot_drive,
+                bi->cfg_path);
+
     if (bi->flags & BI_F_GDB) {
         gdb_init(COM2);
         kprintf("GLOS-GDB waiting on COM2\n");

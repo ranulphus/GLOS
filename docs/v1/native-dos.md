@@ -600,7 +600,18 @@ bootinfo); and the ways out (`glos exit` back to DOS, DOWN, /ROUNDTRIP).
 **The steps:**
 - **NB1, the start:** `make native-image` (mtools on the host: GLOS's MBR, a FAT volume with GLOS's boot sector
   naming `GLOSLDR SYS`, `\GLOSLDR.SYS`, `\GLOS\` with GLOSK.BIN and GLOS.CFG); GLOSLDR.SYS reads the kernel by
-  INT 13h and enters it; the kernel says it started native. Loop A (`--hdd`): its GLOS-BOOT and GLOS-RING0 lines.
+  INT 13h and enters it; the kernel says it started native. Loop A (`--hdd`): its GLOS-BOOT and GLOS-RING0 lines. **Built
+  2026-11-22:** `tools/ndos/native-image.sh` (in the dev container: GLOS's MBR by `tools/ndos/mkmbr.c`, a volume
+  of GLOS's own formatter by `tools/ndos/mkvol.c`, its boot code naming GLOSLDR.SYS); GLOSLDR.SYS (`make
+  native-loader`) = `loader/nprelude.S` (512 bytes: says `GLOS-BOOT step=prelude`, applies the .EXE's
+  relocations in place, makes its PSP in the 256 bytes before its image, enters it with DL the disk) + `loader/main.c`
+  built `-dNATIVE` with `loader/nstart.asm` (its entry in place of the C library's: SS made DGROUP, the BSS cleared)
+  and `loader/nlib.c` (`fopen`, `fgets`, `fread`, `fseek`, `access` over `kernel/fs/fat.c` built 16-bit on the
+  BIOS's INT 13h, LBA or CHS, the active FAT partition; `_dos_allocmem` up from the loader's end; no environment).
+  The C library's DOS start-up is linked, dead (sscanf's multibyte tables ask for it), and never runs. Bootinfo:
+  `BI_F_NATIVE` (1000h). NB1 is a round trip: the kernel says `GLOS-NATIVE step=kernel`, measures its clock and
+  returns; the loader says `GLOS-EXIT code=0`. `loopa-nboot` (the bf6, the 486) passes; loopa-m1 (GLOS.EXE from DOS)
+  unchanged.
 - **NB2, the system VM's DOS:** with `BI_F_NATIVE`, GLOS's DOS over the system VM's memory (the loader adopted,
   its PSP the master environment's), INT 20h and 21h trapped to it, C: the boot volume; the stub goes resident,
   the agent listens. Loop A: SSH's `ver`, `dir C:\`, a file written and read back through the shell (the DOS server

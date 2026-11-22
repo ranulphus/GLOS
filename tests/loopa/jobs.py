@@ -7226,6 +7226,37 @@ def dosdiff_compare(got_text):
     return out
 
 
+def nboot_case(profile, card):
+    """Native boot, NB1 (docs/v1/native-dos.md, native boot): a disk with GLOS's MBR, a volume of GLOS's own
+    formatter whose boot sector names GLOSLDR.SYS, and the kernel in \\GLOS (tools/ndos/native-image.sh), started
+    with no DOS anywhere. GLOS's boot sector loads GLOSLDR.SYS; its prelude runs the loader built native (files by
+    GLOS's FAT code over INT 13h, memory by E820h); the kernel enters, says it started native, measures its clock
+    and comes back (NB1's round trip); the loader ends with 0. (No harness line ends the run yet, so it runs to
+    its short timeout: NB2's AUTOEXEC.BAT will say HX-DONE.)"""
+    del card
+    img = os.path.join(ROOT, "out", "nboot-img-" + profile, "c.img")
+    os.makedirs(os.path.dirname(img), exist_ok=True)
+    mk = subprocess.run(["sh", "tools/ndos/native-image.sh", img], cwd=ROOT, capture_output=True)
+    st, serial = run("nboot-" + profile, ["--hdd", img, "--machine", profile, "--timeout", "40"])
+    checks = {
+        "image": mk.returncode == 0,
+        "prelude": "GLOS-BOOT step=prelude" in serial,
+        "loader": re.search(r"GLOS-BOOT step=start build=\S+ native=1 disk=80", serial) is not None,
+        "kernel-read": "GLOS-BOOT step=enter" in serial,
+        "kernel": "GLOS-NATIVE step=kernel" in serial
+                  and re.search(r"GLOS-RING0 step=entry mode=raw .*flags=1001", serial) is not None,
+        "clock": re.search(r"GLOS-RING0 ticks=\d+", serial) is not None,
+        "back": "GLOS-BOOT step=back ret=00000000" in serial and "GLOS-EXIT code=0" in serial,
+        "clean": "GLOS-REFUSE" not in serial and "GLOS-PANIC" not in serial,
+    }
+    bad = [k for k, v in checks.items() if not v]
+    info = " status=%s" % st if bad else ""
+    if not checks["image"]:
+        info += " image=%r" % mk.stderr.decode("latin-1")[-200:]
+    return "  %-22s %s%s%s" % ("nboot-" + profile, "PASS" if not bad else "FAIL", info,
+                               "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 def ndos_case(profile, card):
     """A native machine (docs/v1/native-dos.md, native-DOS sessions, NS1: kernel/vm/ndm.c): GLOS's second V86 machine,
     no DOS under it, its INT 21h GLOS's own. Through the agent, twice (the first machine's memory and thread
@@ -12057,7 +12088,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
                                       "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time", "netapp", "https", "sshc", "pkg", "vnc", "cache",
-                                      "umaprobe", "mem-page", "int2f", "umb", "joy", "xfer", "api", "thr", "floppy", "ndos"])
+                                      "umaprobe", "mem-page", "int2f", "umb", "joy", "xfer", "api", "thr", "floppy", "ndos",
+                                      "nboot"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -12302,6 +12334,9 @@ def main():
             res += matrix(api_dbg_case, wins, a.jobs)   # ... and a program debugged
             res += matrix(api_sec_case, wins, a.jobs)   # ... and secrets kept
         return 0 if all(r[1] for r in res) else 1
+    if a.suite == "nboot":                      # (native boot: the bf6, the 486)
+        cases = [c for c in [("bf6", None), ("486dx2", None)] if not a.profile or c[0] in a.profile]
+        return 0 if all(r[1] for r in matrix(nboot_case, cases, a.jobs)) else 1
     if a.suite == "ndos":                       # (native machines: the bf6 with VME, the 486 without)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(ndos_case, cases, a.jobs)) else 1
