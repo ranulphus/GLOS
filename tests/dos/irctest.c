@@ -8,7 +8,7 @@
  * up), is announced (by SASL with an account), joins CHANNEL, says "ping from GLOS", waits for an answer that
  * begins "pong", and leaves. A line for each step:
  *
- *     IRCTEST on nick=NICK network=NAME
+ *     IRCTEST on nick=NICK network=NAME          (once the server has named its network, or 5 s after its welcome)
  *     IRCTEST joined CHANNEL users=N topic=TOPIC
  *     IRCTEST heard NICK at WHEN: TEXT
  *     IRCTEST ended: WHY
@@ -66,7 +66,7 @@ int main(int argc, char **argv)
     struct irc_opts o;
     char host[128], certs[300], why[80], piece[512], *address;
     const char *home;
-    unsigned waited;
+    unsigned waited, on_at = 0;
     int state, said_on = 0, said_joined = 0, said_ping = 0, quit = 0, r;
     if (argc < 6) {
         printf("IRCTEST HOST[=ADDRESS] PORT plain|tls NICK CHANNEL [ACCOUNT PASSWORD]\n");
@@ -104,7 +104,11 @@ int main(int argc, char **argv)
     for (waited = 0; waited < 90000; waited += 20) {
         while ((r = ircnet_read(net, piece, sizeof piece)) > 0)
             irc_feed(irc, piece, (unsigned)r);
-        if (irc_state(irc) == IRC_ON && !said_on) {
+        if (irc_state(irc) == IRC_ON && !said_on && !on_at)
+            on_at = waited + 1;
+        /* (said once the network has named itself: 005 comes after the welcome, 001, which is when the state is
+           ON, and over TLS on a slow PC they come in reads of their own; a server that names none: 5 s after) */
+        if (on_at && !said_on && (irc_network(irc)[0] || waited + 1 - on_at >= 5000)) {
             said_on = 1;
             printf("IRCTEST on nick=%s network=%s\n", irc_nick(irc), irc_network(irc));
             snprintf(piece, sizeof piece, "/join %s", argv[5]);
