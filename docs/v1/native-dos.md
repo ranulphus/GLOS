@@ -258,8 +258,14 @@ right error is part of the answer); **internal** after the core.
     disks are under 1,024 cylinders, where 86Box reports no LBA and its BIOS sets no multiple: the driver's
     CHS single-sector path is what Loop A proves; LBA, 48-bit and READ/WRITE MULTIPLE are the host test's and
     the benches'. (A Loop A scratch disk past 504 MB needs RetroGPU's run.py to allow one: it keeps them to the
-    BIOS's CHS limit.) Still to come in N1c: the gate run with `driver = glos` as the default (every suite on
-    it), the benches' real disks, the cache keeping writes for 2 seconds, IRQ-driven transfers.
+    BIOS's CHS limit.) **Proven 2026-11-21/22:** the gate with `driver = glos` as the default (a throwaway
+    branch, every suite's DOS disks on GLOS's driver): 33 of 33 after a fix (the Control Panel's letter for the
+    new setting clashed with the cache's own); and bench-g400's real disk (a Fujitsu MPE3173AE on the PIIX4,
+    LBA, the BIOS's 16-sector multiple; the ATAPI CD found on the secondary channel) with `driver = glos-read`
+    and `enabled = verify`: DOOM's 17 MB copied by XCOPY and compared by FC /B (all 19 files the same), 40,027
+    sectors read by GLOS's driver, 125,839 hit sectors read again by the BIOS and compared, no mismatch, no
+    driver error. Still to come in N1c: `driver = glos` (its writes too) on a real disk, the cache keeping
+    writes for 2 seconds, IRQ-driven transfers.
   - **N1d, many callers:** a lock per volume, handles that stay right while another caller changes the folder
     they are in. **Built 2026-11-21** (`kernel/fs/fsv.c`, plain C with the lock as callbacks; not yet linked
     into GLOSK.BIN: nothing uses it before N1e): every call under the volume's lock; a file's handles share one
