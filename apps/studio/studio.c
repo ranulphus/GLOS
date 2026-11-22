@@ -28,7 +28,7 @@
 #include "../shared/song.h"
 
 enum { C_NEW = 1, C_OPEN, C_SAVE, C_SAVEAS, C_EXIT, C_UNDO, C_REDO, C_DELETE, C_SELALL, C_TRACK, C_DRUMS, C_UNTRACK, C_INSTR,
-       C_MUTE, C_SOLO, C_PLAY, C_STOP, C_TEMPO, C_ZOOMIN, C_ZOOMOUT };
+       C_MUTE, C_SOLO, C_PLAY, C_STOP, C_TEMPO, C_ZOOMIN, C_ZOOMOUT, C_RECORD };
 
 #define ROW 8                           /* a key's row on the roll: pixels */
 #define GRID (SONG_PPQ / 4)             /* notes are put and moved on sixteenths */
@@ -473,11 +473,15 @@ static void feeder(void *arg)
     }
 }
 
+static void rec_poll(void);
+static void rec_stop(void);
+
 static void tick(void *arg)             /* the line along the roll; the end seen */
 {
     unsigned long ms;
     int ended;
     (void)arg;
+    rec_poll();
     if (!heard)
         return;
     take();
@@ -494,6 +498,163 @@ static void tick(void *arg)             /* the line along the roll; the end seen
     line = (long)song_tick(song, ms);
     show_clock();
     gui_damage(roll);
+}
+
+/* ---- recording: from a MIDI keyboard (the MPU-401's input: AUDIO's MIDI port in) and from the PC's keys, two
+   rows as a piano (Z S X D C V G B H N J M: C4 to B4; Q 2 W 3 E R 5 T 6 Y 7 U: C5 to B5). The song plays meanwhile
+   (if it has notes), and each note played goes into the chosen track where it was played, its start on the
+   nearest sixteenth, a sixteenth long at least; the notes are heard as they are played. One step of the
+   history for the whole take. In the suite's -demo the time is the demo's (F9 a second), so a take is the same
+   on every PC. */
+
+static const unsigned char pc_keys[24] = { 0x2C, 0x1F, 0x2D, 0x20, 0x2E, 0x2F, 0x22, 0x30, 0x23, 0x31, 0x24, 0x32,
+                                           0x10, 0x03, 0x11, 0x04, 0x12, 0x13, 0x06, 0x14, 0x07, 0x15, 0x08, 0x16 };
+#define PC_BASE 60                      /* the first's key: middle C */
+#define GRID (SONG_PPQ / 4)             /* a sixteenth */
+
+static int recording, rec_n;
+static glos_handle rec_in, rec_out;
+static unsigned rec_t0;
+static unsigned long rec_demo_ms;
+static struct { unsigned char on, pc, force; unsigned long ms; } held[128];
+static struct step *rec_step;
+static char rec_keys[200], rec_ats[200];
+
+static unsigned long rec_now(void)
+{
+    unsigned long ms;
+    if (demo)
+        return playing ? demo_ms : rec_demo_ms;
+    if (!playing)
+        return glos_ticks() - rec_t0;
+    take();
+    ms = mp_where(&mp);
+    give();
+    return ms;
+}
+
+static void rec_sound(unsigned status, unsigned key, unsigned force)
+{
+    struct glos_midi_msg m;
+    glos_handle h = playing ? mp.port : rec_out;
+    if (!h || demo)
+        return;
+    memset(&m, 0, sizeof m);
+    m.status = (unsigned char)(status | song->track[cur].channel), m.data1 = (unsigned char)key, m.data2 = (unsigned char)force;
+    take();
+    glos_midi_send(h, &m, 1, NULL, NULL);
+    give();
+}
+
+static void rec_on(unsigned key, unsigned force, int pc)
+{
+    if (!recording || key > 127 || held[key].on)
+        return;
+    held[key].on = 1, held[key].pc = (unsigned char)pc, held[key].force = (unsigned char)(force ? force : 100);
+    held[key].ms = rec_now();
+    rec_sound(0x90, key, held[key].force);
+}
+
+static void rec_off(unsigned key)
+{
+    unsigned long a, b, len;
+    size_t k;
+    if (!recording || key > 127 || !held[key].on)
+        return;
+    held[key].on = 0;
+    rec_sound(0x80, key, 0);
+    a = song_tick(song, held[key].ms), b = song_tick(song, rec_now());
+    len = b > a ? (b - a + GRID / 2) / GRID * GRID : 0;
+    a = (a + GRID / 2) / GRID * GRID;
+    if (song_note_add(&song->track[cur], a, len < GRID ? GRID : len, key, held[key].force) < 0)
+        return;
+    rec_n++;
+    k = strlen(rec_keys);
+    if (k + 8 < sizeof rec_keys)
+        snprintf(rec_keys + k, sizeof rec_keys - k, "%s%u", k ? "," : "", key);
+    k = strlen(rec_ats);
+    if (k + 12 < sizeof rec_ats)
+        snprintf(rec_ats + k, sizeof rec_ats - k, "%s%lu", k ? "," : "", a);
+    size_roll();
+    gui_damage(roll);
+}
+
+static int pc_key(unsigned code)        /* the key a PC key plays, or -1 */
+{
+    int i;
+    for (i = 0; i < 24; i++)
+        if (pc_keys[i] == code)
+            return PC_BASE + i;
+    return -1;
+}
+
+/* The PC's keys as they are held (an idle's look): a key let go ends its note. */
+static void rec_poll(void)
+{
+    struct glos_keys k;
+    int i;
+    memset(&k, 0, sizeof k);
+    k.size = sizeof k;
+    if (!recording || glos_keys(&k) != 0)
+        return;
+    for (i = 0; i < 24; i++) {
+        unsigned key = PC_BASE + (unsigned)i;
+        int down = GLOS_KEY_DOWN(&k, pc_keys[i]);
+        if (down && !held[key].on)
+            rec_on(key, 100, 1);
+        else if (!down && held[key].on && held[key].pc)
+            rec_off(key);
+    }
+}
+
+static void rec_event(const struct glos_ev *ev)         /* a message of the MIDI keyboard's */
+{
+    const struct glos_ev_midi *m = (const struct glos_ev_midi *)ev;
+    if (ev->kind != GLOS_EV_MIDI || !recording)
+        return;
+    if ((m->status & 0xF0) == 0x90 && m->data2)
+        rec_on(m->data1 & 0x7F, m->data2, 0);
+    else if ((m->status & 0xF0) == 0x80 || (m->status & 0xF0) == 0x90)
+        rec_off(m->data1 & 0x7F);
+}
+
+static void rec_stop(void)
+{
+    unsigned i;
+    if (!recording)
+        return;
+    for (i = 0; i < 128; i++)
+        rec_off(i);
+    recording = 0;
+    if (rec_in)
+        glos_close(rec_in);
+    if (rec_out)
+        glos_close(rec_out);
+    rec_in = rec_out = 0;
+    if (heard)
+        stop_playing();
+    step_end(rec_step, GUI_T("Record"));
+    rec_step = NULL;
+    say("recorded %d notes keys=%s at=%s", rec_n, rec_keys[0] ? rec_keys : "-", rec_ats[0] ? rec_ats : "-");
+    show_status();
+}
+
+static void rec_start(void)
+{
+    rec_stop();
+    memset(held, 0, sizeof held);
+    rec_n = 0, rec_keys[0] = rec_ats[0] = 0;
+    rec_step = step_begin();
+    rec_in = demo ? 0 : glos_midi_in(GLOS_MIDI_PORT_MPU);   /* (none: the PC's keys alone) */
+    if (song_ticks(song))
+        play();                         /* (the song as it is, heard while the new notes are played) */
+    if (!playing && !demo)
+        rec_out = glos_midi_out(GLOS_MIDI_PORT_FM);
+    rec_t0 = glos_ticks();
+    rec_demo_ms = 0;
+    recording = 1;
+    say("recording in=%s", rec_in ? "mpu+keys" : "keys");
+    gui_focus(roll);
 }
 
 /* ---- files */
@@ -797,10 +958,19 @@ static void command(struct gui_window *w, int id)
         show_tracks();
         break;
     case C_PLAY:
+        rec_stop();
         play();
         break;
+    case C_RECORD:
+        if (recording)
+            rec_stop();
+        else
+            rec_start();
+        break;
     case C_STOP:
-        if (heard) {
+        if (recording)
+            rec_stop();
+        else if (heard) {
             stop_playing();
             say("stopped");
         }
@@ -827,7 +997,8 @@ static void update(struct gui_window *w)
     gui_command_enable(w, C_DELETE, chosen > 0);
     gui_command_enable(w, C_SELALL, t->nnotes > 0);
     gui_command_enable(w, C_UNTRACK, song->ntracks > 1);
-    gui_command_enable(w, C_STOP, heard != NULL);
+    gui_command_enable(w, C_STOP, heard != NULL || recording);
+    gui_command_check(w, C_RECORD, recording);
     gui_command_enable(w, C_ZOOMIN, zoom > 2);
     gui_command_enable(w, C_ZOOMOUT, zoom < 32);
     gui_command_check(w, C_MUTE, t->mute);
@@ -851,12 +1022,20 @@ static void tracks_event(struct gui_widget *l, int what)
 static int key(struct gui_window *w, struct gui_ev *e)
 {
     (void)w;
+    rec_poll();                                 /* (the keys let go since the last look end their notes first, before
+                                                   this key moves the time on: the same take on every PC) */
     if (demo && e->key == 0x43) {               /* F9: a second heard */
         take();
         if (playing)
             demo_ms += 1000;
         give();
+        rec_demo_ms += 1000;
         tick(NULL);
+        return 1;
+    }
+    if (recording && !e->mods && pc_key(e->key) >= 0) {        /* (a key of the PC's piano: its note, however short
+                                                   the press; the idle's look at the keys ends it) */
+        rec_on((unsigned)pc_key(e->key), 100, 1);
         return 1;
     }
     return 0;
@@ -906,6 +1085,7 @@ static void build(void)
     gui_command(win, C_SOLO, GUI_T("&Solo"), "Ctrl+L", NULL, NULL);
     gui_command(win, C_PLAY, GUI_T("&Play"), "F5", gui_glyph("play"), GUI_T("Play from the start"));
     gui_command(win, C_STOP, GUI_T("&Stop"), "F6", gui_glyph("stop"), GUI_T("Stop"));
+    gui_command(win, C_RECORD, GUI_T("&Record"), "F7", NULL, GUI_T("Record from a MIDI keyboard or the PC's keys"));
     gui_command(win, C_TEMPO, GUI_T("&Tempo..."), NULL, NULL, NULL);
     gui_command(win, C_ZOOMIN, GUI_T("Zoom &In"), "Ctrl++", gui_glyph("zoom-in"), GUI_T("Zoom in"));
     gui_command(win, C_ZOOMOUT, GUI_T("Zoom &Out"), "Ctrl+-", gui_glyph("zoom-out"), GUI_T("Zoom out"));
@@ -923,7 +1103,7 @@ static void build(void)
     gui_menu_sep(m);
     gui_menu_command(m, C_INSTR), gui_menu_command(m, C_MUTE), gui_menu_command(m, C_SOLO);
     m = gui_menu(bar, GUI_T("Tra&nsport"));
-    gui_menu_command(m, C_PLAY), gui_menu_command(m, C_STOP);
+    gui_menu_command(m, C_PLAY), gui_menu_command(m, C_STOP), gui_menu_command(m, C_RECORD);
     gui_menu_sep(m);
     gui_menu_command(m, C_TEMPO);
     m = gui_menu(bar, GUI_T("&View"));
@@ -931,7 +1111,7 @@ static void build(void)
     tb = gui_toolbar(win);
     gui_toolbar_command(tb, C_NEW), gui_toolbar_command(tb, C_OPEN), gui_toolbar_command(tb, C_SAVE);
     gui_toolbar_sep(tb);
-    gui_toolbar_command(tb, C_PLAY), gui_toolbar_command(tb, C_STOP);
+    gui_toolbar_command(tb, C_PLAY), gui_toolbar_command(tb, C_STOP), gui_toolbar_command(tb, C_RECORD);
     gui_toolbar_sep(tb);
     gui_toolbar_command(tb, C_UNDO), gui_toolbar_command(tb, C_REDO), gui_toolbar_command(tb, C_DELETE);
     gui_toolbar_sep(tb);
@@ -981,8 +1161,10 @@ int main(int argc, char **argv)
     if (file)
         open_file(file);
     gui_focus(roll);
+    gui_on_event(rec_event);                    /* (a MIDI keyboard's messages) */
     gui_idle(tick, NULL, 50);
     gui_run();
+    rec_stop();
     stop_playing();
     if (thread) {
         take();

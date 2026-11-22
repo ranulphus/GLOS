@@ -1346,3 +1346,21 @@ copy of a program of that name.
 - **Tests:** `games-profile` (host and the emulated desktops): Doom's Properties set to the whole screen,
   8192 KB, a Sound Blaster at IRQ 7 and direct mode, and read back when the dialog opens again.
 - **Not yet:** the controller's mapping for a game (`[joystick] map` is one for every program).
+
+## MIDI Studio: recording (2026-11-22)
+
+The plan's "a MIDI keyboard as input: an MPU-401 port where a card has one" and "step entry from the PC's
+keys" (`docs/v1/apps/midi-studio.md`), as recording: **F7** (Transport, Record).
+
+- **What is heard:** AUDIO's MIDI port in on the MPU-401 (`glos_midi_in`; its note messages through the
+  toolkit's `gui_on_event`), and the PC's keys as two octaves of a piano (Z S X ... M from middle C, Q 2 W ...
+  U above), looked at on the idle (key let go: the note ends) and caught by their key events (however short
+  the press). Each note played is heard at once (the playing song's port, or the FM chip's own).
+- **Where it goes:** the chosen track, at the time it was played (the song plays from its start meanwhile,
+  if it has notes; else a clock of its own), its start on the nearest sixteenth, its length in sixteenths,
+  one at least. The whole take is one step of the history ("Record").
+- **The suite's `-demo`:** the take's time is the demo's (F9: a second), so a take is the same on every PC.
+- **Tests:** `studio-record` (host and the emulated desktops): C, D and E a second apart from the PC's keys:
+  at 0, 960 and 1920 ticks; undone and done again. The MPU-401's input waits for a bench with a keyboard.
+- **Not yet:** step entry at a cursor (a note a key press, the cursor moving on); a count-in and a click; USB
+  MIDI keyboards (the USB MIDI class on GLOS's stack); velocity from the PC's keys.

@@ -285,6 +285,13 @@ glos_handle glos_midi_out(unsigned port)
     return 0;
 }
 
+glos_handle glos_midi_in(unsigned port)        /* (no MPU-401 here: nothing comes in) */
+{
+    (void)port;
+    last_error = GLOS_E_NOT_FOUND;
+    return 0;
+}
+
 int glos_midi_send(glos_handle h, const struct glos_midi_msg *m, unsigned count, unsigned *taken, unsigned *queued)
 {
     (void)h, (void)m, (void)count;
