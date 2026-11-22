@@ -7271,7 +7271,8 @@ def nboot_dos_case(profile, card):
     cfg = batfile("nboot2-%s/GLOS.CFG" % profile, ["; jobs.py nboot: NB2", "[time]", "sntp = off"])
     mk = subprocess.run(["sh", "tools/ndos/native-image.sh", img, cfg + "=\\GLOS\\GLOS.CFG",
                          "build/glos/COMMAND.COM=\\GLOS\\COMMAND.COM", "tests/keys/hostkey=\\GLOS\\KEYS\\HOSTKEY",
-                         "tests/keys/AUTHKEYS=\\GLOS\\KEYS\\AUTHKEYS"], cwd=ROOT, capture_output=True)
+                         "tests/keys/AUTHKEYS=\\GLOS\\KEYS\\AUTHKEYS", "build/ow/dos/TYPEIN.EXE=\\GLOS\\TYPEIN.EXE",
+                         "build/ow/dos/CONTEST.EXE=\\GLOS\\CONTEST.EXE"], cwd=ROOT, capture_output=True)
     checks, info = {"image": mk.returncode == 0}, ""
     agent = Agent("nboot2-%s-%s" % (profile, card), profile, card, ["--hdd", img], timeout=600, files=False)
     try:
@@ -7287,6 +7288,36 @@ def nboot_dos_case(profile, card):
             checks["write-read"] = wr[0] == 0 and rd[0] == 0 and "written natively" in rd[1]
             checks["job"] = job[0] == 0 and "GLOS" in job[1]
             info += " ver=%r dir=%r rd=%r job=%r" % (ver[1][:60], ls[1][:160], rd[1][:60], (job[1] + job[2])[:120])
+            # NB3: the console. TYPEIN reads a line through DOS (3Fh, cooked) as glos type types it at the VM's
+            # keyboard (the BIOS's INT 09h, its buffer, GLOS's DOS taking a key at a time).
+            import time
+            text = "Typed natively 1+2=3"
+            p = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\GLOS\\TYPEIN.EXE"], stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+            t0 = time.time()
+            while time.time() - t0 < 120 and "HX-TYPE ready" not in agent.log() and p.poll() is None:
+                time.sleep(0.3)
+            agent.ssh("glos type " + text + "\\n")
+            checks["typein"] = p.wait(timeout=120) == 0 and ("HX-TYPE got=" + text) in agent.log()
+            # CONTEST: a line by 0Ah, then a key by the BIOS's own INT 16h (left in its buffer), 08h, Ctrl-C (the
+            # keys) into its own INT 23h and the call made again, the timer; its words on the screen too.
+            p = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\GLOS\\CONTEST.EXE"], stdout=subprocess.PIPE,
+                                 stderr=subprocess.DEVNULL)
+            time.sleep(3)
+            agent.ssh("glos type Ada\\nkm")
+            agent.ssh("glos key 0.1:0x1D:down,0.2:0x2E,0.3:0x1D:up")
+            agent.ssh("glos type x")
+            try:
+                out = p.communicate(timeout=120)[0].decode("latin-1")
+            except subprocess.TimeoutExpired:
+                p.kill()
+                out = "(timed out)"
+            want = "CONTEST line=Ada key=256B ch=m c23=1 after=x ticks=ok bios=ok"
+            checks["console"] = p.returncode == 0 and want in out
+            shot = agent.ssh("glos shot --text")[1]
+            checks["screen"] = want in shot
+            if not checks["console"] or not checks["screen"]:
+                info += " contest=%r/%s screen=%r" % (out[-160:], p.returncode, shot.replace("\n", "|")[-300:])
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
     agent.proc.kill()

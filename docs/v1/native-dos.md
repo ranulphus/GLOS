@@ -631,7 +631,16 @@ bootinfo); and the ways out (`glos exit` back to DOS, DOWN, /ROUNDTRIP).
   through the DOS server; nothing unanswered. Open: the console (NB3); the disk cache under `fsv.c` (today the
   native volume's I/O goes past the cache, which a program's INT 13h on the same disk would see stale).
 - **NB3, waits and the console:** the HLT-and-again wait; lcon and the shell's terminal typing into GLOS's DOS;
-  INT 2Fh answered; Ctrl-C into sessions' programs.
+  INT 2Fh answered; Ctrl-C into sessions' programs. **Built 2026-11-22:** keys come as they come to DOS: the VM's
+  keyboard (the PC's, lcon's and the shell's typing, `glos type` and `glos key`) into the BIOS's INT 09h and its
+  buffer, from which GLOS's DOS takes one key at a time when its ring is empty and the call wants input (`fill`),
+  only Ctrl-C for any other call, so that a program reading a line through DOS and then a key through the BIOS's
+  INT 16h finds that key there. A line being read (0Ah, cooked 3Fh) whose call goes back to its INT to wait keeps
+  what it has (`rl_n`, `cooked`). CON's output on the VM's text screen as the BIOS's teletype writes it
+  (`vcon_tty`); INT 29h, and DOS's own INT 23h, at ARPLs; Ctrl-C into a program's own INT 23h and the call made
+  again from its INT (or its end); INT 2Fh's chain ends at an IRET of DOS's. `loopa-nboot`: TYPEIN's line typed
+  by `glos type`; CONTEST (a line by 0Ah, a key by the BIOS's INT 16h, 08h, Ctrl-C by `glos key` into its own
+  INT 23h, ticks by INT 1Ch and the BIOS's count), its words on the screen as well.
 - **NB4, programs:** agent jobs and sessions EXEC'd by GLOS's DOS (NDOSTEST, DOSDIFF against MS-DOS 7.1 again),
   GLOS's COMMAND.COM, apps (the DPMI host's reflection reaching GLOS's DOS), the census's programs; a `native`
   variant of the suites.

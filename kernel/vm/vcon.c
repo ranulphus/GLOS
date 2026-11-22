@@ -74,6 +74,57 @@ static int vcon_write(const char *s, u32 n, int fresh)
 
 static void vcon_put(const char *s, u32 n) { (void)vcon_write(s, n, 0); }
 
+/* The BIOS's teletype, for a program's CON output when GLOS's own DOS is the system VM's (vdos.c): CR to the line's
+   start, LF down, Backspace back, BEL nothing, Tab to the next multiple of eight; the BIOS's cursor kept. */
+int vcon_tty(const char *s, u32 n)
+{
+    u8 mode = session_bios_mode(), page = vm_rd8(0x462);
+    u32 cols = vm_rd8(0x44A) | (u32)vm_rd8(0x44B) << 8, rows = vm_rd8(0x484) + 1u;
+    u32 col, row, base;
+    u16 *scr;
+
+    if ((mode != 2 && mode != 3 && mode != 7) || display_fb() || cols < 40 || cols > 132 || rows < 25 || rows > 60
+        || page > 7)
+        return 0;
+    base = (mode == 7 ? 0xB0000u : 0xB8000u) + (u32)page * (vm_rd8(0x44C) | (u32)vm_rd8(0x44D) << 8);
+    scr = (u16 *)vm_ptr(base);
+    col = vm_rd8(0x450 + page * 2u), row = vm_rd8(0x451 + page * 2u);
+    if (col >= cols || row >= rows)
+        col = 0, row = rows - 1;
+    for (; n; n--, s++) {
+        switch (*s) {
+        case '\r':
+            col = 0;
+            break;
+        case '\n':
+            row++;
+            break;
+        case '\b':
+            if (col)
+                col--;
+            break;
+        case '\a':
+            break;
+        case '\t':
+            do
+                scr[row * cols + col] = 0x0720;
+            while (++col % 8 && col < cols);
+            break;
+        default:
+            scr[row * cols + col] = (u16)((scr[row * cols + col] & 0xFF00 ? scr[row * cols + col] & 0xFF00 : 0x0700)
+                                          | (u8)*s);
+            col++;
+        }
+        if (col >= cols)
+            col = 0, row++;
+        if (row == rows)
+            scroll_up(scr, cols, rows), row = rows - 1;
+    }
+    vm_wr8(0x450 + page * 2u, (u8)col);
+    vm_wr8(0x451 + page * 2u, (u8)row);
+    return 1;
+}
+
 /* A panic (cpu.c): what the kernel says from here goes to the screen as well, verbose boot or not, where the
    screen is a text screen and no desktop's. A PC with no serial cable has its last words there. */
 void vcon_panic(void)

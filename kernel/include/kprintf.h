@@ -16,6 +16,8 @@ extern void (*kprintf_screen)(const char *s, u32 n);    /* /VERBOSE: lines on th
 void vcon_start(void);
 void vcon_notice(void);                 /* the idle screen's notice, from the VM thread about to wait there */
 void vcon_panic(void);                  /* a panic: its lines on the screen too, if that is a text screen */
+int vcon_tty(const char *s, u32 n);     /* a program's CON output on a native boot (vdos.c), as the BIOS's teletype
+                                           writes it: 1 if the screen took it (a text mode, not the desktop's) */
 extern u8 kprintf_com1_off;             /* COM1 carries no log: it is a cable link's (drv/uart.c) */
 extern int (*kprintf_hold)(void);       /* 1 while a program's COM1 line is unfinished (vm/vdev.c) */
 void kprintf_flush(int force);

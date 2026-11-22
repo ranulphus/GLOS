@@ -657,6 +657,27 @@ int main(void)
     r.dx = 0xFF;
     call(&r, 0x0C06);
     CHECK((r.flags & 0x40), "0Ch: what was typed ahead flushed");
+    /* a line whose call went back to wait for a key (the system VM's way) goes on where it was */
+    outn = 0, out[0] = 0;
+    mem[lin(psp, 0x600)] = 20;
+    type("ab");
+    r.ds = psp, r.dx = 0x600;
+    res = call(&r, 0x0A00);
+    CHECK(res == DOS21_GONE && !strcmp(out, "ab"), "0Ah waiting: %d \"%s\"", res, out);
+    type("c\r");
+    res = call(&r, 0x0A00);
+    CHECK(res == DOS21_DONE && mem[lin(psp, 0x601)] == 3 && !memcmp(mem + lin(psp, 0x602), "abc\r", 4)
+          && !strcmp(out, "abc\r"), "0Ah again: %u \"%.4s\" echo \"%s\"", mem[lin(psp, 0x601)],
+          (char *)mem + lin(psp, 0x602), out);
+    type("li");
+    r.bx = 0, r.cx = 100, r.dx = 0x700;
+    res = call(&r, 0x3F00);
+    CHECK(res == DOS21_GONE, "3Fh CON waiting: %d", res);
+    type("ne\r");
+    r.bx = 0, r.cx = 100, r.dx = 0x700;
+    call(&r, 0x3F00);
+    CHECK(r.ax == 6 && !memcmp(mem + lin(psp, 0x700), "line\r\n", 6), "3Fh CON again: %u", r.ax);
+
     /* 3Fh from CON, cooked */
     type("line one\r");
     r.ds = psp, r.bx = 0, r.cx = 4, r.dx = 0x700;

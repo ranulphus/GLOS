@@ -66,10 +66,17 @@ struct dos_m {
     volatile unsigned khead, ktail;
     int (*wait)(void *ctx);
     void (*idle)(void *ctx);            /* a poll found no key (06h, 0Bh, 44h 06h): its time slice given up */
+    void (*fill)(void *ctx, int input); /* before a call, with the ring empty: the next key typed elsewhere put in
+                                           it (the system VM's: from the BIOS's buffer, vdos.c), for an input call;
+                                           for any other, only if it is Ctrl-C (as DOS's check takes it) */
     unsigned char after_cr;             /* (dos_type's: an LF after a CR is the same Enter) */
     unsigned char pend_scan;            /* 01h/07h/08h: an extended key's scan code, the next call's AL */
     char line[132];                     /* 3Fh on CON, cooked: a line read, CR LF at its end, what's left of it */
     unsigned line_n, line_at;
+    unsigned char cooked[132];          /* ... and the line being read for it */
+    unsigned rl_n;                      /* a line being read (0Ah, cooked 3Fh) when its call went back to wait for
+                                           a key (the system VM's way: DOS21_GONE): its characters so far, kept */
+    int rl_live;
 };
 
 /* Terminal bytes typed into the machine (its terminal's: UTF-8 none yet, VT100's keys' sequences as the PC's

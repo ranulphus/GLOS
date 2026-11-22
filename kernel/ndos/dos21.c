@@ -342,16 +342,20 @@ static int getc_dos(struct dos_m *m, int check, int echo)
    Esc a new start; control characters shown as ^X): 0, -1 the machine is to end, -2 Ctrl-C. */
 static int read_line(struct dos_m *m, unsigned char *buf, unsigned max)
 {
-    unsigned n = 0;
+    unsigned n = m->rl_live && m->rl_n < max ? m->rl_n : 0;   /* (a line whose call went back to wait goes on: its
+                                                                   characters are in buf still, echoed) */
     int k;
 
+    m->rl_live = 0;
     if (!max)
         return 0;
     for (;;) {
         unsigned c;
 
-        if ((k = dos_key_get(m)) < 0)
+        if ((k = dos_key_get(m)) < 0) {
+            m->rl_n = n, m->rl_live = 1;
             return -1;
+        }
         c = (unsigned)k & 0xFF;
         if (c == 0x03) {
             con_out(m, "^C\r\n", 4);
@@ -413,7 +417,7 @@ static long con_read(struct dos_m *m, unsigned char *dst, unsigned long cnt, int
         return (long)i;
     }
     if (m->line_at >= m->line_n) {
-        unsigned char tmp[130];
+        unsigned char *tmp = m->cooked;         /* (the machine's: a line that waits for a key keeps it) */
 
         tmp[0] = 128;
         if ((k = read_line(m, tmp + 2, 128)) < 0)
@@ -907,6 +911,8 @@ static int ioctl(struct dos_m *m, struct dos_regs86 *r, unsigned al)
             wr8(m, en + 5, (rd16(m, en + 5) & 0xDF) | (r->dx & 0x20));     /* (raw or cooked) */
         } else if (al == 0x06) {
             if (m->files.k[i].dev == DOS_DEV_CON) {
+                if (m->fill)
+                    m->fill(m->ctx, 1);
                 set_al(r, dos_key_peek(m) >= 0 || m->line_at < m->line_n ? 0xFF : 0);
                 if (!(r->ax & 0xFF) && m->idle)
                     m->idle(m->ctx);
@@ -1210,6 +1216,9 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
     struct fat_ent fe;
     int drive, drive2, e, d;
 
+    if (m->fill)
+        m->fill(m->ctx, ah == 0x01 || ah == 0x07 || ah == 0x08 || ah == 0x0A || ah == 0x0B || ah == 0x0C
+                            || (ah == 0x06 && (r->dx & 0xFF) == 0xFF));
     if (m->ctrl_break && ah != 0x06 && ah != 0x07 && ah != 0x33 && ah != 0x4C && break_waiting(m))
         return DOS21_CTRLC;                     /* (BREAK ON: every call looks) */
     switch (ah) {

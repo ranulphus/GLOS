@@ -34,7 +34,6 @@ static struct fsv_vol cvol;
 static struct ata_dev *cdev;
 static unsigned long cbase;
 static int ready, mounted, unanswered;
-static u32 arpl21, arpl20;                      /* (seg << 16 | off) */
 
 /* ---- C: */
 
@@ -107,10 +106,11 @@ static void mount_c(void)
 
 /* ---- the machine */
 
+/* A program's CON output: on the screen, as the BIOS's teletype writes it (the agent's capture has seen the call). */
 static void vd_out(void *ctx, const char *s, unsigned n)
 {
-    (void)ctx, (void)s, (void)n;                /* (a program's CON output: the agent's capture sees its calls
-                                                   already; the screen is NB3's) */
+    (void)ctx;
+    vcon_tty(s, n);
 }
 
 static unsigned long vd_now(void *ctx)
@@ -121,11 +121,50 @@ static unsigned long vd_now(void *ctx)
     return local > 315532800u ? local - 315532800u : 0;
 }
 
+/* A key the BIOS's INT 09h has put in its buffer (the VM's keyboard: the PC's, lcon's and the shell's typing, glos
+   type's) into GLOS's DOS's ring when it is empty, one at a time, as DOS takes them through INT 16h: so a program
+   that reads a line through DOS and then a key through INT 16h finds that key still in the BIOS's buffer. For a
+   call that isn't input, only Ctrl-C is taken. */
+static void vd_fill(void *ctx, int input)
+{
+    u32 head = vm_rd16(0x41A), tail = vm_rd16(0x41C), start = vm_rd16(0x480), end = vm_rd16(0x482), key;
+
+    (void)ctx;
+    if (head == tail || dos_key_peek(&vd) >= 0)
+        return;
+    if (start < 0x1E || end > 0x100 || start >= end)
+        start = 0x1E, end = 0x3E;
+    key = vm_rd16(0x400 + head);
+    if (!input && (key & 0xFF) != 0x03)
+        return;
+    dos_key_push(&vd, key);
+    head += 2;
+    if (head >= end)
+        head = start;
+    vm_wr16(0x41A, head);
+}
+
 static int vd_wait(void *ctx)
 {
-    (void)ctx;
-    return -1;                                  /* (no waiting in a trap: the call comes back to its INT) */
+    vd_fill(ctx, 1);
+    return dos_key_peek(&vd) >= 0 ? 0 : -1;     /* (none yet: the call comes back to its INT, no waiting in a trap) */
 }
+
+/* DOS's bytes for the vectors (the layout's misc + 4 on): ARPLs for INT 21h, 20h, 29h and 23h (DOS's own Ctrl-C
+   handler), one a program's INT 23h returns to, and an IRET that ends INT 2Fh's chain. */
+enum { V21, V20, V29, V23, VC23, NV };
+static u32 arpl[NV];                            /* (seg << 16 | off) */
+static struct dos_regs86 c23;                   /* the call Ctrl-C stopped: its registers, where its INT was (a */
+static u32 c23_sp, c23_at;                      /* call made again may wait), whether it came through the vector */
+static int c23_via;
+
+static void set_vec(u32 n, u32 v)
+{
+    vm_wr16(n * 4, v & 0xFFFF);
+    vm_wr16(n * 4 + 2, v >> 16);
+}
+
+static u32 vec(u32 n) { return (u32)vm_rd16(n * 4 + 2) << 16 | vm_rd16(n * 4); }
 
 int vdos_init(struct bootinfo *bi)
 {
@@ -133,22 +172,24 @@ int vdos_init(struct bootinfo *bi)
     unsigned top = vm_rd16((u32)psp * 16 + 2), low_top = vm_rd16(0x413) * 64u;
     unsigned long a;
     u8 *mem = vm_ptr(0);
+    int i;
 
     if (dos_m_init_vm(&vd, mem, (unsigned long)low_top * 16, psp, top, low_top, 0, 2, 437) != 0) {
         kprintf("GLOS-NATIVE step=dos error psp=%04x top=%04x low_top=%04x\n", psp, top, low_top);
         return -1;
     }
-    vd.out = vd_out, vd.now = vd_now, vd.wait = vd_wait;
+    vd.out = vd_out, vd.now = vd_now, vd.wait = vd_wait, vd.fill = vd_fill;
     bi->indos = vd.lay.sda + 1;
     bi->sda = vd.lay.sda;
     bi->lol = vd.lay.lol;
-    /* INT 21h's and 20h's vectors at ARPLs in DOS's own bytes */
     a = vd.lay.misc + 4;
-    mem[a] = 0x63, mem[a + 1] = 0xC0, mem[a + 2] = 0x63, mem[a + 3] = 0xC0;
-    arpl21 = (u32)(a >> 4) << 16 | (u32)(a & 0xF);
-    arpl20 = arpl21 + 2;
-    vm_wr16(0x21 * 4, arpl21 & 0xFFFF), vm_wr16(0x21 * 4 + 2, arpl21 >> 16);
-    vm_wr16(0x20 * 4, arpl20 & 0xFFFF), vm_wr16(0x20 * 4 + 2, arpl20 >> 16);
+    for (i = 0; i < NV; i++) {
+        mem[a + 2 * i] = 0x63, mem[a + 2 * i + 1] = 0xC0;
+        arpl[i] = (u32)(a >> 4) << 16 | (u32)((a & 0xF) + 2 * i);
+    }
+    mem[a + 2 * NV] = 0xCF;                     /* (IRET) */
+    set_vec(0x21, arpl[V21]), set_vec(0x20, arpl[V20]), set_vec(0x29, arpl[V29]), set_vec(0x23, arpl[V23]);
+    set_vec(0x2F, arpl[V21] + 2 * NV);          /* (INT 2Fh's chain ends here: GLOS's int2f_hook answers before it) */
     ready = 1;
     kprintf("GLOS-NATIVE step=dos psp=%04x top=%04x tables=%05x sda=%05x\n", psp, top, (u32)(vd.lay.lol - 0x12),
             (u32)vd.lay.sda);
@@ -159,6 +200,39 @@ int vdos_on(void) { return ready; }
 
 #define LO16(x, v) ((x) = ((x) & 0xFFFF0000u) | ((v) & 0xFFFF))
 
+static void to_regs(const struct trapframe *tf, struct dos_regs86 *r, u32 ret)
+{
+    r->ax = tf->eax & 0xFFFF, r->bx = tf->ebx & 0xFFFF, r->cx = tf->ecx & 0xFFFF, r->dx = tf->edx & 0xFFFF;
+    r->si = tf->esi & 0xFFFF, r->di = tf->edi & 0xFFFF, r->bp = tf->ebp & 0xFFFF;
+    r->ds = tf->v86_ds & 0xFFFF, r->es = tf->v86_es & 0xFFFF;
+    r->cs = tf->cs & 0xFFFF, r->ip = ret & 0xFFFF, r->ss = tf->ss & 0xFFFF, r->sp = tf->esp & 0xFFFF;
+    r->flags = tf->eflags & 0xFFFF;
+}
+
+static void from_regs(struct trapframe *tf, const struct dos_regs86 *r)
+{
+    LO16(tf->eax, r->ax), LO16(tf->ebx, r->bx), LO16(tf->ecx, r->cx), LO16(tf->edx, r->dx);
+    LO16(tf->esi, r->si), LO16(tf->edi, r->di), LO16(tf->ebp, r->bp);
+    tf->v86_ds = r->ds, tf->v86_es = r->es;
+    tf->cs = r->cs, tf->eip = r->ip, tf->ss = r->ss;
+    LO16(tf->esp, r->sp);
+    tf->eflags = (tf->eflags & ~0x0FD5u) | (r->flags & 0x0FD5u);
+}
+
+static void push16(struct trapframe *tf, u32 v)
+{
+    LO16(tf->esp, (tf->esp - 2) & 0xFFFF);
+    vm_wr16((tf->ss & 0xFFFF) * 16 + (tf->esp & 0xFFFF), v);
+}
+
+/* The program ends as DOS's own Ctrl-C handler ends it (4Dh's AH 01h): its parent runs on. */
+static void ctrl_c_end(struct trapframe *tf, struct dos_regs86 *r)
+{
+    if (dos_ctrl_c_end(&vd, r) == DOS21_END)
+        kprintf("GLOS-NATIVE dos end-of-root ctrl-c psp=%04x\n", dos_cur_psp(&vd));
+    from_regs(tf, r);
+}
+
 /* INT n (20h, 21h) for the program at the trap frame: ret its return address (CS:IP after the INT), at where the
    INT was (for a call made again after a wait), via_arpl when it came through the vector (a far call). */
 void vdos_int(struct trapframe *tf, u8 n, u32 ret, u32 at, int via_arpl)
@@ -168,54 +242,90 @@ void vdos_int(struct trapframe *tf, u8 n, u32 ret, u32 at, int via_arpl)
 
     if (!mounted)
         mount_c();
-    r.ax = tf->eax & 0xFFFF, r.bx = tf->ebx & 0xFFFF, r.cx = tf->ecx & 0xFFFF, r.dx = tf->edx & 0xFFFF;
-    r.si = tf->esi & 0xFFFF, r.di = tf->edi & 0xFFFF, r.bp = tf->ebp & 0xFFFF;
-    r.ds = tf->v86_ds & 0xFFFF, r.es = tf->v86_es & 0xFFFF;
-    r.cs = tf->cs & 0xFFFF, r.ip = ret & 0xFFFF, r.ss = tf->ss & 0xFFFF, r.sp = tf->esp & 0xFFFF;
-    r.flags = tf->eflags & 0xFFFF;
+    to_regs(tf, &r, ret);
     res = n == 0x20 ? dos20(&vd, &r) : dos21(&vd, &r);
     if (res == DOS21_GONE) {                    /* a key waited for: back to the INT, the VM idling meanwhile */
         if (via_arpl) {
-            u32 sp = (tf->esp - 6) & 0xFFFF, lin = (tf->ss & 0xFFFF) * 16 + sp;
-
-            vm_wr16(lin, ret & 0xFFFF), vm_wr16(lin + 2, tf->cs & 0xFFFF), vm_wr16(lin + 4, tf->eflags & 0xFFFF);
-            LO16(tf->esp, sp);
-            tf->cs = (n == 0x20 ? arpl20 : arpl21) >> 16;
-            tf->eip = (n == 0x20 ? arpl20 : arpl21) & 0xFFFF;
+            push16(tf, tf->eflags & 0xFFFF);
+            push16(tf, tf->cs & 0xFFFF);
+            push16(tf, ret & 0xFFFF);
+            tf->cs = arpl[n == 0x20 ? V20 : V21] >> 16;
+            tf->eip = arpl[n == 0x20 ? V20 : V21] & 0xFFFF;
         } else {
             tf->eip = at;
         }
         vm_idle(timer_ticks() + 8);
         return;
     }
-    if (res == DOS21_END || res == DOS21_CTRLC) {
-        kprintf("GLOS-NATIVE dos %s ax=%04x psp=%04x\n", res == DOS21_END ? "end-of-root" : "ctrl-c", r.ax,
-                dos_cur_psp(&vd));             /* (NB3: Ctrl-C; the root never ends) */
+    if (res == DOS21_CTRLC) {
+        if (vec(0x23) == arpl[V23]) {           /* (no handler of the program's: DOS's own ends it) */
+            ctrl_c_end(tf, &r);
+            return;
+        }
+        c23 = r;                                /* its INT 23h, the call's registers, back by an ARPL of GLOS's */
+        c23_at = at, c23_via = via_arpl;
+        from_regs(tf, &r);
+        c23_sp = tf->esp & 0xFFFF;
+        push16(tf, tf->eflags & 0xFFFF);
+        push16(tf, arpl[VC23] >> 16);
+        push16(tf, arpl[VC23] & 0xFFFF);
+        tf->cs = vec(0x23) >> 16;
+        tf->eip = vec(0x23) & 0xFFFF;
+        tf->eflags &= ~0x0300u;                 /* (IF and TF, as an interrupt clears them) */
+        return;
     }
+    if (res == DOS21_END)
+        kprintf("GLOS-NATIVE dos end-of-root ax=%04x psp=%04x\n", r.ax, dos_cur_psp(&vd));     /* (the stub never ends) */
     if (res == DOS21_UNANSWERED && unanswered++ < 40)
         kprintf("GLOS-NATIVE unanswered int=%02x ax=%04x psp=%04x\n", n, tf->eax & 0xFFFF, dos_cur_psp(&vd));
-    LO16(tf->eax, r.ax), LO16(tf->ebx, r.bx), LO16(tf->ecx, r.cx), LO16(tf->edx, r.dx);
-    LO16(tf->esi, r.si), LO16(tf->edi, r.di), LO16(tf->ebp, r.bp);
-    tf->v86_ds = r.ds, tf->v86_es = r.es;
-    tf->cs = r.cs, tf->eip = r.ip, tf->ss = r.ss;
-    LO16(tf->esp, r.sp);
-    tf->eflags = (tf->eflags & ~0x0FD5u) | (r.flags & 0x0FD5u);
+    from_regs(tf, &r);
 }
 
-/* A #UD at INT 21h's or 20h's ARPL: the call made through the vector (its INT frame on the stack). 1 if it was. */
+/* A #UD at one of DOS's ARPLs (its INT frame on the stack, but VC23's: a RETF or an IRET to it). 1 if it was. */
 int vdos_arpl(struct trapframe *tf)
 {
     u32 at = (tf->cs & 0xFFFF) << 16 | (tf->eip & 0xFFFF), lin, ip, cs, f;
-    u8 n;
+    struct dos_regs86 r;
+    int i;
+    char c;
 
-    if (!ready || (at != arpl21 && at != arpl20))
+    if (!ready)
         return 0;
-    n = at == arpl21 ? 0x21 : 0x20;
+    for (i = 0; i < NV && arpl[i] != at; i++)
+        ;
+    if (i == NV)
+        return 0;
     lin = (tf->ss & 0xFFFF) * 16 + (tf->esp & 0xFFFF);
+    if (i == VC23) {                            /* back from the program's INT 23h */
+        if ((tf->esp & 0xFFFF) == ((c23_sp - 2) & 0xFFFF) && (vm_rd16(lin) & 1)) {
+            LO16(tf->esp, (tf->esp + 2) & 0xFFFF);      /* (RETF with CF set: the program ends) */
+            to_regs(tf, &r, tf->eip);
+            ctrl_c_end(tf, &r);
+            return 1;
+        }
+        r = c23;                                /* (IRET, or RETF with CF clear: the call again) */
+        from_regs(tf, &r);
+        vdos_int(tf, 0x21, r.ip, c23_at, c23_via);
+        return 1;
+    }
     ip = vm_rd16(lin), cs = vm_rd16(lin + 2), f = vm_rd16(lin + 4);
     LO16(tf->esp, (tf->esp + 6) & 0xFFFF);
     tf->cs = cs;
+    tf->eip = ip;
     tf->eflags = (tf->eflags & ~0x0FD5u) | (f & 0x0FD5u);
-    vdos_int(tf, n, ip, ip, 1);
+    switch (i) {
+    case V21:
+    case V20:
+        vdos_int(tf, i == V21 ? 0x21 : 0x20, ip, ip, 1);
+        break;
+    case V29:                                   /* DOS's fast console output */
+        c = (char)(tf->eax & 0xFF);
+        vcon_tty(&c, 1);
+        break;
+    case V23:                                   /* DOS's own Ctrl-C handler, called or chained to: the end */
+        to_regs(tf, &r, ip);
+        ctrl_c_end(tf, &r);
+        break;
+    }
     return 1;
 }
