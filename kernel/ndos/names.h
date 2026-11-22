@@ -4,11 +4,18 @@
 #ifndef K_NDOS_NAMES_H
 #define K_NDOS_NAMES_H
 
-/* A byte of code page cp in upper case, as DOS's capitalisation table has it: the capital where the page has
-   it, else the letter without its accent (437's a grave is A), else the byte as it is; Greek only in the Greek
-   pages (437's are maths symbols). To be checked against MS-DOS 7.1's own tables (COUNTRY.SYS, N7): whether
-   437's e acute is E acute (as here, and Windows 98's short names) or E. */
+/* A byte of code page cp in upper case for a file name, as MS-DOS 7.1's tables have it (6504h: fucase.c, made
+   from its COUNTRY.SYS by tools/ndos/fucase.py, the owner's choice: 437's e acute is E); in a page without a
+   table, the capital where the page has it, else the letter without its accent, else the byte; Greek only in the
+   Greek pages. */
 unsigned char dos_upper(int cp, unsigned char b);
+
+/* MS-DOS's file-name upper-case tables, bytes 80h-FFh, a code page each; ended by cp 0. */
+struct dos_fucase {
+    int cp;
+    unsigned char t[128];
+};
+extern const struct dos_fucase dos_fucase_tables[];
 
 /* The last part of a file specification ("*.TXT", "FOO?.C", "README") as the 11-byte template FINDFIRST keeps:
    upper case, name and extension blank-padded, '*' filling the rest of its part with '?' (what follows it in

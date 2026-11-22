@@ -420,8 +420,11 @@ Everything else (the files, the directories, the cache) is the kernel's, above 1
 - **Upper case in file names, answered 2026-11-22** from MS-DOS 7.1's own COUNTRY.SYS (the owner's Windows 98
   SE): its filename upper-case tables (65h's 04h) follow no rule. In 437 (US and UK alike) e acute is E,
   though 437 has E acute, and so is every accented letter but ü, ä, å, ç, æ, ö and ñ (Ü, Ä, Å, Ç, Æ, Ö, Ñ); in
-  850 they are the accented capitals, but ÿ is "_". GLOS's `dos_upper` differs there (437's e acute, 850's ÿ):
-  where its tables come from is the owner's to decide (they are Microsoft's data).
+  850 they are the accented capitals, but ÿ is "_". **The owner's choice (2026-11-22): GLOS keeps MS-DOS's own
+  tables** (`kernel/ndos/fucase.c`, made by `tools/ndos/fucase.py` from the COUNTRY.SYS in `MSDOS_DIR`; each
+  page's default country's: 437 and 850 001, 737 030, 852 Central Europe, 866 007). Some countries' tables
+  differ (437 in Belgium, Switzerland, Sweden and Finland makes e acute E acute): a region setting may choose
+  them later. File names GLOS makes on long-name volumes stay Windows 98's (`fat.c`'s short names, E acute).
 
 ### What it answers
 

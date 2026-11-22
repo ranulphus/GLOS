@@ -65,7 +65,7 @@ int main(void)
     tmpl("a?c.d*", "A?C     D??", 1);
     tmpl(".", ".          ", 0);
     tmpl("..", "..         ", 0);
-    tmpl("caf\x82.txt", "CAF\x90    TXT", 0);   /* (cp437: e acute to E acute) */
+    tmpl("caf\x82.txt", "CAFE    TXT", 0);       /* (cp437: e acute to E, as MS-DOS 7.1's table has it) */
     tmpl("a.b.c", 0, 0);
     tmpl(".txt", 0, 0);
     tmpl("", 0, 0);
@@ -109,7 +109,7 @@ int main(void)
     /* Upper case in the page. */
     upper(437, 'a', 'A');
     upper(437, 'Z', 'Z');
-    upper(437, 0x82, 0x90);                        /* e acute -> E acute */
+    upper(437, 0x82, 'E');                         /* e acute -> E (MS-DOS's table, though 437 has E acute) */
     upper(437, 0x84, 0x8E);                        /* a diaeresis -> A diaeresis */
     upper(437, 0x85, 'A');                         /* a grave -> A: 437 has no A grave */
     upper(437, 0x8A, 'E');                         /* e grave -> E */
@@ -120,6 +120,8 @@ int main(void)
     upper(737, 0x98, 0x80);                        /* Greek alpha -> Alpha in the Greek page */
     upper(850, 0x85, 0xB7);                        /* a grave -> A grave: 850 has it */
     upper(850, 0x8A, 0xD4);                        /* e grave -> E grave */
+    upper(850, 0x98, '_');                         /* y diaeresis -> _ (850 has no capital for it) */
+    upper(850, 0x82, 0x90);                        /* e acute -> E acute in 850 */
     upper(866, 0xA0, 0x80);                        /* Cyrillic a -> A */
 
     printf("names_test: %d failures\n", fails);

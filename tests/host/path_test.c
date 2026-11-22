@@ -47,7 +47,7 @@ int main(void)
     res("C:\\games\\", 0, 2, "\\GAMES");                /* (a separator at the end: dropped) */
     res("C:\\\\games\\\\doom", 0, 2, "\\GAMES\\DOOM");
     res("C:\\LONGFILENAME.TEXT", 0, 2, "\\LONGFILE.TEX"); /* (cut to 8.3: to check against MS-DOS 7.1) */
-    res("C:\\caf\x82.txt", 0, 2, "\\CAF\x90.TXT");
+    res("C:\\caf\x82.txt", 0, 2, "\\CAFE.TXT");     /* (437's e acute: E, as MS-DOS 7.1) */
     res("C:\\FOO.", 0, 2, "\\FOO");
     res("B:\\X", 0x0F, 0, 0);
     res("Q:", 0x0F, 0, 0);

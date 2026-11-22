@@ -24,11 +24,15 @@ static int base_letter(unsigned u)
 
 unsigned char dos_upper(int cp, unsigned char b)
 {
+    const struct dos_fucase *f;
     unsigned u, up;
     int r;
 
     if (b < 0x80)
         return (unsigned char)(b >= 'a' && b <= 'z' ? b - 32 : b);
+    for (f = dos_fucase_tables; f->cp; f++)
+        if (f->cp == cp)
+            return f->t[b - 0x80];              /* (MS-DOS's own) */
     u = cp_char(cp, b);
     if (u >= 0x370 && u <= 0x3FF && cp != 737 && cp != 869)
         return b;                               /* (Greek in a Latin page, 437's maths letters: DOS leaves them) */
