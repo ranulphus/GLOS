@@ -1305,3 +1305,11 @@ The rest of Help's plan's first item (`docs/v1/apps/help.md`): the tour on GLOS'
   the pad takes over. The hover case moves the pointer into the window and hears "HVCRAFT mouse drives".
 - **Not yet:** the mouse taken (captured) so that it never leaves the window; a second pad for a second
   player on one PC (not in v1).
+
+### Frames a second, measured (2026-11-22)
+
+- **Cushion on bench-g400** (IBM 300PL, its G400 by DOS-GL's engine in a 480 by 360 window at 16 bits;
+  `HVCRAFT -demo -kind 0 -until 900`, which now says `HVCRAFT frames=N ms=T fps=F` at its end): **25.5 a
+  second** (768 frames in 30 seconds of the game). The game's thirty steps a second are kept either way.
+- Owed: Fall Line on the 486 (bench C, the plan's floor: thirty a second on a 486DX2-66 at 8 bits), and both
+  on the other benches' cards.
