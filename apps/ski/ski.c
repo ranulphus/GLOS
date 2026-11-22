@@ -93,6 +93,7 @@ static struct skirun ghost_run;
 static int ghost_on;                    /* it skis in this run */
 static int speed = 1;                   /* the suite's: the clock so many times faster (a run is its steps: the same) */
 static unsigned frames;                 /* (the strip of figures is drawn every third: ten times a second) */
+static unsigned started_ms;             /* (the program's start: the frames a second it drew, for the suite) */
 static int suite, held;                 /* the suite's run: every step that is due is made (its clock jumps); held:
                                            paused for a picture, with nothing written over the field */
 static int asking;                      /* (a dialog is up: no steps meanwhile) */
@@ -998,8 +999,13 @@ int main(int argc, char **argv)
     gui_idle(frame, NULL, 33);          /* thirty pictures a second (the motion is sixty steps, whatever the pictures) */
     if (demo && until >= 0)
         start(1);
+    started_ms = glos_ticks();
     gui_run();
     sound_stop();
+    if (suite) {                                /* (the suite's, and the benches': the frames a second drawn) */
+        unsigned ms = glos_ticks() - started_ms;
+        printf("SKI frames=%u ms=%u fps=%u.%u\n", frames, ms, ms ? frames * 1000 / ms : 0, ms ? frames * 10000 / ms % 10 : 0);
+    }
     printf("SKI end\n");
     return 0;
 }

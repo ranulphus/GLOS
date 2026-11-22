@@ -528,7 +528,7 @@ int main(int argc, char **argv)
     DGLConfig cfg;
     glos_handle win;
     char why[160], name[17] = "";
-    unsigned last, acc = 0, said = 0, my_keys = 0, marked = 0, heard_from = 0;
+    unsigned last, acc = 0, said = 0, my_keys = 0, marked = 0, heard_from = 0, frames_drawn = 0, started_ms;
     int heard = 0;
     int sounding = 0, code = 0;
     int w = 480, h = 360, i, on = 1, demo = 0, kind = HV_FLAGS, opening = 0, joining = 0;
@@ -600,7 +600,7 @@ int main(int argc, char **argv)
         sounding = hvsound_start();
     printf("HVCRAFT started kind=%d craft=%d arena=%s\n", G->kind, G->ncraft, arena.name);
     fflush(stdout);
-    last = glos_ticks();
+    last = started_ms = glos_ticks();
     while (on) {
         unsigned now = glos_ticks(), due;
         acc += (now - last) * HV_STEPS;
@@ -679,6 +679,7 @@ int main(int argc, char **argv)
         frame((float)w / (float)h);
         overlay(w, h);
         dglSwapBuffers();
+        frames_drawn++;
         if (now - said >= 1000) {
             said = now;
             title(win);
@@ -726,6 +727,11 @@ int main(int argc, char **argv)
                 }
             }
         }
+    }
+    if (until >= 0) {                           /* (the suite's, and the benches': the frames a second drawn) */
+        unsigned ms = glos_ticks() - started_ms;
+        printf("HVCRAFT frames=%u ms=%u fps=%u.%u\n", frames_drawn, ms, ms ? frames_drawn * 1000 / ms : 0,
+               ms ? frames_drawn * 10000 / ms % 10 : 0);
     }
     hvlink_leave();
     hvsound_stop();
