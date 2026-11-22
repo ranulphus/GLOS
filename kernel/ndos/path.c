@@ -102,7 +102,9 @@ int dos_resolve(const struct dos_cds *c, int cp, const char *path, int *drive, c
         if (n == 1 && s[0] == '.')
             continue;
         if (n == 2 && s[0] == '.' && s[1] == '.') {
-            while (len && out[len - 1] != '\\')     /* (the last part off; at the root: stays there) */
+            if (!len)
+                return 0x03;                    /* (above the root: no such path, as MS-DOS 7.1 says) */
+            while (len && out[len - 1] != '\\')     /* (the last part off) */
                 len--;
             if (len)
                 len--;

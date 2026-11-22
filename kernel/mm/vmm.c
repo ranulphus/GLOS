@@ -22,6 +22,7 @@ extern char __kernel_start[], __kernel_end[];
 
 static u32 kpd[1024] __attribute__((aligned(4096)));
 static u32 kpt_low[1024] __attribute__((aligned(4096)));
+static u32 kpt_ndm[1024] __attribute__((aligned(4096)));
 static u32 kpt_kernel[1024] __attribute__((aligned(4096)));
 static u32 kpt_heap[1024] __attribute__((aligned(4096)));
 static u32 kpt_kmap[1024] __attribute__((aligned(4096)));
@@ -243,6 +244,31 @@ u32 mm_space_new_low(u32 *frames, u32 n)
     p[0] = pt | PTE_P | PTE_W | PTE_U;
     kunmap(p);
     return pd;
+}
+
+u8 *mm_ndm_map(u32 slot, const u32 *frames, u32 n)
+{
+    u32 i, base = slot * 256;
+
+    if (slot >= NDM_SLOTS || n > 256)
+        return 0;
+    for (i = 0; i < 256; i++) {
+        kpt_ndm[base + i] = i < n ? frames[i] | PTE_P | PTE_W : 0;
+        invlpg(NDM_BASE + ((base + i) << 12));
+    }
+    return (u8 *)(NDM_BASE + (slot << 20));
+}
+
+void mm_ndm_unmap(u32 slot)
+{
+    u32 i, base = slot * 256;
+
+    if (slot >= NDM_SLOTS)
+        return;
+    for (i = 0; i < 256; i++) {
+        kpt_ndm[base + i] = 0;
+        invlpg(NDM_BASE + ((base + i) << 12));
+    }
 }
 
 /* ... and freed: its first MB's frames and table, then the rest as mm_space_free does (never while it is the
@@ -669,6 +695,7 @@ void mm_init(struct bootinfo *bi)
     frame_bits = (u32 *)((u32)__kernel_start + pages * PAGE_SIZE);
     kpd[0] = kernel_phys(kpt_low) | PTE_P | PTE_W;
     kpd[VMLOW_BASE >> 22] = kernel_phys(kpt_low) | PTE_P | PTE_W;     /* (the same table, the kernel's alone) */
+    kpd[NDM_BASE >> 22] = kernel_phys(kpt_ndm) | PTE_P | PTE_W;
     kpd[KERNEL_PDE] = kernel_phys(kpt_kernel) | PTE_P | PTE_W;
     kpd[HEAP_BASE >> 22] = kernel_phys(kpt_heap) | PTE_P | PTE_W;
     kpd[KMAP_BASE >> 22] = kernel_phys(kpt_kmap) | PTE_P | PTE_W;

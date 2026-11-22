@@ -20,6 +20,9 @@ struct bootinfo;
 #define VMLOW_BASE  0xC7800000u         /* the system VM's first 4 MB (PDE 0's table, kpt_low) as the kernel reaches
                                            it from every address space: vm_ptr's (a native machine's own first MB
                                            is at 0 while its thread runs: docs/v1/native-dos.md) */
+#define NDM_BASE    0xC7C00000u         /* native machines' memory as the kernel reaches it from every address space:
+                                           NDM_SLOTS of 1 MB (mm_ndm_map) */
+#define NDM_SLOTS   4u
 #define RECURSIVE   0xFFC00000u         /* PDE 1023 maps the page directory itself */
 
 void mm_init(struct bootinfo *bi);
@@ -54,6 +57,9 @@ void mm_set_a20(int on);                /* 100000h-10FFFFh: the HMA, or wrapped 
 u32 mm_space_new(void);                 /* a page directory with the kernel's PDEs; 0 without memory */
 void mm_space_free(u32 pd_phys);        /* not the current one: its page tables and itself */
 void mm_space_enter(u32 pd_phys);       /* CR3; 0: the kernel's own */
+/* A native machine's frames (n, at most 256) at its kernel window, slot's: the window; and taken away. */
+u8 *mm_ndm_map(u32 slot, const u32 *frames, u32 n);
+void mm_ndm_unmap(u32 slot);
 u32 mm_space_new_low(u32 *frames, u32 n);       /* a native machine's: PDE 0 its own table over n fresh zeroed
                                                    frames from 0 (into frames[]); 0 without memory */
 void mm_space_free_low(u32 pd_phys);    /* ... and freed (not while loaded) */

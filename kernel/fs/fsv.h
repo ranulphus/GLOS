@@ -7,8 +7,10 @@
  *     is what a read through the other finds, and a handle's cached place in the cluster chain is dropped when
  *     another changes the chain (the node's generation);
  *   - an open file's directory entry is where the node says: entries never move when others are made, deleted
- *     or renamed, nor when a folder is renamed or moved (its first cluster stays), and an open file itself can't
- *     be deleted, renamed or made again (FSV_ESHARE, as DOS with SHARE answers);
+ *     or renamed, nor when a folder is renamed or moved (its first cluster stays); an open file itself can't be
+ *     made again (FSV_ESHARE, as DOS with SHARE answers), but can be renamed (the node follows it to its new
+ *     entry) and deleted (its entry gone, the node's dir FAT_NO_ENTRY, its chain freed at the last close), as
+ *     MS-DOS 7.1 renames and deletes one;
  *   - sharing: each open says its access (read, write, both) and what it denies others (DOS's sharing modes);
  *     a new open that conflicts with one already there is refused (FSV_ESHARE). DOS's compatibility mode and
  *     whose process opened what are N2's (the DOS personality decides, with this as its mechanism).
@@ -40,6 +42,8 @@ struct fsv_node {
     unsigned gen;                       /* changed when the cluster chain changes under the handles */
     unsigned readers, writers;          /* handles open with read, with write access */
     unsigned deny_read, deny_write;     /* handles that deny others reading, writing */
+    int gone;                           /* deleted while open: no entry (dir FAT_NO_ENTRY), its chain freed at the
+                                           last close */
 };
 
 struct fsv_vol {

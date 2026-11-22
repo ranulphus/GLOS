@@ -1,17 +1,21 @@
-/* Native machines (docs/v1/native-dos.md, native-DOS sessions, NS1): V86 machines with no DOS under them, whose
- * INT 21h GLOS's own DOS answers (kernel/vm/ndm.c). A command starts one with a program's image and reads what
- * the program writes, as diskcmd.h's do. */
+/* Native machines (docs/v1/native-dos.md, native-DOS sessions, NS1-NS2): V86 machines with no DOS under them,
+ * whose INT 21h GLOS's own DOS answers (kernel/vm/ndm.c over kernel/ndos/dos21.c). A command starts one with a
+ * program and reads what the program writes, as diskcmd.h's do. */
 #ifndef K_NDM_H
 #define K_NDM_H
 #include "types.h"
 
 struct ndm;
+struct fsv_vol;
 
-/* A machine for a .COM image of len bytes (name for the log; tail its command tail), started: 0 without memory
-   or for an image too big. kick: called when it has something to read or has ended. */
-struct ndm *ndm_start(const u8 *image, u32 len, const char *name, const char *tail, void (*kick)(void));
+/* A machine started with its first program: path on volume v (the machine's C:, or 0 for none), or image (len
+   bytes, a .COM or an .EXE) named name in C:'s root; tail its command tail (" abc"). 0 with *dos_err DOS's error
+   for the load (02h no such file, 0Bh not a program, 08h no memory). kick: called when it has something to read
+   or has ended. */
+struct ndm *ndm_start(struct fsv_vol *v, const char *path, const u8 *image, u32 len, const char *name,
+                      const char *tail, void (*kick)(void), int *dos_err);
 u32 ndm_read(struct ndm *m, char *buf, u32 room);       /* what the program wrote since the last read */
-int ndm_done(const struct ndm *m, int *code);           /* 1 once it has ended: its exit code (AL of 4Ch) */
+int ndm_done(const struct ndm *m, int *code);           /* 1 once it has ended: its first program's exit code */
 void ndm_free(struct ndm *m);                           /* its reader has done with it (or gone) */
 
 /* A test program built into the kernel (NS1, before native volumes): "HELLO". */

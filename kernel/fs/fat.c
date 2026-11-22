@@ -1433,9 +1433,13 @@ static int update_file(struct fat_file *f)
     struct fat_vol *v = f->v;
     unsigned char ent[32];
     unsigned long now = now_of(v);
-    int r = get_slot(v, f->dir, f->index, ent);
+    int r;
 
-    if (r)
+    if (f->dir == FAT_NO_ENTRY) {               /* (a deleted file's: no entry to keep up) */
+        f->changed = 0;
+        return FAT_OK;
+    }
+    if ((r = get_slot(v, f->dir, f->index, ent)) != 0)
         return r;
     wr16(ent + 20, v->fat == 32 ? f->first >> 16 : 0);
     wr16(ent + 26, f->first & 0xFFFF);
@@ -1685,6 +1689,30 @@ int fat_unlink(struct fat_vol *v, const char *path)
         return FAT_EACCES;
     r = del_entry(v, &e);                       /* (the entry first, then its clusters) */
     return r ? r : e.cluster ? free_chain(v, e.cluster) : FAT_OK;
+}
+
+int fat_unlink_keep(struct fat_vol *v, const char *path, unsigned long *first)
+{
+    struct fat_ent e;
+    int r = begin_write(v);
+
+    if (!r)
+        r = entry_of(v, path, &e);
+    if (r)
+        return r;
+    if (e.attr & FAT_A_DIR)
+        return FAT_EISDIR;
+    if (e.attr & FAT_A_RDONLY)
+        return FAT_EACCES;
+    *first = e.cluster;
+    return del_entry(v, &e);
+}
+
+int fat_free_chain(struct fat_vol *v, unsigned long first)
+{
+    int r = begin_write(v);
+
+    return r ? r : first ? free_chain(v, first) : FAT_OK;
 }
 
 int fat_mkdir(struct fat_vol *v, const char *path)

@@ -7202,32 +7202,70 @@ def ndos_nhello():
     return out + msg + crlf
 
 
+# DOSDIFF's lines where GLOS's own DOS answers otherwise than MS-DOS 7.1 on purpose, or not yet
+# (tests/dos/dosdiff.msdos71.txt is MS-DOS 7.1's, made by tools/ndos/msdos-image.sh's disk: docs/v1/native-dos.md).
+DOSDIFF_KNOWN = {
+    "5D06h": "GLOS's own swappable data area, 16 bytes",
+}
+
+
+def dosdiff_compare(got_text):
+    """DOSDIFF's output against MS-DOS 7.1's: the lines that differ, but for DOSDIFF_KNOWN's."""
+    import difflib
+    want = open(os.path.join(ROOT, "tests", "dos", "dosdiff.msdos71.txt")).read().splitlines()
+    got = got_text.replace("\r", "").splitlines()
+    out = []
+    for op, a0, a1, b0, b1 in difflib.SequenceMatcher(None, want, got, autojunk=False).get_opcodes():
+        if op == "equal":
+            continue
+        for w_, g_ in zip(want[a0:a1] + [""] * max(0, (b1 - b0) - (a1 - a0)),
+                          got[b0:b1] + [""] * max(0, (a1 - a0) - (b1 - b0))):
+            name = (w_ or g_)
+            if not any(name.startswith(k) for k in DOSDIFF_KNOWN):
+                out.append("%s | %s" % (w_, g_))
+    return out
+
+
 def ndos_case(profile, card):
     """A native machine (docs/v1/native-dos.md, native-DOS sessions, NS1: kernel/vm/ndm.c): GLOS's second V86 machine,
     no DOS under it, its INT 21h GLOS's own. Through the agent, twice (the first machine's memory and thread
     gone before the next): NDOS's test program HELLO writes by 09h and 02h, asks 30h (7.10), ends by 4Ch with
     42; what it wrote comes back as the command's output, 42 as its exit code; nothing unanswered; the system VM
-    goes on as before (VER), and GLOS's free memory is what it was."""
+    goes on as before (VER), and GLOS's free memory is what it was. NS1c: the scratch disk made a native volume, a
+    .COM copied there from C: and run with its tail. NS2: NDOSTEST (Open Watcom's C library over GLOS's own DOS:
+    files, folders, searches, memory, EXEC of itself as a child, date and time) under the DOS beside GLOS first (the
+    reference), then copied to the native volume and run in a native machine: 0 failures both times, the children's
+    words and codes, no fault; what its C library asked that isn't answered yet is shown. DOSDIFF in a native
+    machine: every line MS-DOS 7.1's (tests/dos/dosdiff.msdos71.txt) but DOSDIFF_KNOWN's."""
     tag = "%s-%s" % (profile, card)
     prog = os.path.join(ROOT, "out", "bat", "ndos", "NHELLO.COM")
     os.makedirs(os.path.dirname(prog), exist_ok=True)
     open(prog, "wb").write(ndos_nhello())
     agent = Agent("ndos-" + tag, profile, card, ["--scratch-hdd", "64", "--file", prog + "=/TEST/NHELLO.COM",
+                                                 "--file", "build/ow/dos/NDOSTEST.EXE=/TEST/NDOSTEST.EXE",
+                                                 "--file", "build/ow/dos/DOSDIFF.EXE=/TEST/DOSDIFF.EXE",
                                                  "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"],
-                  timeout=900)
+                  timeout=1200)
     want = "Hello from GLOS's own DOS\r\n!7.10\r\n"
     checks, info = {"listen": agent.listening()}, ""
 
+    seen = []
+
     def mem():                                  # free and the disk cache's (which gives its frames back at need)
         t = agent.ssh("glos mem")[1]
-        f, c = re.search(r"free_kb=(\d+)", t), re.search(r"cache kb=(\d+)", t)
-        return int(f.group(1)) + (int(c.group(1)) if c else 0) if f else -1
+        f, c, h = re.search(r"free_kb=(\d+)", t), re.search(r"cache kb=(\d+)", t), re.search(r"heap_kb=(\d+)", t)
+        v = int(f.group(1)) + (int(c.group(1)) if c else 0) if f else -1
+        seen.append("%d/h%s" % (v, h.group(1) if h else "?"))
+        return v
     try:
         if checks["listen"]:
             runs = [agent.ssh("glos ndos run hello")]       # (a first run: the heap grows to its size once)
-            before = mem()
-            runs += [agent.ssh("glos ndos run hello") for _ in range(5)]
-            after = mem()
+            vals = [mem()]
+            for _ in range(5):                  # (a leak grows with every run; the heap settling doesn't)
+                runs.append(agent.ssh("glos ndos run hello"))
+                vals.append(mem())
+            before, after = vals[1], vals[-1]   # (the heap grows to its high-water mark in a run or two: seen
+                                                # 2026-11-22 on the bf6, 829 KB to 1021 KB once, then flat)
             ver = agent.ssh("ver")
             # NS1c: a native volume on the scratch disk, a program copied onto it from C:, run from it.
             disks = agent.ssh("glos ndos disks")[1]
@@ -7242,14 +7280,34 @@ def ndos_case(profile, card):
                 and re.search(r"^%s ata .* native\r?$" % n, disks2, re.M) is not None
             checks["copy"] = cp[0] == 0 and "NDOS COPY: %d bytes" % len(ndos_nhello()) in cp[1] and "NHELLO.COM" in ls[1]
             checks["native-run"] = nrun[0] == 4 and nrun[1] == "Loaded from the native volume: abc\r\n"
+            # NS2: NDOSTEST under the DOS beside GLOS (the reference), then in a native machine.
+            agent.ssh("cd \\TEST")
+            ref = agent.ssh("C:\\TEST\\NDOSTEST.EXE ref two")
+            agent.ssh("cd \\")
+            cp2 = agent.ssh("glos ndos copy C:\\TEST\\NDOSTEST.EXE N:\\NDOSTEST.EXE")
+            nt = agent.ssh("glos ndos run N:\\NDOSTEST.EXE NATIVE two")
+            checks["ndostest-ref"] = ref[0] == 0 and "NDOSTEST: 0 failures" in ref[1]
+            checks["ndostest"] = cp2[0] == 0 and nt[0] == 0 and "NDOSTEST: 0 failures" in nt[1] \
+                and "child: 7 word" in nt[1] and "child: 0 again" in nt[1]
+            # ... and DOSDIFF in a native machine, its lines MS-DOS 7.1's.
+            cp3 = agent.ssh("glos ndos copy C:\\TEST\\DOSDIFF.EXE N:\\DOSDIFF.EXE")
+            dd = agent.ssh("glos ndos run N:\\DOSDIFF.EXE")
+            diffs = dosdiff_compare(dd[1])
+            checks["dosdiff"] = cp3[0] == 0 and dd[0] == 0 and "DOSDIFF end" in dd[1] and not diffs
+            if not checks["dosdiff"]:
+                info += " dosdiff(%d)=%r" % (len(diffs), diffs[:10] if diffs else dd[1][-300:])
+            if not checks["ndostest-ref"]:
+                info += " ref=%r/%d" % (ref[1][-300:], ref[0])
+            if not checks["ndostest"]:
+                info += " ndostest=%r/%d" % (nt[1][-400:], nt[0])
             info += " disks=%r run=%r/%d" % (disks.replace("\r", "")[:120], nrun[1][:60], nrun[0])
             if not checks["copy"]:
                 info += " copy=%r/%d dir=%r" % (cp[1][:80], cp[0], ls[1][:160])
             checks["runs"] = all(r[0] == 42 and r[1] == want for r in runs)
-            checks["memory"] = before > 0 and after >= before - 64   # (a machine's 640 KB a run can't hide in 64; a
-                                                                    # dead thread's stack not yet freed may)
+            checks["memory"] = before > 0 and max(vals[1:]) - min(vals[1:]) <= 16 and after >= before - 16
             checks["vm"] = ver[0] == 0 and "GLOS shell" in ver[1]
             info = " free_kb=%d->%d out=%r" % (before, after, runs[0][1][:60]) + info
+            info += " mem=%s" % ",".join(seen)
             agent.ssh("glos exit")
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
@@ -7257,6 +7315,11 @@ def ndos_case(profile, card):
     checks["log"] = text.count("GLOS-NDOS start prog=HELLO") == 6 \
         and text.count("GLOS-NDOS end prog=HELLO code=42 why=int21-4c unanswered=0") == 6
     checks["clean"] = "GLOS-EXIT code=0" in text and "GLOS-PANIC" not in text and "GLOS-NDOS fault" not in text
+    asked = sorted(set(re.findall(r"GLOS-NDOS unanswered int=(\w+) ax=(\w+) prog=NDOSTEST", text)))
+    if asked:
+        info += " unanswered=%s" % ",".join("%s:%s" % a for a in asked[:12])
+    for line in re.findall(r"GLOS-NDOS (?:fault|refused) .*", text)[:2]:
+        info += " [%s]" % line.strip()
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("ndos-" + tag, "PASS" if not bad else "FAIL", info,
                                "" if not bad else " failed: " + " ".join(bad)), not bad

@@ -105,7 +105,10 @@ static void t_handles(void)
     CHECK(dos_seek(&t, PSP_A, h, 0, 0, &pos) == 0 && pos == 0, "seek to the start");
     CHECK(dos_read(&t, PSP_A, h, buf, sizeof buf) == 12 && !memcmp(buf, "hello world!", 12), "read it back");
     CHECK(dos_seek(&t, PSP_A, h, 2, -6, &pos) == 0 && pos == 6, "seek from the end: %lu", pos);
-    CHECK(dos_seek(&t, PSP_A, h, 1, -100, &pos) == 0x19, "before the start: 19h");
+    CHECK(dos_seek(&t, PSP_A, h, 1, -100, &pos) == 0 && pos == 0xFFFFFFA2UL, "before the start: kept as MS-DOS "
+          "7.1 keeps it, %lx", pos);
+    CHECK(dos_read(&t, PSP_A, h, buf, 4) == 0 && dos_write(&t, PSP_A, h, "x", 1) == 0, "nothing there");
+    CHECK(dos_seek(&t, PSP_A, h, 0, 6, &pos) == 0 && pos == 6, "back");
     CHECK(dos_seek(&t, PSP_A, h, 3, 0, &pos) == 0x01, "an origin DOS has not");
     CHECK(dos_write(&t, PSP_A, h, "", 0) == 0 && dw(ent(e) + 0x11) == 6, "a 0-byte write cuts the file: %lu",
           dw(ent(e) + 0x11));

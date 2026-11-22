@@ -1,0 +1,93 @@
+DOSDIFF 2
+30h00 ax=0A07 bh=FF
+30h01 ax=0A07 bh=00
+3306h bx=0A07 dx=0000
+0Eh al=1A
+3Bh DDIFF              cf=0
+47h cf=0 ax=0100 "DDIFF"
+3Dh no file            cf=1 ax=0002
+59h after it           ax=0002 class=08 action=03 locus=02
+3Dh no folder          cf=1 ax=0003
+59h after it           ax=0003 class=08 action=03 locus=02
+3Dh mode 3             cf=1 ax=000C
+59h after it           ax=000C class=07 action=04 locus=01
+41h no file            cf=1 ax=0002
+43h no folder          cf=1 ax=0003
+4Eh none match         cf=1 ax=0012
+59h after it           ax=0012 class=08 action=03 locus=02
+4Eh no folder          cf=1 ax=0003
+4Eh *.* dirs cf=0 name=. attr=10
+4Fh cf=0 name=..
+4Fh at the end         cf=1 ax=0012
+3Ch handle=5
+42h before 0 cf=0 ax=FFF5 dx=FFFF
+44h00 file dx=0002
+44h00 CON dx=80D3
+44h00 NUL dx=80C4
+44h06 file at end al=00
+4408h C:               cf=0
+4409h C: cf=0 dx=0000
+56h of an open file    cf=0
+3Eh twice              cf=1 ax=0006
+59h after it           ax=0006 class=07 action=04 locus=01
+5Bh there              cf=0
+41h read-only          cf=1 ax=0005
+59h after it           ax=0005 class=03 action=03 locus=02
+3Ch read-only          cf=1 ax=0005
+3Dh write read-only    cf=1 ax=0005
+4301h dir bit          cf=1 ax=0005
+6Ch make cf=0 cx=0002
+6Ch there, fail        cf=1 ax=0050
+59h after it           ax=0050 class=0C action=03 locus=02
+6Ch replace cf=0 cx=0003
+6Ch none, fail         cf=1 ax=0002
+6Ch bad action         cf=1 ax=0001
+59h after it           ax=0001 class=07 action=04 locus=01
+42h to -2 cf=0 ax=FFFE dx=FFFF
+40h at -2 cf=0 ax=0000
+3Fh at -2 cf=0 ax=0000
+41h of an open file    cf=0
+39h there              cf=1 ax=0005
+3Ah not empty          cf=1 ax=0005
+3Ah current            cf=1 ax=0010
+59h after it           ax=0010 class=03 action=03 locus=02
+3Ah root               cf=1 ax=0005
+3Bh to a file          cf=1 ax=0003
+3Bh no folder          cf=1 ax=0003
+3Ah                    cf=0
+60h c:sub\..\x.txt     cf=0 C:\DDIFF\X.TXT
+60h x.txt              cf=0 C:\DDIFF\X.TXT
+60h NUL                cf=0 C:/NUL
+60h C:\DDIFF\CON       cf=0 C:\DDIFF\CON
+60h lower.txt          cf=0 C:\DDIFF\LOWER.TXT
+60h A.B.C              cf=1 ax=0002
+60h LONGNAMEXYZ.TEXT   cf=0 C:\DDIFF\LONGNAME.TEX
+60h ..\..\..\X         cf=1 ax=0003
+29h   c:foo.bar rest al=0 al=00 used=11 fcb=<03>FOO     BAR
+29h   c:foo.bar rest al=1 al=00 used=11 fcb=<03>FOO     BAR
+29h ,*.c           al=1 al=01 used=4 fcb=<00>????????C  
+29h ;;x            al=1 al=00 used=1 fcb=<00>           
+29h file name      al=0 al=00 used=4 fcb=<00>FILE       
+29h q:x            al=0 al=FF used=3 fcb=<11>X          
+29h longername.text al=0 al=00 used=15 fcb=<00>LONGERNATEX
+29h a?b.*          al=0 al=01 used=5 fcb=<00>A?B     ???
+29h [bad           al=0 al=00 used=0 fcb=<00>           
+29h x/y            al=0 al=00 used=1 fcb=<00>X          
+29h                al=0 al=00 used=0 fcb=<00>           
+49h                    cf=0
+49h twice              cf=0
+49h not a block        cf=1 ax=0009
+59h after it           ax=0009 class=07 action=04 locus=05
+5800h                  cf=0
+5802h cf=0 al=00
+2Bh 30 Feb al=FF
+2Dh 25:00 al=FF
+5D06h cf=0 cx=07DA dx=001A
+6300h cf=0 al=00
+71A0h                  cf=1 ax=7100
+4411h                  cf=1 ax=0001
+6900h C:               cf=0
+4Dh at the start ax=0000
+spawn none=-1
+3Ah DDIFF              cf=0
+DOSDIFF end

@@ -33,7 +33,6 @@
 #include "../ndos/dtime.h"
 
 #define OUT_RING 8192u
-#define PROG_MAX 0xFE00u                /* a .COM's bytes at most */
 
 struct ndcmd {
     char args[256];
@@ -433,13 +432,10 @@ static void relay(void)
 
 static int cmd_run(struct ndcmd *c, const char *arg)
 {
-    char name[128], *tail;
+    char name[128], dospath[132], *tail;
     const char *path;
-    struct fsv_file f;
     struct ndm *m;
-    u8 *img = 0;
-    long n = 0;
-    int code = 255;
+    int code = 255, e;
 
     strncpy(name, arg, sizeof name - 1);
     name[sizeof name - 1] = 0;
@@ -455,40 +451,25 @@ static int cmd_run(struct ndcmd *c, const char *arg)
     }
     running_cmd = c;
     if (!strcmp(name, "HELLO") || !strcmp(name, "hello")) {
-        m = ndm_start(ndm_hello, ndm_hello_len, "HELLO", tail ? tail : "", relay);
+        m = ndm_start(vmounted ? &vol : 0, 0, ndm_hello, ndm_hello_len, "HELLO", tail ? tail : "", relay, &e);
     } else {
+        const char *b;
+
         if (!(path = native_path(name))) {
             say(c, "NDOS RUN: N:\\path [tail], or HELLO\n");
             return 1;
         }
         if (mount(c) != 0)
             return 1;
-        if (fsv_open(&vol, path, FSV_READ, FSV_DENY_WRITE, &f) != 0) {
-            say(c, "NDOS RUN: %s: no such program\n", name);
-            return 1;
-        }
-        if (!(img = kmalloc(PROG_MAX))) {
-            fsv_close(&f);
-            say(c, "NDOS RUN: no memory\n");
-            return 1;
-        }
-        n = fsv_read(&f, img, PROG_MAX);
-        fsv_close(&f);
-        if (n <= 0) {
-            kfree(img);
-            say(c, "NDOS RUN: %s can't be read\n", name);
-            return 1;
-        }
-        {
-            const char *b = strrchr(path, '\\');
-
-            m = ndm_start(img, (u32)n, b ? b + 1 : path, tail ? tail : "", relay);
-        }
+        dospath[0] = 'C', dospath[1] = ':';     /* (the native volume is the machine's C:) */
+        strncpy(dospath + 2, path, sizeof dospath - 3);
+        dospath[sizeof dospath - 1] = 0;
+        b = strrchr(path, '\\');
+        m = ndm_start(&vol, dospath, 0, 0, b ? b + 1 : path, tail ? tail : "", relay, &e);
     }
     if (!m) {
-        if (img)
-            kfree(img);
-        say(c, "NDOS RUN: no memory for a machine\n");
+        say(c, e == 0x02 || e == 0x03 ? "NDOS RUN: %s: no such program\n"
+               : e == 0x0B ? "NDOS RUN: %s: not a program\n" : "NDOS RUN: %s: DOS error %02x\n", name, e);
         return 1;
     }
     for (;;) {                                  /* what it writes, as it writes it; then its end */
@@ -511,8 +492,6 @@ static int cmd_run(struct ndcmd *c, const char *arg)
     }
     ndm_free(m);
     running_cmd = 0;
-    if (img)
-        kfree(img);
     return code;
 }
 

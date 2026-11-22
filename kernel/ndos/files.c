@@ -53,7 +53,7 @@ int dos_entry(struct dos_files *t, unsigned psp, unsigned h)
 
 static void set_device(struct dos_files *t, unsigned i, int dev, unsigned owner)
 {
-    static const unsigned info[] = { 0, 0x80D3, 0x80C0, 0xA8C0, 0x8084 };   /* (4400h's: CON, AUX, PRN, NUL) */
+    static const unsigned info[] = { 0, 0x80D3, 0x80C0, 0xA8C0, 0x80C4 };   /* (4400h's: CON, AUX, PRN, NUL as MS-DOS 7.1) */
     static const char *const name[] = { "", "CON        ", "AUX        ", "PRN        ", "NUL        " };
     unsigned char *e = entry(t, i);
 
@@ -339,6 +339,8 @@ long dos_write(struct dos_files *t, unsigned psp, unsigned h, const void *buf, u
         return t->k[i].dev == DOS_DEV_NUL ? (long)n : -DOS_EACCES;
     if ((mode_of(t, (unsigned)i) & 7) == 0 || (mode_of(t, (unsigned)i) & 7) == 4)
         return -DOS_EACCES;                     /* (read-only) */
+    if (t->k[i].f.pos >= 0x80000000UL)
+        return 0;                               /* (a place before the start: dos_seek's) */
     r = n ? fsv_write(&t->k[i].f, buf, n) : fsv_truncate(&t->k[i].f);
     entry(t, (unsigned)i)[5] &= (unsigned char)~0x40;  /* (written) */
     refresh(t, (unsigned)i);
@@ -359,9 +361,9 @@ int dos_seek(struct dos_files *t, unsigned psp, unsigned h, int whence, long off
         return 0;
     }
     base = whence == 0 ? 0 : whence == 1 ? (long)t->k[i].f.pos : (long)fsv_size(&t->k[i].f);
-    if (base + off < 0)
-        return 0x19;                            /* (before the start: seek error) */
-    fsv_seek(&t->k[i].f, (unsigned long)(base + off));
+    /* (before the start: kept as MS-DOS 7.1 keeps it, the 32 bits wrapped, and no error; what's read there is
+       nothing and nothing is written: GLOS's, to check) */
+    fsv_seek(&t->k[i].f, (unsigned long)base + (unsigned long)off);
     *pos = t->k[i].f.pos;
     refresh(t, (unsigned)i);
     return 0;

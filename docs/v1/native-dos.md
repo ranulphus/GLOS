@@ -271,8 +271,9 @@ right error is part of the answer); **internal** after the core.
     into GLOSK.BIN: nothing uses it before N1e): every call under the volume's lock; a file's handles share one
     node (its entry's place, size and first cluster), each handle its own position and place in the chain,
     dropped when another handle changes the chain other than by growing it (the node's generation); an open
-    file can't be deleted, renamed, made again or have its attributes changed (`FSV_ESHARE`, as DOS with SHARE
-    answers); access and denial per open (DOS's sharing modes, compatibility mode treated as deny-none until
+    file can't be made again or have its attributes changed (`FSV_ESHARE`, as DOS with SHARE answers), and
+    (since NS2, as MS-DOS 7.1 does: DOSDIFF) it can be renamed (its handles follow it to the new entry) and
+    deleted (its entry goes, its clusters stay its handles' until the last closes); access and denial per open (DOS's sharing modes, compatibility mode treated as deny-none until
     N2 gives it DOS's rules and whose process opened what); 64 files open on a volume. Entries never move when
     others are made, deleted or renamed, nor when their folder is renamed or moved, so an open file's entry
     stays its own. A folder listed between calls holds no lock: what others do meanwhile may or may not be
@@ -467,7 +468,35 @@ second V86 machine, the one N6 needs anyway. What it is:
     and the 486 (none): HELLO six times (its words, 42, the memory back each time), the scratch disk made native,
     a program copied there from C: and run with its tail (its words, its exit code 4).
   - **NS2, the groundwork wired:** files, paths, searches, PSPs, EXEC of .COM and .EXE, memory, date and time
-    (`kernel/ndos/`); Loop A: test programs of GLOS's own (Open Watcom), the census's programs.
+    (`kernel/ndos/`); Loop A: test programs of GLOS's own (Open Watcom), the census's programs. **Part 1 built
+    2026-11-22:** `kernel/ndos/dos21.c`, GLOS's own INT 21h over the groundwork, plain C over a machine's memory
+    and registers (`tests/host/dos21_test.c` runs programs' calls simulated). A machine's low memory: the vector
+    table, the List of Lists (0540h), DOS's own bytes and swappable area (05F0h), the ARPLs (0600h), the file
+    table (0800h), a root PSP of GLOS's own (1180h, its own parent: where the first program's five handles come
+    from), the memory chain from 1280h to A000h. EXEC and a program's end as DOS does them (the parent's SS:SP in its
+    PSP, its return in the child's INT 22h, the child's INT 22h-24h given back, its handles closed and memory freed);
+    4B01h and 4B03h; 31h; devices by name in any folder; 03h for a folder on the way that isn't there. Answered:
+    00h, 02h, 06h (output), 09h, 0Bh, 0Dh, 0Eh, 19h, 1Ah, 25h, 29h, 2Ah-2Fh, 30h, 31h, 33h, 34h-36h, 38h, 39h-43h,
+    44h (00h, 01h, 06h-09h, 0Eh; 10h, 11h refused), 45h-4Fh, 50h-52h, 54h, 56h, 57h 00h, 58h, 59h, 5Bh, 5D06h,
+    60h, 62h, 63h, 66h 01h, 68h, 6Ah, 6Ch, 7303h; 71h refused as 7.1 refuses it with no Windows. The machine
+    (`kernel/vm/ndm.c`) calls it with interrupts on, its memory reached through a kernel window of its own
+    (`NDM_BASE`, `mm_ndm_map`: so that the VM thread's disk I/O lands in it); INT 10h 0Eh/0Fh/03h, INT 1Ah 00h and
+    INT 2Fh 1680h answered there. `NDOS RUN N:\path` loads through it (an .EXE of any size the machine holds). Loop
+    A: NDOSTEST (`tests/dos/ndostest.c`, Open Watcom's C library: files, folders, searches, memory, spawn of
+    itself, date and time) 0 failures under the DOS beside GLOS and in a native machine, nothing unanswered, on
+    the bf6 and the 486. **Against MS-DOS 7.1 itself:** `tools/ndos/msdos-image.sh` makes a boot disk of the
+    owner's MS-DOS 7.1 (`MSDOS_DIR`: private, and so is the disk, kept outside the repository) for Loop A's `--hdd`;
+    DOSDIFF (`tests/dos/dosdiff.c`: ~90 probes where the books leave DOS's answer open) ran there, its output kept
+    as `tests/dos/dosdiff.msdos71.txt`, and `loopa-ndos` runs it in a native machine and compares every line (but
+    `DOSDIFF_KNOWN`'s: the swappable area's size, GLOS's own). What it settled, and GLOS's DOS now does: 0Eh says
+    26 drives; 59h's class, action and locus (02h/03h/12h 08h 03h 02h, 05h/10h 03h 03h 02h, 50h 0Ch 03h 02h, 09h
+    07h 04h 05h, 01h/06h/0Ch 07h 04h 01h); a seek before a file's start succeeds (the 32 bits wrapped) and reads
+    and writes nothing there; 56h renames an open file and 41h deletes one (its handles follow it, or keep its
+    clusters until the last closes: `fsv.c`, safer than DOS's stale entries); 6Ch's bad action is 01h; 3Ah of
+    the root is 05h; 60h of a bare device is `C:/NUL`, above the root is 03h (and so for every call: `path.c`);
+    4Eh with nothing matching is 12h; 47h leaves AX 0100h; NUL's device word is 80C4h; 29h as built. Open: the
+    census's programs themselves (they need NS3's console and NS4's DPMI first); console input (NS3); 36h on a
+    large FAT32 volume (DOSDIFF's disk is 128 MB).
   - **NS3, the console and the clock:** INT 16h and 10h's teletype, cooked input, Ctrl-C, INT 23h and 24h, the
     timer IRQ.
   - **NS4, programs that need more:** DPMI on a native machine (DJGPP programs), EMS and XMS, a VGA of its own.

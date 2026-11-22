@@ -146,6 +146,11 @@ host-test-run: build/host/libpdfbr32.a
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-format-truncation -Ikernel/include -Iinclude -o build/host/find_test \
 	  tests/host/find_test.c kernel/ndos/find.c kernel/ndos/names.c kernel/ndos/fucase.c kernel/fs/fsv.c kernel/fs/fat.c kernel/disk/fatfmt.c \
 	  kernel/disk/mbr.c kernel/disk/mbrboot.S kernel/disk/fdboot.S $(CP_SRCS) && build/host/find_test
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-format-truncation -Ikernel/include -Iinclude -o build/host/dos21_test \
+	  tests/host/dos21_test.c kernel/ndos/dos21.c kernel/ndos/files.c kernel/ndos/share.c kernel/ndos/psp.c kernel/ndos/exe.c \
+	  kernel/ndos/mcb.c kernel/ndos/path.c kernel/ndos/find.c kernel/ndos/names.c kernel/ndos/fucase.c kernel/ndos/dtime.c \
+	  kernel/fs/fsv.c kernel/fs/fat.c kernel/disk/fatfmt.c kernel/disk/mbr.c kernel/disk/mbrboot.S kernel/disk/fdboot.S \
+	  $(CP_SRCS) && build/host/dos21_test
 	@$(HOST_CC) -m32 -O2 -g -Wall -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint -o build/host/crypto_kat \
 	  tests/host/crypto_kat.c $(TINYSSH_SRCS) && build/host/crypto_kat
 	@$(HOST_CC) -m32 -O2 -g -Wall -Wextra -Werror -Ikernel/include -Iinclude -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint \
@@ -520,6 +525,8 @@ $(eval $(call dos_test,SHOTTEST,shottest))
 $(eval $(call dos_test,TYPEIN,typein))
 $(eval $(call dos_test,I2FTSR,i2ftsr))
 $(eval $(call dos_test,FMTEST,fmtest))
+$(eval $(call dos_test,NDOSTEST,ndostest))
+$(eval $(call dos_test,DOSDIFF,dosdiff))
 $(eval $(call dos_test,STUBTSR,stubtsr))
 $(eval $(call dos_test,UMBRD,umbrd))
 $(eval $(call dos_test,JOYTEST,joytest))
@@ -557,7 +564,7 @@ DOS_TESTS := build/ow/dos/HOSTILE.EXE build/ow/dos/XMSTEST.EXE build/ow/dos/XMSB
              build/ow/dos/RUNOUT.EXE build/ow/dos/DPMI16.EXE build/ow/dos/SESSTEST.EXE build/ow/dos/TIMECHK.EXE \
              build/ow/dos/SHOTTEST.EXE build/ow/dos/TYPEIN.EXE build/ow/dos/CONIN.EXE build/ow/dos/CLOCKCHK.EXE build/ow/dos/SBTEST.EXE \
              build/ow/dos/I2FTSR.EXE build/ow/dos/STUBTSR.EXE build/ow/dos/UMBRD.EXE build/ow/dos/FMTEST.EXE \
-             build/ow/dos/JOYTEST.EXE build/ow/dos/SCRTEXT.EXE
+             build/ow/dos/JOYTEST.EXE build/ow/dos/SCRTEXT.EXE build/ow/dos/NDOSTEST.EXE build/ow/dos/DOSDIFF.EXE
 dos-tests: $(DOS_TESTS)
 
 # The 2D library (kernel/gfx; M6 step C) and its fonts: 1-bit bitmaps made from TrueType fonts by
@@ -576,7 +583,7 @@ KCFLAGS := -m32 -march=i486 -ffreestanding -fno-pic -fno-pie -fno-stack-protecto
            -Ithird_party/lwip/src/include -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint -Ikernel/ssh \
            -I$(RETROGPU)/hal/include
 KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/arch/mtrr.c kernel/core/main.c kernel/core/timer.c \
-         kernel/core/sched.c kernel/drv/pci.c kernel/drv/dev.c kernel/drv/devlist.c kernel/drv/cstore.c kernel/drv/cache.c kernel/drv/ata.c kernel/drv/ide.c kernel/vm/ndm.c kernel/vm/ndcmd.c kernel/ndos/exe.c kernel/ndos/dtime.c kernel/fs/fat.c kernel/fs/fsv.c kernel/ndos/psp.c kernel/drv/nic.c kernel/drv/ne2k.c kernel/drv/rtl8139.c kernel/drv/e100.c \
+         kernel/core/sched.c kernel/drv/pci.c kernel/drv/dev.c kernel/drv/devlist.c kernel/drv/cstore.c kernel/drv/cache.c kernel/drv/ata.c kernel/drv/ide.c kernel/vm/ndm.c kernel/vm/ndcmd.c kernel/ndos/exe.c kernel/ndos/dtime.c kernel/fs/fat.c kernel/fs/fsv.c kernel/ndos/psp.c kernel/ndos/dos21.c kernel/ndos/files.c kernel/ndos/share.c kernel/ndos/mcb.c kernel/ndos/path.c kernel/ndos/find.c kernel/ndos/names.c kernel/ndos/fucase.c kernel/drv/nic.c kernel/drv/ne2k.c kernel/drv/rtl8139.c kernel/drv/e100.c \
          kernel/net/net.c kernel/net/sock.c kernel/lib/libc.c \
          kernel/core/random.c kernel/core/kat.c kernel/ssh/ssh.c kernel/ssh/sshbuf.c kernel/ssh/sshkeys.c \
          kernel/ssh/sshd.c \

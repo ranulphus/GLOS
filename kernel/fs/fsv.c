@@ -269,6 +269,7 @@ unsigned long fsv_size(struct fsv_file *f)
 int fsv_close(struct fsv_file *f)
 {
     struct fsv_node *n = f->n;
+    int r = FAT_OK;
 
     if (!n)
         return FSV_EBADF;
@@ -279,8 +280,12 @@ int fsv_close(struct fsv_file *f)
     n->deny_write -= (unsigned)denies_write(f->share);
     n->refs--;
     f->n = 0;
+    if (!n->refs && n->gone) {
+        r = fat_free_chain(&f->v->fat, n->first);
+        n->gone = 0;
+    }
     unlock(f->v);
-    return FAT_OK;
+    return r;
 }
 
 /* ---- names and folders */
@@ -304,26 +309,43 @@ int fsv_lookup(struct fsv_vol *v, const char *path, struct fat_ent *e)
     return r;
 }
 
+/* (An open file may be deleted, as MS-DOS 7.1 deletes one: its entry goes now, its clusters stay its handles'
+   until the last of them closes.) */
 int fsv_unlink(struct fsv_vol *v, const char *path)
 {
+    struct fat_ent e;
+    struct fsv_node *n;
+    unsigned long first;
     int r;
 
     lock(v);
-    r = not_open(v, path);
-    if (!r)
+    r = fat_lookup(&v->fat, path, &e);
+    if (!r && (n = node_at(v, e.dir, e.index)) != 0) {
+        r = fat_unlink_keep(&v->fat, path, &first);
+        if (!r)
+            n->dir = n->index = FAT_NO_ENTRY, n->gone = 1;
+    } else if (!r) {
         r = fat_unlink(&v->fat, path);
+    }
     unlock(v);
     return r;
 }
 
+/* (An open file may be renamed, as MS-DOS 7.1 renames one: its handles follow it to its new entry.) */
 int fsv_rename(struct fsv_vol *v, const char *from, const char *to)
 {
+    struct fat_ent a, b;
+    struct fsv_node *n;
     int r;
 
     lock(v);
-    r = not_open(v, from);
-    if (!r)
+    r = fat_lookup(&v->fat, from, &a);
+    if (!r) {
+        n = node_at(v, a.dir, a.index);
         r = fat_rename(&v->fat, from, to);
+        if (!r && n && fat_lookup(&v->fat, to, &b) == 0)
+            n->dir = b.dir, n->index = b.index;
+    }
     unlock(v);
     return r;
 }

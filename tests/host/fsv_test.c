@@ -156,10 +156,25 @@ static void t_sharing(void)
     CHECK(fsv_open(&vol, "\\s.dat", FSV_READ, FSV_DENY_NONE, &a) == FSV_ESHARE, "anything beside deny-all");
     fsv_close(&d);
 
-    /* An open file can't go, be renamed, made again or have its attributes changed; closed, it can. */
-    CHECK(fsv_open(&vol, "\\s.dat", FSV_READ, FSV_DENY_NONE, &a) == 0, "open");
-    CHECK(fsv_unlink(&vol, "\\s.dat") == FSV_ESHARE, "delete while open");
-    CHECK(fsv_rename(&vol, "\\s.dat", "\\t.dat") == FSV_ESHARE, "rename while open");
+    /* An open file can't be made again or have its attributes changed; closed, it can. It can be renamed (as
+       MS-DOS 7.1 renames one): its handle follows it, a write through it lands in its new entry. */
+    CHECK(fsv_open(&vol, "\\s.dat", FSV_RW, FSV_DENY_NONE, &a) == 0, "open");
+    CHECK(fsv_rename(&vol, "\\s.dat", "\\a much longer name for it.dat") == 0, "rename while open");
+    {
+        struct fat_ent e;
+        unsigned long was;
+
+        CHECK(fsv_lookup(&vol, "\\a much longer name for it.dat", &e) == 0, "found by its new name");
+        was = e.size;
+        fsv_seek(&a, was);
+        CHECK(fsv_write(&a, "more", 4) == 4, "a write after the rename");
+        CHECK(fsv_lookup(&vol, "\\a much longer name for it.dat", &e) == 0 && e.size == was + 4,
+              "the new entry's size (%lu, was %lu)", e.size, was);
+        CHECK(fsv_lookup(&vol, "\\s.dat", &e) == FAT_ENOENT, "the old name gone");
+        CHECK(fsv_rename(&vol, "\\a much longer name for it.dat", "\\s.dat") == 0, "renamed back, open");
+        fsv_seek(&a, 0);
+        CHECK(fsv_truncate(&a) == 0 && fsv_lookup(&vol, "\\s.dat", &e) == 0 && e.size == 0, "cut through it");
+    }
     CHECK(fsv_create(&vol, "\\s.dat", 0, 1, FSV_RW, FSV_DENY_NONE, &b) == FSV_ESHARE, "made again while open");
     CHECK(fsv_setattr(&vol, "\\s.dat", FAT_A_RDONLY) == FSV_ESHARE, "attributes while open");
     fsv_close(&a);
@@ -170,6 +185,44 @@ static void t_sharing(void)
     CHECK(fsv_rename(&vol, "\\s.dat", "\\t.dat") == 0, "rename when closed");
     CHECK(fsv_unlink(&vol, "\\t.dat") == 0, "delete when closed");
     CHECK(fsv_open(&vol, "\\", FSV_READ, FSV_DENY_NONE, &a) == FAT_EISDIR, "the root opened");
+
+    /* An open file deleted (as MS-DOS 7.1 deletes one): its name gone and free for another, its handles reading and
+       writing what was theirs, its clusters free once the last of them closes. */
+    {
+        static unsigned char data[9000], back[9000];
+        unsigned long free0, free1, free2, free3;
+        struct fat_ent e;
+
+        fill(data, sizeof data, 7);
+        CHECK(fsv_create(&vol, "\\gone.dat", 0, 0, FSV_RW, FSV_DENY_NONE, &a) == 0, "create gone.dat");
+        fsv_write(&a, data, sizeof data);
+        fsv_close(&a);
+        fsv_free(&vol, &free0);
+        CHECK(fsv_open(&vol, "\\gone.dat", FSV_RW, FSV_DENY_NONE, &a) == 0, "open gone.dat");
+        CHECK(fsv_open(&vol, "\\gone.dat", FSV_READ, FSV_DENY_NONE, &b) == 0, "and again");
+        CHECK(fsv_unlink(&vol, "\\gone.dat") == 0, "delete while open");
+        CHECK(fsv_lookup(&vol, "\\gone.dat", &e) == FAT_ENOENT, "its name gone");
+        fsv_free(&vol, &free1);
+        CHECK(free1 == free0, "its clusters still its handles' (%lu, %lu)", free1, free0);
+        CHECK(fsv_read(&b, back, sizeof back) == (long)sizeof data && !memcmp(back, data, sizeof data),
+              "read after the delete");
+        fsv_seek(&a, sizeof data);
+        CHECK(fsv_write(&a, data, 3000) == 3000, "a write after the delete");
+        CHECK(fsv_create(&vol, "\\gone.dat", 0, 0, FSV_RW, FSV_DENY_NONE, &c) == 0, "the name made again");
+        fsv_write(&c, "new", 3);
+        fsv_close(&c);
+        CHECK(fsv_lookup(&vol, "\\gone.dat", &e) == 0 && e.size == 3, "the new file's entry: %lu", e.size);
+        fsv_close(&a);
+        fsv_free(&vol, &free2);
+        CHECK(free2 < free0, "one handle still has them");
+        fsv_seek(&b, 0);
+        CHECK(fsv_read(&b, back, sizeof back) == (long)sizeof back && !memcmp(back, data, sizeof data),
+              "the last handle reads them");
+        fsv_close(&b);
+        fsv_free(&vol, &free3);
+        CHECK(free3 >= free0 + 2, "freed at the last close (%lu, was %lu)", free3, free0);
+        CHECK(fsv_unlink(&vol, "\\gone.dat") == 0, "the new one deleted");
+    }
 }
 
 static void t_entry_stays(void)

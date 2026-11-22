@@ -150,6 +150,12 @@ int fat_truncate(struct fat_file *f, unsigned long size);
 /* Its directory entry brought up to date (size, first cluster, written time): fat_write does it as it goes. */
 int fat_close(struct fat_file *f);
 int fat_unlink(struct fat_vol *v, const char *path);
+/* An open file deleted (fsv.c's, as MS-DOS 7.1 deletes one): its entry gone, its chain kept for the handles
+   (*first), which then have FAT_NO_ENTRY as their entry; fat_free_chain at the last close. A power cut between
+   leaves lost clusters, as ScanDisk and fsck.fat find them. */
+#define FAT_NO_ENTRY 0xFFFFFFFFUL
+int fat_unlink_keep(struct fat_vol *v, const char *path, unsigned long *first);
+int fat_free_chain(struct fat_vol *v, unsigned long first);
 int fat_mkdir(struct fat_vol *v, const char *path);
 int fat_rmdir(struct fat_vol *v, const char *path);
 /* A file or folder given another name, in the same folder or another (a folder never into itself). */

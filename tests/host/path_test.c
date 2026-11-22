@@ -37,7 +37,8 @@ int main(void)
     res("\\autoexec.bat", 0, 2, "\\AUTOEXEC.BAT");
     res("/dos/edit.com", 0, 2, "\\DOS\\EDIT.COM");
     res("..\\HEXEN\\HEXEN.EXE", 0, 2, "\\GAMES\\HEXEN\\HEXEN.EXE");
-    res("..\\..\\..\\..\\x", 0, 2, "\\X");               /* (above the root: stays at it) */
+    res("..\\..\\..\\..\\x", 0x03, 0, 0);                /* (above the root: MS-DOS 7.1's 03h) */
+    res("..\\..\\x", 0, 2, "\\X");                       /* (to the root and no further) */
     res(".\\a\\.\\b", 0, 2, "\\GAMES\\DOOM\\A\\B");
     res("C:", 0, 2, "\\GAMES\\DOOM");
     res("C:\\", 0, 2, "\\");
