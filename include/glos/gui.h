@@ -918,6 +918,9 @@ int gui_richview_find(struct gui_widget *w, const char *what, unsigned flags, in
                                            the one before it), in a block's text, round the end once: chosen and
                                            scrolled to, 1; 0 none; -1 a wrong expression. With nothing chosen, from
                                            the start (back: the end) */
+int gui_richview_pos(struct gui_widget *w);    /* (phase F) how far it is scrolled: pixels from the top */
+void gui_richview_set_pos(struct gui_widget *w, int pos);      /* ... scrolled there (laid out first; held to the
+                                           document's length) */
 int gui_richview_chosen(struct gui_widget *w, int *from, int *to);     /* (phase F) the block what is chosen
                                            begins in, and its bytes there (to: in the block it ends in); -1 none */
 /* Markdown (CommonMark's headings, paragraphs, lists, quotes, code, rules, tables, emphasis, code spans, links,

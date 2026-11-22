@@ -1007,6 +1007,18 @@ static char *block_text(const struct rblock *b, int *len)     /* a block's runs 
     return t;
 }
 
+int gui_richview_pos(struct gui_widget *w) { return RV(w)->sb.pos; }
+
+void gui_richview_set_pos(struct gui_widget *w, int pos)
+{
+    struct rview *v = RV(w);
+    place(v);
+    v->sb.pos = pos;
+    gui_sb_clamp(&v->sb);
+    v->at_end = v->sb.pos + v->sb.page >= v->total;
+    gui_damage(w);
+}
+
 int gui_richview_chosen(struct gui_widget *w, int *from, int *to)
 {
     struct rview *v = RV(w);

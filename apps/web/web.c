@@ -43,6 +43,10 @@ static struct gui_window *win;
 static struct gui_widget *address, *view, *status;
 static char current[1024];              /* the page shown */
 static char *history[HISTORY];          /* where one has been; `at` is the page shown */
+static int hpos[HISTORY];               /* (phase F) how far each was scrolled when it was left (-1: never left) */
+static int restoring;                   /* (Back, Forward: the page shown at its place when it comes) */
+static int restored;                    /* (... and so it was: not at its #place) */
+static void push_place(const char *url);
 static int nhistory, at = -1;
 static struct webget *getting;          /* a page on its way ... */
 static char getting_url[1024];
@@ -496,22 +500,25 @@ static void show_page(const char *url, const char *bytes, unsigned long n, const
         gui_rdoc_text(doc, t, -1, 0, NULL);
         blocks++;
     }
-    gui_richview_set(view, doc);        /* (the view's now; the one before is freed, which pointed at the old picture) */
+    {
+        int keep = remaking ? gui_richview_pos(view) : -1;
+        gui_richview_set(view, doc);    /* (the view's now; the one before is freed, which pointed at the old picture) */
+        if (keep > 0)
+            gui_richview_set_pos(view, keep);   /* (made again with its pictures: where it was) */
+    }
     free(picture);
     picture = px;
     snprintf(current, sizeof current, "%s", url);
     gui_set_text(address, current);
-    if (push) {                         /* a new place: what was ahead of here is forgotten */
-        while (nhistory > at + 1)
-            free(history[--nhistory]);
-        if (nhistory == HISTORY) {
-            free(history[0]);
-            memmove(history, history + 1, (HISTORY - 1) * sizeof history[0]);
-            nhistory--;
-        }
-        if ((history[nhistory] = malloc(strlen(url) + 1)) != NULL)
-            strcpy(history[nhistory], url), at = nhistory++;
+    if (push)                           /* a new place: what was ahead of here is forgotten */
+        push_place(url);
+    else if (restoring && !remaking && at >= 0 && at < nhistory && hpos[at] >= 0) {
+        gui_richview_set_pos(view, hpos[at]);   /* (Back, Forward: where it was left, its #place or not) */
+        say("back at %d", hpos[at]);
+        restored = 1;
     }
+    if (!remaking)
+        restoring = 0;
     snprintf(t, sizeof t, "%s%sWeb Reader", page_title, page_title[0] ? " - " : "");
     gui_title(win, t);
     gui_set_text(status, page_title[0] ? page_title : url);
@@ -525,8 +532,9 @@ static void show_page(const char *url, const char *bytes, unsigned long n, const
         return;
     }
     say("loaded %s title=%s blocks=%u links=%u", url, page_title, blocks, links);
-    if (strchr(url, '#'))
+    if (strchr(url, '#') && !restored)
         show_place(strchr(url, '#') + 1);
+    restored = 0;
     {
         int i, here = 0;
         for (i = 0; i < npics; i++)
@@ -952,27 +960,44 @@ static void form_fill(int k)
 
 static int reloading;                   /* (Reload: the page read again, though it is the one shown) */
 
-static void push_place(const char *url)        /* a place in the page shown: kept in the history as a page is */
+static void push_place(const char *url)        /* a page or a place in it: kept in the history */
 {
     while (nhistory > at + 1)
         free(history[--nhistory]);
     if (nhistory == HISTORY) {
         free(history[0]);
         memmove(history, history + 1, (HISTORY - 1) * sizeof history[0]);
+        memmove(hpos, hpos + 1, (HISTORY - 1) * sizeof hpos[0]);
         nhistory--;
     }
     if ((history[nhistory] = malloc(strlen(url) + 1)) != NULL)
-        strcpy(history[nhistory], url), at = nhistory++;
+        strcpy(history[nhistory], url), hpos[nhistory] = -1, at = nhistory++;
+}
+
+static void keep_pos(void)              /* the page shown left: how far it was scrolled, kept with it */
+{
+    if (at >= 0 && at < nhistory && current[0] && !strcmp(history[at], current))
+        hpos[at] = gui_richview_pos(view);
 }
 
 static void go(const char *url, int push)
 {
     char certs[300], path[300], t[1100];
+    if (push) {                                 /* (somewhere new: this one's place kept; nothing to restore) */
+        keep_pos();
+        restoring = 0;
+    }
     if (!reloading && current[0] && !getting && same_page(url, current) && (strchr(url, '#') || strchr(current, '#'))) {
         const char *h = strchr(url, '#');       /* (another place in the page shown: scrolled to) */
         char was[1024];
         snprintf(was, sizeof was, "%s", url);
-        show_place(h ? h + 1 : "");
+        if (restoring && at >= 0 && at < nhistory && hpos[at] >= 0) {
+            gui_richview_set_pos(view, hpos[at]);       /* (Back to the page's own entry: where it was left) */
+            say("back at %d", hpos[at]);
+        } else {
+            show_place(h ? h + 1 : "");
+        }
+        restoring = 0;
         snprintf(current, sizeof current, "%s", was);
         gui_set_text(address, current);
         if (push)
@@ -1037,6 +1062,8 @@ static void go_post(const char *url, const char *body)
         return;
     }
     stop();
+    keep_pos();
+    restoring = 0;
     gui_path_join(certs, sizeof certs, glos_home(), TLS_CERTS);
     if (!(getting = webget_post(url, certs, PAGE_MAX, body, strlen(body)))) {
         show_failure(url, "no memory");
@@ -1185,15 +1212,19 @@ static void command(struct gui_window *w, int id)
     switch (id) {
     case C_BACK:
         if (at > 0) {
+            keep_pos();
             at--;
             say("back");
+            restoring = 1;
             go(history[at], 0);
         }
         break;
     case C_FORWARD:
         if (at + 1 < nhistory) {
+            keep_pos();
             at++;
             say("forward");
+            restoring = 1;
             go(history[at], 0);
         }
         break;

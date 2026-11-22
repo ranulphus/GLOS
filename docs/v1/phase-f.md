@@ -1424,8 +1424,13 @@ round the end once; what it finds chosen and scrolled to), with `gui_richview_ch
   `#middle`, Back and Forward between places, `#`, an address typed with its place, Find, F3 round the end,
   Shift+F3, words not there; `help`: the result's word chosen. (Disk Tools' script images C:\WEB: one file
   more.)
-- **Not yet:** a place kept for each page in the history (Back to another page shows its top); Find's
-  matches all tinted; Help's `#part` links (the guide has none).
+- **A page's place in the history** (later the same day): how far a page was scrolled is kept with its entry
+  when it is left (a link, an address, Back, Forward) and given back on Back and Forward, over its `#place` if
+  it has one (an entry never left keeps its `#place`); a page made again as its pictures come keeps where it
+  was. The rich view's `gui_richview_pos` and `gui_richview_set_pos`. `web-find`: Back and Forward between the
+  places at the top and the end (292 pixels), and Back from another page to the long page as it was left (173
+  pixels, the second needle), not at its `#middle`.
+- **Not yet:** Find's matches all tinted; Help's `#part` links (the guide has none).
 
 ## The Web Reader: bookmarks (2026-11-22)
 
