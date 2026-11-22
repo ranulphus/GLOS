@@ -47,12 +47,14 @@
 #include <GL/dosgl.h>
 #include <GL/gl.h>
 #include <glos/glos.h>
+#include <glos/gui.h>
 
 #include "../shared/hvarenas.h"
 #include "../shared/hvbasin.h"
 #include "../shared/hvgame.h"
 #include "hvlink.h"
 #include "hvsound.h"
+#include "lobby.h"
 
 #define GAME_NAME "Cushion"             /* (the owner's choice, 2026-11-21) */
 
@@ -62,6 +64,8 @@ static struct hv_game *G = &alone;      /* the game shown: that one, or a networ
                                            view of it) */
 static int me;                          /* the player's craft in it */
 static int which;                       /* the arena: the game's six, then the user's own */
+static int cur_kind;                    /* the kind of game (HV_FLAGS ...) */
+static int strength = 1;                /* the computer's craft's (hv_auto's): 0 mild, 1 normal, 2 keen */
 
 /* The arenas: the six that come with the game, then the user's own: text files (hvarena.h says how they are
    written) in the folder ARENAS beside the program. One that the reader refuses is left out, and why is said on
@@ -515,60 +519,27 @@ static int open_game(int kind, const char *name)
 {
     if (which >= HV_ARENAS || hvlink_open(&arena, which, kind, HV_DEMO_CRAFT, name) != 0)
         return -1;
+    hvlink_set_strength(strength);
     G = hvlink_game(), me = hvlink_craft();
     printf("HVCRAFT net open kind=%d arena=%d name=%s\n", kind, which, name);
     fflush(stdout);
     return 0;
 }
 
-int main(int argc, char **argv)
+/* The game in DOS-GL's window, until it is left (Esc, the window closed) or the suite's step: its exit code.
+   demo: every craft the computer's; until: the suite's step; opening, joining: the network at once (the
+   suite's flags); pre: the lobby has the link set up already (a game joined). The kind of game is cur_kind. */
+static int play(int demo, long until, int opening, int joining, int pre, const char *name)
 {
     static unsigned char evbuf[GLOS_EV_MAX];
     const struct glos_ev *ev = (const struct glos_ev *)evbuf;
     DGLConfig cfg;
     glos_handle win;
-    char why[160], name[17] = "";
+    char why[160];
     unsigned last, acc = 0, said = 0, my_keys = 0, marked = 0, heard_from = 0, frames_drawn = 0, started_ms;
     int heard = 0;
-    int sounding = 0, code = 0;
-    int w = 480, h = 360, i, on = 1, demo = 0, kind = HV_FLAGS, opening = 0, joining = 0;
-    long until = -1;
-    cfg_read(argc > 0 ? argv[0] : "", &kind);
-    for (i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "-demo"))
-            demo = 1;
-        else if (!strcmp(argv[i], "-kind") && i + 1 < argc)
-            kind = atoi(argv[++i]) & 3;
-        else if (!strcmp(argv[i], "-until") && i + 1 < argc)
-            until = atol(argv[++i]);
-        else if (!strcmp(argv[i], "-arena") && i + 1 < argc)
-            which = atoi(argv[++i]);
-        else if (!strcmp(argv[i], "-open"))
-            opening = 1;
-        else if (!strcmp(argv[i], "-join"))
-            joining = 1;
-        else if (!strcmp(argv[i], "-name") && i + 1 < argc)
-            snprintf(name, sizeof name, "%s", argv[++i]);
-    }
-    if (glos_init(GAME_NAME, 0, 0) != 0) {
-        printf("HVCRAFT no GLOS\n");
-        return 2;
-    }
-    if (!name[0])
-        snprintf(name, sizeof name, "%s", cfg_name);
-    if (!name[0]) {                             /* the player's name on the network: the PC's own, unless said */
-        int set = 0;
-        if (glos_setting_get("net", "hostname", name, sizeof name, &set) != 0 || !name[0])
-            snprintf(name, sizeof name, "GLOS PC");
-    }
-    user_arenas(argc > 0 ? argv[0] : "");
-    if (which < 0 || which >= HV_ARENAS + nuser)
-        which = 0;
-    if (hv_arena_read(&arena, arena_text(which), strlen(arena_text(which)), why, sizeof why) != 0
-        || hv_game_start(&alone, &arena, kind, HV_DEMO_CRAFT) != 0) {
-        printf("HVCRAFT arena %s\n", why);
-        return 3;
-    }
+    int sounding = 0, code = 0, kind = cur_kind;
+    int w = 480, h = 360, i, on = 1;
     memset(&cfg, 0, sizeof cfg);
     cfg.width = w, cfg.height = h;
     cfg.color_bits = 16;
@@ -590,9 +561,9 @@ int main(int argc, char **argv)
     if ((opening && open_game(kind, name) != 0) || (joining && hvlink_look(name) != 0)) {
         printf("HVCRAFT net no network\n");
         code = 6, on = 0;
-    } else if (!opening && !joining && !demo && cfg_network == 1) {     /* (as HVCRAFT.CFG says: failing, the game alone) */
+    } else if (!pre && !opening && !joining && !demo && cfg_network == 1) {     /* (as HVCRAFT.CFG says: failing, the game alone) */
         open_game(kind, name);
-    } else if (!opening && !joining && !demo && cfg_network == 2) {
+    } else if (!pre && !opening && !joining && !demo && cfg_network == 2) {
         hvlink_look(name);
     }
     title(win);
@@ -617,7 +588,7 @@ int main(int argc, char **argv)
                 unsigned char keys[HV_CRAFT];
                 keys[0] = (unsigned char)ctl;
                 for (i = 1; i < alone.ncraft; i++)
-                    keys[i] = (unsigned char)hv_auto(&alone, i, HV_DEMO_STRENGTH);
+                    keys[i] = (unsigned char)hv_auto(&alone, i, demo ? HV_DEMO_STRENGTH : strength);
                 hv_game_step(&alone, keys);
                 evs = alone.ev;
             }
@@ -733,11 +704,100 @@ int main(int argc, char **argv)
         printf("HVCRAFT frames=%u ms=%u fps=%u.%u\n", frames_drawn, ms, ms ? frames_drawn * 1000 / ms : 0,
                ms ? frames_drawn * 10000 / ms % 10 : 0);
     }
-    hvlink_leave();
     hvsound_stop();
     dglShutdown();
-    if (!demo && until < 0)                     /* (the suite's games leave nothing behind) */
-        cfg_write(kind);
-    printf("HVCRAFT end\n");
+    cur_kind = kind;
     return code;
+}
+
+int main(int argc, char **argv)
+{
+    char why[160], name[17] = "";
+    const char *arena_names[HV_ARENAS + USER_ARENAS];
+    static struct hv_arena named;
+    int i, demo = 0, opening = 0, joining = 0, interactive, code = 0;
+    long until = -1;
+    cur_kind = HV_FLAGS;
+    cfg_read(argc > 0 ? argv[0] : "", &cur_kind);
+    for (i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "-demo"))
+            demo = 1;
+        else if (!strcmp(argv[i], "-kind") && i + 1 < argc)
+            cur_kind = atoi(argv[++i]) & 3;
+        else if (!strcmp(argv[i], "-until") && i + 1 < argc)
+            until = atol(argv[++i]);
+        else if (!strcmp(argv[i], "-arena") && i + 1 < argc)
+            which = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "-open"))
+            opening = 1;
+        else if (!strcmp(argv[i], "-join"))
+            joining = 1;
+        else if (!strcmp(argv[i], "-name") && i + 1 < argc)
+            snprintf(name, sizeof name, "%s", argv[++i]);
+    }
+    /* The lobby (lobby.c) unless the suite's flags or HVCRAFT.CFG's network say how to play at once. */
+    interactive = !demo && !opening && !joining && until < 0 && !cfg_network;
+    if (interactive ? gui_init(argc, argv) != 0 : glos_init(GAME_NAME, 0, 0) != 0) {
+        printf("HVCRAFT no GLOS\n");
+        return 2;
+    }
+    if (!name[0])
+        snprintf(name, sizeof name, "%s", cfg_name);
+    if (!name[0]) {                             /* the player's name on the network: the PC's own, unless said */
+        int set = 0;
+        if (glos_setting_get("net", "hostname", name, sizeof name, &set) != 0 || !name[0])
+            snprintf(name, sizeof name, "GLOS PC");
+    }
+    user_arenas(argc > 0 ? argv[0] : "");
+    if (which < 0 || which >= HV_ARENAS + nuser)
+        which = 0;
+    if (hv_arena_read(&arena, arena_text(which), strlen(arena_text(which)), why, sizeof why) != 0
+        || hv_game_start(&alone, &arena, cur_kind, HV_DEMO_CRAFT) != 0) {
+        printf("HVCRAFT arena %s\n", why);
+        return 3;
+    }
+    if (!interactive) {
+        code = play(demo, until, opening, joining, 0, name);
+        hvlink_leave();
+        if (!demo && until < 0)                 /* (the suite's games leave nothing behind) */
+            cfg_write(cur_kind);
+        printf("HVCRAFT end\n");
+        return code;
+    }
+    for (i = 0; i < HV_ARENAS + nuser; i++) {   /* the arenas' names, for the lobby's list */
+        static char names[HV_ARENAS + USER_ARENAS][40];
+        if (hv_arena_read(&named, arena_text(i), strlen(arena_text(i)), why, sizeof why) == 0)
+            snprintf(names[i], sizeof names[i], "%s", named.name);
+        else
+            snprintf(names[i], sizeof names[i], "%d", i + 1);
+        arena_names[i] = names[i];
+    }
+    for (;;) {
+        struct lobby l;
+        int r;
+        memset(&l, 0, sizeof l);
+        l.kind = cur_kind, l.arena = which, l.strength = strength;
+        snprintf(l.name, sizeof l.name, "%s", name);
+        l.arenas = arena_names, l.narenas = HV_ARENAS + nuser;
+        r = lobby_run(&l);
+        if (r == LOBBY_QUIT)
+            break;
+        cur_kind = l.kind & 3, which = l.arena, strength = l.strength;
+        if (l.name[0])
+            snprintf(name, sizeof name, "%s", l.name);
+        snprintf(cfg_name, sizeof cfg_name, "%.16s", name);
+        if (r == LOBBY_OPEN && which >= HV_ARENAS)
+            which = 0;                          /* (an arena of this PC's own: the others have not got it) */
+        begin_alone(cur_kind);
+        if (r == LOBBY_JOIN && hvlink_join_offer(l.offer, name) != 0)
+            continue;
+        if (r == LOBBY_ALONE)
+            hvlink_leave();                     /* (the lobby's look at the network: over) */
+        play(0, -1, r == LOBBY_OPEN, 0, r == LOBBY_JOIN, name);
+        hvlink_leave();
+        cfg_write(cur_kind);
+    }
+    hvlink_leave();
+    printf("HVCRAFT end\n");
+    return 0;
 }

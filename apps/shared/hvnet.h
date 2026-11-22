@@ -46,6 +46,7 @@ struct hv_opener {
     char name[17];
     struct hv_seat seat[HV_CRAFT];
     int own;                            /* the opener's own craft */
+    int strength;                       /* the computer's craft's (hv_auto's): 1 unless changed */
 };
 
 void hv_opener_start(struct hv_opener *o, const struct hv_arena *a, int arena, int kind, int ncraft, const char *name);

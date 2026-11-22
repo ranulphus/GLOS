@@ -3,6 +3,14 @@
 A game of hovercraft in walled harbour yards, in 3D, alone against the computer's craft or with the other
 GLOS PCs of your network. A hovercraft rides on a cushion of air, which is where the game's name comes from.
 
+## The lobby
+
+The game begins with its lobby: choose the **game** (flags, beacons, the lamp or laps), how keen **the
+computer's craft** are, the **arena**, and **your name** on the network. Then **Play Alone**, **Open to the
+Network** (your game, which the others see and join), or choose a game in **Games on the network** (the
+open games of the other GLOS PCs, found by themselves) and **Join** it. Esc in the game brings you back to
+the lobby; **Quit** leaves.
+
 A hovercraft has almost no grip. Its fans change its speed, not its place: it goes on the way it was going
 until you have pushed it somewhere else. Turn early, and use the side fans to stop a slide.
 
@@ -49,10 +57,11 @@ small map at the top right shows the arena from above, with every craft (yours i
 GLOS PCs on the same network (by their network cards, or joined by a [cable](NETWORK.MD)) play together. No
 addresses are needed.
 
-1. On one PC, choose the game (1 to 4) and the arena (Tab), then press **O**. The game begins again, open to
-   the others; the window's title says so, and how many have joined.
-2. On each other PC, press **J**. The game looks for an open one and joins it; the title says whose game you
-   are in. If nobody has a game open, it says so after ten seconds and you play on alone.
+1. On one PC, choose the game and the arena in the lobby and press **Open to the Network**; or, in a game,
+   press **O**: it begins again, open to the others. The window's title says so, and how many have joined.
+2. On each other PC, choose the game in the lobby's **Games on the network** and press **Join**; or, in a
+   game, press **J**: it joins the first open game it finds. The title says whose game you are in. If nobody
+   has a game open, it says so after ten seconds and you play on alone.
 
 The first PC to join drives a craft of the other side, the next one of the opener's side, and so on; the
 craft nobody drives are the computer's. **J** again leaves the game (the computer takes your craft); **O**

@@ -29,6 +29,7 @@ void hv_opener_start(struct hv_opener *o, const struct hv_arena *a, int arena, i
     memset(o, 0, sizeof *o);
     hv_game_start(&o->game, a, kind, ncraft);
     o->arena = arena;
+    o->strength = 1;
     strncpy(o->name, name ? name : "", sizeof o->name - 1);
 }
 
@@ -95,7 +96,7 @@ void hv_opener_step(struct hv_opener *o, unsigned own_controls)
         struct hv_seat *s = &o->seat[i];
         if (s->taken && o->game.steps - s->heard > HV_NET_QUIET)
             s->taken = 0;               /* gone quiet: the computer's from here */
-        keys[i] = (unsigned char)(i == o->own ? own_controls : s->taken ? s->controls : hv_auto(&o->game, i, 1));
+        keys[i] = (unsigned char)(i == o->own ? own_controls : s->taken ? s->controls : hv_auto(&o->game, i, o->strength));
     }
     hv_game_step(&o->game, keys);
 }

@@ -22,6 +22,9 @@ static unsigned seat_addr[HV_CRAFT], seat_port[HV_CRAFT];
 static unsigned host_addr, host_port;   /* a joiner's: the opener (0: none found yet) */
 static char host_name[17], my_name[17];
 static unsigned asked, looked, quiet;
+static struct hvl_offer offers[HVL_OFFERS];
+static int noffers;
+static unsigned browse_asked;
 
 int hvlink_mode(void) { return mode; }
 struct hv_game *hvlink_game(void) { return mode == HVL_OPEN ? &op.game : &jn.view; }
@@ -206,7 +209,82 @@ static unsigned joiner_step(unsigned controls)
     return ev;
 }
 
+/* ---- the lobby's list of the network's open games */
+
+int hvlink_browse(void)
+{
+    hvlink_leave();
+    if (!(port_h = glos_net_datagram(0, GLOS_NETF_BROADCAST)))
+        return -1;
+    noffers = 0;
+    browse_asked = 0;
+    mode = HVL_BROWSING;
+    return 0;
+}
+
+int hvlink_browse_step(void)
+{
+    unsigned char in[HV_NET_MOST], out[HV_NET_MOST];
+    unsigned addr, prt, len, now = glos_ticks();
+    char name[17];
+    int offer[4], n, r, i;
+    if (mode != HVL_BROWSING)
+        return 0;
+    if (!browse_asked || now - browse_asked >= 1000) {  /* once a second: who has a game open? */
+        n = hv_joiner_find(out);
+        glos_net_sendto(port_h, out, (unsigned)n, 0, EVERYONE, HV_PORT);
+        browse_asked = now ? now : 1;
+    }
+    for (n = 0; n < HEAR_MOST; n++) {
+        addr = prt = len = 0;
+        r = glos_net_recvfrom(port_h, in, sizeof in, 0, &addr, &prt, &len);
+        if (r <= 0)
+            break;
+        if (hv_joiner_hear(&jn, NULL, in, r, offer, name) != 1)
+            continue;
+        for (i = 0; i < noffers && (offers[i].addr != addr || offers[i].port != prt); i++)
+            ;
+        if (i == noffers) {
+            if (noffers == HVL_OFFERS)
+                continue;
+            noffers++;
+        }
+        offers[i].addr = addr, offers[i].port = prt;
+        memcpy(offers[i].name, name, sizeof offers[i].name);
+        offers[i].kind = offer[0], offers[i].arena = offer[1], offers[i].ncraft = offer[2], offers[i].free = offer[3];
+        offers[i].heard = now;
+    }
+    for (i = 0; i < noffers;)                   /* (gone quiet: gone) */
+        if (now - offers[i].heard > 4000)
+            offers[i] = offers[--noffers];
+        else
+            i++;
+    return noffers;
+}
+
+const struct hvl_offer *hvlink_offer(int i) { return i >= 0 && i < noffers ? &offers[i] : NULL; }
+
+int hvlink_join_offer(int i, const char *name)
+{
+    if (mode != HVL_BROWSING || i < 0 || i >= noffers)
+        return -1;
+    hv_joiner_start(&jn);
+    jn_arena = 0;
+    host_addr = offers[i].addr, host_port = offers[i].port;
+    memcpy(host_name, offers[i].name, sizeof host_name);
+    strncpy(my_name, name ? name : "", sizeof my_name - 1);
+    asked = looked = quiet = 0;
+    mode = HVL_LOOKING;                         /* (the port stays: JOIN is sent from the next step) */
+    return 0;
+}
+
+int hvlink_set_strength(int strength)
+{
+    op.strength = strength < 0 ? 0 : strength > 2 ? 2 : strength;
+    return op.strength;
+}
+
 unsigned hvlink_step(unsigned controls)
 {
-    return mode == HVL_OPEN ? opener_step(controls) : mode == HVL_ALONE ? 0 : joiner_step(controls);
+    return mode == HVL_OPEN ? opener_step(controls) : mode == HVL_ALONE || mode == HVL_BROWSING ? 0 : joiner_step(controls);
 }

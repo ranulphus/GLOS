@@ -7518,6 +7518,8 @@ def hover_case(profile, vcard, card):
     mine = batfile("hover-%s/MINE.TXT" % tag, ["name: A Yard of My Own", "", "#########", "#A.a.b.B#", "#A.*.*.B#", "#..d.c..#", "#########"])
     wrong = batfile("hover-%s/WRONG.TXT" % tag, ["name: Walled In", "", "#######", "#A.#.B#", "#######"])
     agent = Agent("hover-" + tag, profile, card, ["--card", vcard, "--file", "build/apps/HVCRAFT.EXE=/TEST/HVCRAFT.EXE",
+        "--file", "sdk/gui/fonts/SMOOTH.DAT=/TEST/SMOOTH.DAT", "--file", "sdk/gui/fonts/FONTS.DAT=/TEST/FONTS.DAT",
+        "--file", "sdk/gui/fonts/ICONS.DAT=/TEST/ICONS.DAT",
         "--file", mine + "=/TEST/ARENAS/MINE.TXT", "--file", wrong + "=/TEST/ARENAS/WRONG.TXT",
         "--cmd", "SERSAY HX-START hover", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=1200)
     out = os.path.join(ROOT, "out", "hover-" + tag)
@@ -7620,11 +7622,19 @@ def hover_case(profile, vcard, card):
         except subprocess.TimeoutExpired:
             h.kill()
             checks["played"] = False
+        # the lobby (a toolkit window before the game and after it): played as a script, last (it leaves an
+        # HVCRAFT.CFG beside the program, which the runs above must not read)
+        g = GuiDriver(agent, out, 16, False, "C:\\TEST\\")
+        g.play("tests/loopa/hover-lobby.txt")
+        g.finish()
+        checks["lobby"] = not g.bad
+        if g.bad:
+            print("    %s lobby: %s %s" % (tag, " ".join(g.bad), " ".join(g.notes)[:400]))
         checks["exit"] = agent.ssh("glos exit")[0] == 0
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
     text = agent.wait()
-    checks["apps"] = text.count("prog=HVCRAFT.EXE") >= 9
+    checks["apps"] = text.count("prog=HVCRAFT.EXE") >= 10
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
     checks["done"] = "GLOS-EXIT code=0" in text
     bad = [k for k, v in checks.items() if not v]

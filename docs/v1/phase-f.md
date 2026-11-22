@@ -1313,3 +1313,23 @@ The rest of Help's plan's first item (`docs/v1/apps/help.md`): the tour on GLOS'
   second** (768 frames in 30 seconds of the game). The game's thirty steps a second are kept either way.
 - Owed: Fall Line on the 486 (bench C, the plan's floor: thirty a second on a 486DX2-66 at 8 bits), and both
   on the other benches' cards.
+
+## Cushion's lobby (2026-11-22)
+
+The plan's "toolkit window" before the game (`docs/v1/apps/hovercraft.md`), `apps/hover/lobby.c`.
+
+- **What it has:** the kind of game, the computer's craft's strength (mild, normal, keen: hv_auto's 0 to 2,
+  for the computer's craft of a game alone and of a game opened), the arena (the six and the user's own),
+  the player's name, and the network's open games as a list (name, kind, arena, free craft) that keeps
+  itself up to date: `hvlink_browse` sends FIND once a second and lists the OFFERs that come, each gone after
+  four seconds unheard. Play Alone, Open to the Network (an arena of the user's own falls back to the first:
+  the others have not got it), Join (`hvlink_join_offer`: that opener, not the first that answers), Quit.
+- **One program, the toolkit's window and then DOS-GL's:** the lobby runs `gui_run` to its choice and closes;
+  the game (`play`, the old main loop) makes DOS-GL's window and shuts it at Esc; the lobby comes back. DOS-GL
+  takes a program that is an app already (GLOS_WHY_ALREADY). The suite's flags (-demo, -until, -open,
+  -join) and HVCRAFT.CFG's `network` still play at once, with no lobby.
+- **Remembered** in HVCRAFT.CFG as before (the game, the arena, the name).
+- **Tests:** the hover case plays `tests/loopa/hover-lobby.txt` last on both desktops: the lobby with no
+  game on the network, Play Alone, the game, Esc back to the lobby, Quit.
+- **Not yet:** a game of the lobby's list played over two emulated PCs (the hoverpair case joins by J); the
+  strength and the name remembered across starts (the name is); names over the craft.

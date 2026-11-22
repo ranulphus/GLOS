@@ -8,7 +8,7 @@
 
 #define HV_PORT 18518                   /* the port games are looked for on ('H', 'V') */
 
-enum { HVL_ALONE, HVL_OPEN, HVL_LOOKING, HVL_JOINED };
+enum { HVL_ALONE, HVL_OPEN, HVL_LOOKING, HVL_JOINED, HVL_BROWSING };
 
 /* What a step did (bits). */
 #define HVL_SEATS  1                    /* the opener's: a PC joined, left or went quiet */
@@ -33,5 +33,21 @@ int hvlink_craft(void);                 /* the player's craft in it */
 int hvlink_seats(void);                 /* the opener's: joiners now */
 const struct hv_joiner *hvlink_joiner(void);
 const char *hvlink_host(void);          /* a joiner's: the name of the game it found */
+
+/* The lobby's: the network's open games, looked for (a broadcast every second) and listed as they answer; one
+   that has not answered for four seconds is gone from the list. hvlink_join_offer joins the one chosen
+   (hvlink_step then goes on as after hvlink_look). */
+struct hvl_offer {
+    unsigned addr, port;
+    char name[17];
+    int kind, arena, ncraft, free;
+    unsigned heard;                     /* glos_ticks() when it last answered */
+};
+#define HVL_OFFERS 16
+int hvlink_browse(void);                /* 0; -1 without a network */
+int hvlink_browse_step(void);           /* the list's length now (it changed: the caller draws it again) */
+const struct hvl_offer *hvlink_offer(int i);
+int hvlink_join_offer(int i, const char *name);         /* 0; -1 no such game */
+int hvlink_set_strength(int strength);  /* the opener's: the computer's craft's strength, 0 to 2 */
 
 #endif
