@@ -11532,6 +11532,8 @@ def native_case(profile, vcard, card, bits):
                        "build/apps/HELP.DAT=/TEST/HELP.DAT",                # (the user guide: Help, and any app's F1)
                        "build/apps/PCIIDS.DAT=/TEST/PCIIDS.DAT",            # (the Control Panel's names for PCI devices)
                        "build/apps/USBIDS.DAT=/TEST/USBIDS.DAT",            # (... and USB devices)
+                       "tests/gui/bat/MKGAME.BAT=/TEST/MKGAME.BAT",          # (gameswatch.txt's: a game copied in
+                       "tests/gui/bat/RMGAME.BAT=/TEST/RMGAME.BAT",          # and taken away)
                        "tests/gui/drives/C/GLOS/GLOS.CFG=/TEST/GLOS.CFG"])   # (the Control Panel's, beside GLOS.EXE)
 
 

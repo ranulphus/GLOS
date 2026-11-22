@@ -1,0 +1,17 @@
+#loopa-run-only (it starts a second program, a batch file, while the Games Library runs: the host runs one alone)
+# The Games Library's folders watched (apps/games; phase F): with the library open, a game's folder copied into
+# C:\GAMES (MKGAME.BAT) is found by a scan of its own, three seconds after the folder last changed; taken away
+# again (RMGAME.BAT), the game is marked gone by the next. (After games.txt on Loop A's one disc: its name sorts
+# after it, and the folder is gone again at its end.)
+run GAMES.EXE -library C:\\OUT\\GAMESW.CFG
+wait "Games"
+said GAMES scanned folders=1 games=5 added=5
+run MKGAME.BAT
+said GAMES folder changed C:\GAMES
+said GAMES scanned folders=1 games=6 added=1
+run RMGAME.BAT
+said GAMES folder changed C:\GAMES
+said GAMES scanned folders=1 games=6 added=0
+key alt+f4
+gone "Games"
+expect GAMES end

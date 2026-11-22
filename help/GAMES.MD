@@ -15,7 +15,8 @@ many well-known games by their files, and shows each with its title, year and ma
 | Alt+Enter | The game's properties |
 | Del | Take the game off the list (nothing on the disk is touched) |
 
-- **File, Add Folder** adds a folder of games to look through.
+- **File, Add Folder** adds a folder of games to look through. The folders are watched: a game copied into one while the
+  Games Library is open appears a few seconds later.
 - **Game, Set Up** runs the game's own set-up program, where it has one: choose Sound Blaster 16 there.
 - **Properties** gives a game a title of your own, a picture, and notes. Its lower part says how the game's
   program runs: in a window or on **the whole screen**, how much **memory** it is given (empty: all there

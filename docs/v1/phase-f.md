@@ -1529,8 +1529,11 @@ with libglos's lock round the C library.
 
 - **Tests:** the Games scripts as before (`games`, `games-profile`, `games-run`: the scan's line comes from
   the worker's end now), and the games suite.
-- **Not yet:** folders watched (a game copied in is found when the library is next opened, or by Look for
-  Games).
+- **Folders watched** (later the same day): the library's folders are watched (FS's WATCH, its first user):
+  a change in one is said (`GAMES folder changed C:\GAMES`) and a scan of its own runs three seconds after the
+  folder last changed, so that a game being copied in is whole when it is looked at (what changes inside a
+  game's own folder is not told, and needs no scan). `gameswatch` (Loop A: a batch file copies a game's
+  folder in, another takes it away): the game found (games=6 added=1), then marked gone.
 
 ## The Devices page: names for USB devices (2026-11-22)
 

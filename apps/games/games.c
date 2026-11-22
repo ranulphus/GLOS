@@ -419,12 +419,47 @@ static void play(int setup)
     show_page();
 }
 
-static void events(const struct glos_ev *ev)   /* the game ended: its time counted */
+/* (phase F) The library's folders watched (FS's WATCH): a game copied in or taken away is found by a scan of
+   its own, three seconds after its folder last changed (a game copied in takes a moment, and what changes inside
+   its own folder is not told). */
+static glos_handle watches[GAMELIB_FOLDERS];
+static unsigned changed_at;             /* glos_ticks() of the last change told (0: none waiting) */
+
+static void watch_folders(void)
+{
+    unsigned i;
+    for (i = 0; i < GAMELIB_FOLDERS; i++) {
+        if (watches[i])
+            glos_close(watches[i]);
+        watches[i] = i < lib.nfolders ? glos_fs_watch(lib.folder[i]) : 0;
+    }
+}
+
+static void watch_tick(void *arg)
+{
+    (void)arg;
+    if (changed_at && glos_ticks() - changed_at >= 3000) {
+        changed_at = 0;
+        scan();
+    }
+}
+
+static void events(const struct glos_ev *ev)   /* the game ended: its time counted; a folder changed */
 {
     const struct glos_ev_job *j = (const struct glos_ev_job *)ev;
     struct glos_job_status st;
     struct glos_time now;
     struct game *g;
+    if (ev->kind == GLOS_EV_FS) {
+        unsigned i;
+        for (i = 0; i < lib.nfolders; i++)
+            if (watches[i] && ev->handle == watches[i]) {
+                if (!changed_at)
+                    say("folder changed %s", lib.folder[i]);
+                changed_at = glos_ticks() | 1;
+            }
+        return;
+    }
     if (ev->kind != GLOS_EV_JOB || !job || ev->handle != job || j->state != GLOS_JS_DONE)
         return;
     memset(&st, 0, sizeof st), memset(&now, 0, sizeof now);
@@ -715,6 +750,7 @@ static void command(struct gui_window *w, int id)
         snprintf(p, sizeof p, "%s", "C:\\");
         if (gui_folder_dialog(win, GUI_T("Add a Folder of Games"), p, sizeof p) && gamelib_folder_add(&lib, p) == 0) {
             say("folder %s", p);
+            watch_folders();
             scan();
         }
         break;
@@ -910,6 +946,8 @@ int main(int argc, char **argv)
     gui_show(win, 1);
     gui_focus(list);
     scan();
+    watch_folders();
+    gui_idle(watch_tick, NULL, 500);
     if (norder)
         gui_vlist_set(list, 0);
     show_page();
