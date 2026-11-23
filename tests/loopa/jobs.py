@@ -8499,7 +8499,7 @@ class GuiDriver:
         for w in re.finditer(r'^window (\d+) (\w+)(?: (\w+))? at (-?\d+),(-?\d+) (\d+)x(\d+) "(.*)"$', text, re.M):
             kind = w.group(3) or ""
             fx, fy = int(w.group(4)), int(w.group(5))
-            framed = kind not in ("popup", "bare", "bar", "desktop")
+            framed = kind not in ("popup", "bare", "bar", "desktop", "full")   # (full: full screen, no frame drawn)
             d["win"].append({"id": int(w.group(1)), "shown": w.group(2) == "shown", "kind": kind, "title": w.group(8),
                              "x": fx + (1 if framed else 0), "y": fy + (20 if framed else 0),
                              "w": int(w.group(6)), "h": int(w.group(7))})
@@ -8709,6 +8709,8 @@ class GuiDriver:
                 want = re.sub(r"\\(x[0-9a-fA-F]{2}|.)", lambda m: chr(int(m.group(1)[1:], 16)) if m.group(1)[0] == "x"
                               else {"r": "\r", "n": "\n", "t": "\t"}.get(m.group(1), m.group(1)), rest).encode("latin-1")
                 path = args[0]
+                if path.upper().startswith("%GLOS%"):   # (GLOS's own folder, GLOS.EXE's: C:\TEST here, where the
+                    path = "C:\\TEST" + path[6:]       # suite puts it; C:\GLOS on the host's player)
                 dst = os.path.join(self.out, "file-%d" % n)
                 got = None
                 for _ in range(10):             # (the app writes it when it gets to it)

@@ -482,7 +482,8 @@ u32 desk_stat(char *buf, u32 max)
         n += (u32)ksnprintf(buf + n, max - n, "window %u %s%s at %d,%d %dx%d \"%s\"\n", w->id,
                             w->flags & WF_SHOWN ? "shown" : "hidden", w == m->bar ? " bar" : w->flags & WF_POPUP ? " popup"
                             : w->flags & WF_DESKTOP ? " desktop"
-                            : !(w->flags & WF_FRAME) ? " bare" : w->flags & WF_HUNG ? " hung" : w->owner ? " app" : "", w->frame.x,
+                            : !(w->flags & WF_FRAME) ? " bare" : w->flags & WF_HUNG ? " hung" : w->flags & WF_FULL ? " full"
+                            : w->owner ? " app" : "", w->frame.x,
                             w->frame.y, w->store.w, w->store.h, w->title);
     if (n < max)
         n += deskshell_list(m, buf + n, max - n);       /* (and the tray's icons: phase D) */

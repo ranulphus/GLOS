@@ -3,6 +3,7 @@
 # gone into as a folder; a file copied from C:\INF pasted into it; a folder made in it; OLD.TXT renamed; README.TXT
 # deleted; then its files copied out of it again, to the byte. Each change is written into a copy of the image
 # that takes its place when done.
+# (The new folder's and the pasted file's times are the clock's: left out of the pictures.)
 run FILES.EXE -browse C:\IMG
 wait "C:\IMG - Files"
 key home
@@ -32,13 +33,13 @@ wait "Rename"
 key ctrl+a
 type NEW.TXT\n
 said FILES renamed NEW.TXT
-shot changed "C:\IMG\WORK.IMG - Files"
+shot changed "C:\IMG\WORK.IMG - Files" 370 106 170 34
 key end
 key del
 wait "Delete"
 key enter
 said FILES deleted C:\IMG\WORK.IMG\README.TXT
-shot after "C:\IMG\WORK.IMG - Files"
+shot after "C:\IMG\WORK.IMG - Files" 370 106 170 34
 key end
 key ctrl+c
 key ctrl+l

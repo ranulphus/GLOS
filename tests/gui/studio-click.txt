@@ -6,7 +6,7 @@
 run STUDIO.EXE -demo
 wait "MIDI Studio"
 key ctrl+o
-wait "Open"
+wait "Open Song"
 type C:\\SND\\WALTZ.MID\n
 said STUDIO opened WALTZ.MID tracks=1 notes=3
 key f7

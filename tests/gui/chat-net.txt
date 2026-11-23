@@ -14,7 +14,7 @@ type second
 key enter
 gone "Chat Settings"
 said CHAT settings irc.example.net 6697 tls nick=second join= again=1 logs=0 quiet=0 plain=0 tell=1
-file C:\\GLOS\\CHAT.CFG [Second]\r\nserver irc.example.net\r\nport 6697\r\ntls 1\r\nnick second\r\nalt \r\nreal \r\naccount \r\njoin \r\nstart 0\r\nagain 1\r\nlogs 0\r\nquiet 0\r\nplain 0\r\ntell 1\r\n
+file %GLOS%\\CHAT.CFG [Second]\r\nserver irc.example.net\r\nport 6697\r\ntls 1\r\nnick second\r\nalt \r\nreal \r\naccount \r\njoin \r\nstart 0\r\nagain 1\r\nlogs 0\r\nquiet 0\r\nplain 0\r\ntell 1\r\n
 key alt+c
 key n
 wait "Another Network"
@@ -33,6 +33,6 @@ key alt+n
 type third
 key enter
 gone "Chat Settings"
-file C:\\GLOS\\CHAT.CFG [Second]\r\nserver irc.example.net\r\nport 6697\r\ntls 1\r\nnick second\r\nalt \r\nreal \r\naccount \r\njoin \r\nstart 0\r\nagain 1\r\nlogs 0\r\nquiet 0\r\nplain 0\r\ntell 1\r\n[Third]\r\nserver irc.example.org\r\nport 6697\r\ntls 1\r\nnick third\r\nalt \r\nreal \r\naccount \r\njoin \r\nstart 0\r\nagain 1\r\nlogs 0\r\nquiet 0\r\nplain 0\r\ntell 1\r\n
+file %GLOS%\\CHAT.CFG [Second]\r\nserver irc.example.net\r\nport 6697\r\ntls 1\r\nnick second\r\nalt \r\nreal \r\naccount \r\njoin \r\nstart 0\r\nagain 1\r\nlogs 0\r\nquiet 0\r\nplain 0\r\ntell 1\r\n[Third]\r\nserver irc.example.org\r\nport 6697\r\ntls 1\r\nnick third\r\nalt \r\nreal \r\naccount \r\njoin \r\nstart 0\r\nagain 1\r\nlogs 0\r\nquiet 0\r\nplain 0\r\ntell 1\r\n
 key alt+f4
 gone "Chat - Third"

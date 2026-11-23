@@ -12,7 +12,8 @@ key enter
 key f11
 said SKI full on 640x480
 pause 300
-shot full "Fall Line"
+# (The pointer, parked in the screen's bottom left corner, is over the game there: left out.)
+shot full "Fall Line" 0 472 8 8
 key f11
 said SKI full off 640x480
 key alt+f4

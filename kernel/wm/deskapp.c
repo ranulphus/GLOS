@@ -410,7 +410,10 @@ int desk_win_state(struct app *a, u32 id, int state, int focus)
         else if (focus && !(w->flags & WF_EMBED))
             wm_set_focus(m, w);
     }
-    let_go(a);                                  /* (pixels of its old size) */
+    /* The pixels of its old size are not let go of here: the app learns of its new size by an event, and may
+       draw into the old ones until then (Fall Line's View, Full Screen, 2026-11-23: a page fault in Loop A, the
+       old pixels unmapped before its next frame). They go when it asks where its pixels are (desk_win_pixels),
+       or makes or closes a window, or ends. */
     desk_unlock();
     return r;
 }

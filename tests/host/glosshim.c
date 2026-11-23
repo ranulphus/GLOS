@@ -2162,6 +2162,12 @@ static int step(void)
                 }
                 want[n++] = c;
             }
+            if (!strncmp(a, "%GLOS%", 6)) {      /* (GLOS's own folder: glos_home()'s, C:\GLOS here; Loop A's
+                                                   native suite has it where GLOS.EXE is, C:\TEST) */
+                char rest[sizeof a];
+                snprintf(rest, sizeof rest, "%s", a + 6);
+                snprintf(a, sizeof a, "%s%s", glos_home(), rest);
+            }
             snprintf(got, sizeof got, "%s/%c%s", root, a[0], a + 2);
             for (q = got + strlen(root); *q; q++)
                 if (*q == '\\')

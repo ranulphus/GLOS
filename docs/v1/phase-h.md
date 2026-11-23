@@ -107,9 +107,8 @@ were byte-identical, Glide conformance and DOS-GL's 35/35 were as before.
 
 It is probed after the Rhine and before the NE2000.
 
-- **Tests:** builds. Loop A's NET_CASES gain bf6 and 486dx2 with `pcnetpci`. Loop A's run.py takes the card
-  only with RetroGPU branch `glos-pcnet` (one line in `tools/loopa/hostio.py`'s NICS), whose merge waits for
-  the owner's OK; until then the cases run with `RETROGPU=~/wt-rgpu-pcnet`.
+- **Tests:** Loop A's NET_CASES gain bf6 and 486dx2 with `pcnetpci` (one line in RetroGPU's
+  `tools/loopa/hostio.py` NICS: main 89b60a1, merged with the owner's OK); gate 47 passed them.
 
 ## Tier 2: DEC's Tulip (2026-11-23)
 
@@ -127,9 +126,9 @@ The Tulip's clones (Macronix, Lite-On, ADMtek, Davicom) have other IDs, ROMs and
 is probed after the PCnet and before the NE2000.
 
 - **Tests:** Loop A NET_CASES `bf6` with 86Box's `dec_21140_tulip_migrate` (its 21140) and `dec_21143_tulip`:
-  both passed (DHCP, echo, mDNS) on the first runs. run.py takes the cards only with RetroGPU branch
-  `glos-tulip` (two lines in hostio.py's NICS), whose merge waits for the owner's OK; the cases are left out
-  until then.
+  both passed (DHCP, echo, mDNS) on the first runs. run.py takes the cards from RetroGPU main 7127504 (two
+  lines in hostio.py's NICS, merged with the owner's OK the same evening); with an older RetroGPU the cases are
+  left out.
 
 ## Still to come in tier 1
 

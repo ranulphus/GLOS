@@ -2055,3 +2055,25 @@ takes the notes of the bars chosen away (each one step of the history). F4 again
   (kept in order of time) and `song_event_remove` (song_test). `studio-lane` (host and the emulated desktops):
   velocities drawn level over three notes, a volume ramp of nine events, a bend, Undo three times, Redo.
 - **Not yet:** a lane's events chosen, moved or deleted one by one; other controllers by number.
+
+## Gate 47's native faults (2026-11-23 evening)
+
+Gate 47 (phase-h 88ca356, the first gate with the day's leftovers) failed only its native suite: seven of the new
+scripts, on every card. On the host's player, `wait` passes even when no window comes and GLOS's folder is
+C:\GLOS, so none of this showed there.
+
+- **studio-click, studio-arrange, studio-lane:** they waited for "Open"; MIDI Studio's dialog is "Open Song".
+- **chat-net, chat-again:** their `file` checks named C:\GLOS. In the native suite GLOS.EXE is in C:\TEST.
+  A `file` path may now begin `%GLOS%`, GLOS's own folder on either player (C:\GLOS on the host's, C:\TEST in
+  Loop A's native suite).
+- **files-img:** the new folder's and the pasted file's times are the clock's, so they are masked out of its two
+  pictures.
+- **ski-full, a fault in GLOS:** Fall Line crashed (a page fault in memcpy) on View, Full Screen.
+  `desk_win_state` let go of the window's old pixels (unmapped and freed) at the end of the very call that
+  resized the window. The toolkit learns of the new size by an event, and drew into the old pixels first. The
+  old pixels now go when the app next asks where its pixels are (or makes or closes a window, or ends). The
+  toolkit's own resizes ask at once, so they were never hit; Fall Line is the first app to switch an existing
+  window to full screen.
+- **And its picture:** `glos desk` listed a full-screen window as a framed app's, and the native player cropped
+  its shot 1 and 20 pixels in. It is now listed `full`, with no frame.
+
