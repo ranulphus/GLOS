@@ -892,6 +892,8 @@ static int file_io(struct dos_m *m, struct dos_regs86 *r, unsigned ah)
     return ok(r);
 }
 
+static int serial(struct dos_m *m, struct dos_regs86 *r);
+
 static int ioctl(struct dos_m *m, struct dos_regs86 *r, unsigned al)
 {
     unsigned long en;
@@ -926,6 +928,12 @@ static int ioctl(struct dos_m *m, struct dos_regs86 *r, unsigned al)
         return ok(r);
     case 0x10:
     case 0x11:                                  /* (generic requests: none supported) */
+        return err(m, r, 0x01);
+    case 0x0D:                                  /* a drive's generic requests: 66h alone, the volume's serial
+                                                   number, label and file system at DS:DX (BL the drive), which is
+                                                   6900h's answer; category 08h, or FAT32's 48h */
+        if ((r->cx & 0xFF) == 0x66 && ((r->cx >> 8) == 0x08 || (r->cx >> 8) == 0x48))
+            return serial(m, r);
         return err(m, r, 0x01);
     case 0x08:
     case 0x09:

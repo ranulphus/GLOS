@@ -10,6 +10,10 @@ GLOS reads such a disk by the BIOS's calls (it has no USB storage driver yet) an
 to the BIOS while it does, so its own USB keyboards, mice and pads are off; a USB keyboard works as far as the
 BIOS makes it a PS/2 one. The PC's BIOS must be able to start from a USB disk.
 
+To put GLOS on the PC's hard disk from the stick, at the PC or over SSH: DISK (the disks: the stick is the one
+GLOS runs from), then DISK n INSTALL /Y (with /ERASE for a disk that has partitions: everything on it is lost),
+the stick out, REBOOT.
+
   tools/ndos/stick.py build/usb/glos-usb.img --keys build/floppy/keys --name glos-usb [--mb 128] [--quiet]
   sudo dd if=build/usb/glos-usb.img of=/dev/sdX bs=1M conv=fsync      (EVERYTHING ON THE STICK IS LOST)
 
@@ -50,9 +54,18 @@ def main():
         r = subprocess.run(["sh", os.path.join(ROOT, "tools/ndos/native-image.sh"), a.out] + args, env=env)
         if r.returncode != 0:
             sys.exit("stick: the image couldn't be made")
-    with open(a.out, "r+b") as f:               # (the MBR's disk signature: each stick its own)
-        f.seek(440)
+    with open(a.out, "r+b") as f:               # (the MBR's disk signature and the volume's serial number: each
+        f.seek(440)                             # stick its own; DISK knows the disk GLOS runs from by the serial)
         f.write(os.urandom(4))
+        f.seek(446 + 8)
+        start = int.from_bytes(f.read(4), "little")
+        f.seek(start * 512)
+        boot = f.read(512)
+        at = 39 if boot[54:57] == b"FAT" else 67        # (FAT12/16's extended boot record, or FAT32's)
+        serial = os.urandom(4)
+        for copy in sorted({0, int.from_bytes(boot[50:52], "little") if at == 67 else 0}):
+            f.seek((start + copy) * 512 + at)
+            f.write(serial)
     total = sum(os.path.getsize(os.path.join(ROOT, src)) for src, _ in files)
     print("%s: %d MB, %d files of GLOS (%.1f MB), the PC's name %s" % (a.out, a.mb, len(files), total / 1e6, a.name))
     print("then: sudo dd if=%s of=/dev/sdX bs=1M conv=fsync   (everything on the stick is lost)" % a.out)

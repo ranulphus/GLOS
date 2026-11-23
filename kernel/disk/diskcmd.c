@@ -9,8 +9,12 @@
  *                                    from, of the FAT kind its size asks for; GLOS's boot record
  *   DISK n FORMAT [p] [/V:label] /Y  partition p (1 unless said; one of the table's four) made an empty FAT
  *                                    volume
- *   DISK n BOOT [p] /Y               the disk's boot record and partition p's written: the PC starts FreeDOS's
- *                                    KERNEL.SYS from p (the files themselves are COPY's to put there)
+ *   DISK n BOOT [p] [/GLOS] /Y       the disk's boot record and partition p's written: the PC starts FreeDOS's
+ *                                    KERNEL.SYS from p (the files themselves are COPY's to put there); /GLOS: it
+ *                                    starts GLOS itself, GLOSLDR.SYS, with no DOS (docs/v1/native-dos.md)
+ *   DISK n INSTALL [/ERASE] /Y       GLOS put on disk n to start from it with no DOS: NEW, FORMAT and BOOT /GLOS,
+ *                                    then GLOSLDR.SYS and GLOS's folder copied there from the disk GLOS runs
+ *                                    from (a USB stick's start, for one). A disk with partitions: only with /ERASE
  *
  * The rules of whatever writes a disk (the owner, 2026-11-12):
  *   - It says what would be lost, and does nothing without /Y: the command as typed is the question, the same
@@ -38,6 +42,8 @@
 #include "timer.h"
 #include "vm.h"
 #include "disk.h"
+#include "../fs/fsv.h"
+#include "../ndos/dtime.h"
 
 #define OUT_MAX 6144
 #define VOLS    20                              /* a disk's partitions shown: the table's four, and logical drives */
@@ -55,6 +61,7 @@ struct diskcmd {
     u8 own_unknown;                             /* ... and one of them on a hard disk has none DOS could say */
     u8 own_floppy;                              /* bit 0: GLOS or DOS runs from A:; bit 1: from B: */
     u8 dd;                                      /* the command is DD */
+    u8 mute;                                    /* INSTALL's steps: only their errors are said ("DISK: ...") */
     u8 to_conn;                                 /* DD's output is the connection: what is said goes apart (errors) */
     u8 *data;                                   /* ... its bytes, a ring the reader empties */
     volatile u32 dh;                            /* (the worker's) */
@@ -86,7 +93,7 @@ static void say(struct diskcmd *c, const char *fmt, ...)
     __builtin_va_list ap;
     u32 room = OUT_MAX - c->head;
     int n;
-    if (room < 2)
+    if (room < 2 || (c->mute && strncmp(fmt, "DISK:", 5)))
         return;
     __builtin_va_start(ap, fmt);
     n = kvsnprintf(c->out + c->head, room, fmt, ap);
@@ -566,7 +573,7 @@ static int do_format(struct diskcmd *c, u32 n, u32 p, const char *label, int yes
     return 0;
 }
 
-static int do_boot(struct diskcmd *c, u32 n, u32 p, int yes)
+static int do_boot(struct diskcmd *c, u32 n, u32 p, int yes, int native)
 {
     struct vol *v;
     u8 s[512], m[512];
@@ -586,8 +593,9 @@ static int do_boot(struct diskcmd *c, u32 n, u32 p, int yes)
         return 1;
     }
     say(c, "Disk %u: its boot record and partition %u's written anew. The PC then starts from partition %u, which\n"
-        "starts FreeDOS (KERNEL.SYS in its first folder). No file is touched; another system's start-up code or a\n"
-        "boot manager there %s lost.\n", n, p, p, yes ? "is" : "would be");
+        "starts %s in its first folder). No file is touched; another system's start-up code or a\n"
+        "boot manager there %s lost.\n", n, p, p, native ? "GLOS with no DOS (GLOSLDR.SYS" : "FreeDOS (KERNEL.SYS",
+        yes ? "is" : "would be");
     if (!yes) {
         say(c, "Nothing was done. To do it: the same command with /Y\n");
         return 2;
@@ -596,6 +604,15 @@ static int do_boot(struct diskcmd *c, u32 n, u32 p, int yes)
         return bios_failed(c, e, "the read");
     copy = v->fat == 32 ? rd16(s + 50) : 0;     /* (FAT32's copy of its first sector: the sixth, as a rule) */
     if (fat_boot(s, v->fat) != 0) {
+        say(c, "DISK: no boot code for this volume\n");
+        return 1;
+    }
+    for (i = 0; native && i + 11 <= 510; i++)   /* (the file the boot code loads, by its name there) */
+        if (!memcmp(s + i, "KERNEL  SYS", 11)) {
+            memcpy(s + i, "GLOSLDR SYS", 11);
+            break;
+        }
+    if (native && i + 11 > 510) {
         say(c, "DISK: no boot code for this volume\n");
         return 1;
     }
@@ -608,8 +625,11 @@ static int do_boot(struct diskcmd *c, u32 n, u32 p, int yes)
         || (copy && copy < rd16(s + 14) && (e = bdisk_write(d, v->start + copy, 1, s)) != 0)
         || (e = bdisk_write(d, 0, 1, m)) != 0)
         return bios_failed(c, e, "the write");
-    kprintf("GLOS-DISK boot disk=%02x part=%u fat=%u\n", d, p, v->fat);
-    say(c, "Done. The volume needs FreeDOS's KERNEL.SYS and COMMAND.COM in its first folder (COPY, once DOS sees it).\n");
+    kprintf("GLOS-DISK boot disk=%02x part=%u fat=%u%s\n", d, p, v->fat, native ? " native" : "");
+    if (native)
+        say(c, "Done. The volume needs GLOSLDR.SYS in its first folder and GLOS's folder (DISK %u INSTALL puts them there).\n", n);
+    else
+        say(c, "Done. The volume needs FreeDOS's KERNEL.SYS and COMMAND.COM in its first folder (COPY, once DOS sees it).\n");
     return 0;
 }
 
@@ -698,6 +718,307 @@ static void f_close(u16 h)
     dq(&q, 0x3E00, h, 0, 0);
     (void)dos_call(&q);
 }
+
+/* ---- DISK n INSTALL: GLOS put on a disk, to start from it with no DOS
+ *
+ * NEW, FORMAT (the volume named GLOS) and BOOT /GLOS, their own checks and refusals kept; then the files, from
+ * the disk GLOS runs from: GLOSLDR.SYS (the root folder's, as a native start has it, else one beside GLOS's files)
+ * to the new volume's root, and the folder GLOS's files are in (GLOS.CFG's), whole, to the same path there (the
+ * loader's command line names it). The files are read through the DOS server, as DD reads a file, and written
+ * by GLOS's own FAT code (kernel/fs) over the BIOS's sectors: the new volume needs no drive letter, and no
+ * restart in between. Dates, times and attributes are the sources'. */
+#define I_PATH 0                                /* the transfer buffer: a path, */
+#define I_DTA  256                              /* a find's DTA */
+#define I_DEPTH 6
+
+struct inst {
+    struct diskcmd *c;
+    u8 drive;
+    u32 base;                                   /* the volume's start */
+    int bios;                                   /* a BIOS call's error, kept */
+    u8 *buf;
+    u32 chunk, files, kb, bytes;
+};
+static struct fsv_vol ifs;                      /* (one DISK at a time) */
+
+static int i_read(void *ctx, unsigned long lba, unsigned char *buf, unsigned count)
+{
+    struct inst *I = ctx;
+    u32 run = bdisk_run();
+    while (count && !I->bios) {
+        u32 k = count < run ? count : run;
+        I->bios = bdisk_read(I->drive, I->base + (u32)lba, k, buf);
+        lba += k, buf += k * 512, count -= k;
+    }
+    return I->bios;
+}
+
+static int i_write(void *ctx, unsigned long lba, const unsigned char *buf, unsigned count)
+{
+    struct inst *I = ctx;
+    u32 run = bdisk_run();
+    while (count && !I->bios) {
+        u32 k = count < run ? count : run;
+        I->bios = bdisk_write(I->drive, I->base + (u32)lba, k, buf);
+        lba += k, buf += k * 512, count -= k;
+    }
+    return I->bios;
+}
+
+static unsigned long i_now(void *ctx)
+{
+    struct dos_date d;
+    struct dos_time t;
+    u32 local = clock_local();
+    (void)ctx;
+    if (local < 315532800u)
+        return 0;
+    dos_from_seconds(local - 315532800u, &d, &t);
+    return (unsigned long)dos_pack_date(&d) << 16 | dos_pack_time(&t);
+}
+
+/* A folder's next entry into the DTA (first: of the pattern): 0; 1: no more; -1: the DOS server can't. */
+static int i_find(const char *pattern, u8 *dta, int first)
+{
+    struct dos_req q;
+    char p[128];
+    memset(&q, 0, sizeof q);
+    q.n = 2;
+    q.r[0].ax = 0x1A00, q.r[0].dx = I_DTA, q.r[0].ds = q.r[0].es = DOS_XFER;
+    q.r[1].ax = first ? 0x4E00 : 0x4F00, q.r[1].cx = 0x37, q.r[1].dx = I_PATH, q.r[1].ds = q.r[1].es = DOS_XFER;
+    if (first) {
+        memset(p, 0, sizeof p);
+        strcpy(p, pattern);
+        q.in = (const u8 *)p, q.in_len = sizeof p, q.in_at = I_PATH;
+    } else {
+        q.in = dta, q.in_len = 43, q.in_at = I_DTA;
+    }
+    q.out = dta, q.out_len = 43, q.out_at = I_DTA;
+    if (dos_call(&q) != 0)
+        return -1;
+    return q.error || q.ran < 2 || (q.r[1].flags & 1) ? 1 : 0;
+}
+
+/* One file: 0, or 1 with the reason said. */
+static int i_file(struct inst *I, const char *src, const char *dst, const u8 *dta, u8 attr)
+{
+    struct fsv_file f;
+    u16 h;
+    u32 got = 0;
+    int e;
+    if (f_open(src, 0, &h) != 0) {
+        say(I->c, "DISK: %s can't be opened\n", src);
+        return 1;
+    }
+    if ((e = fsv_create(&ifs, dst, 0x20, 1, FSV_WRITE, FSV_DENY_NONE, &f)) != 0) {
+        f_close(h);
+        say(I->c, "DISK: %s can't be made on the new volume (%d)\n", dst, e);
+        return 1;
+    }
+    for (;;) {
+        if (f_read(h, I->buf, I->chunk, &got) != 0) {
+            e = 1;
+            say(I->c, "DISK: reading %s failed\n", src);
+            break;
+        }
+        if (got && fsv_write(&f, I->buf, got) != (long)got) {
+            e = 1;
+            if (I->bios)
+                bios_failed(I->c, I->bios, "the copy");
+            else
+                say(I->c, "DISK: the new volume is full at %s\n", dst);
+            break;
+        }
+        I->bytes += got;
+        I->kb += I->bytes >> 10, I->bytes &= 1023;
+        if (got < I->chunk)
+            break;
+    }
+    f_close(h);
+    if (fsv_close(&f) != 0 && !e) {
+        e = 1;
+        bios_failed(I->c, I->bios, "the copy");
+    }
+    if (!e && dta)
+        fsv_settime(&ifs, dst, (unsigned short)rd16(dta + 0x18), (unsigned short)rd16(dta + 0x16));
+    if (!e && attr != 0x20)
+        fsv_setattr(&ifs, dst, attr);
+    I->files += !e;
+    return e;
+}
+
+/* A folder's files and folders, the folders' own after: 0, or 1 with the reason said. */
+static int i_folder(struct inst *I, const char *src, const char *dst, u32 depth)
+{
+    u8 *dta = kmalloc(43 + 2 * 128);
+    char *s = (char *)dta + 43, *d = s + 128;
+    int r = 0, first = 1, e = 0;
+    if (!dta) {
+        say(I->c, "DISK: no memory\n");
+        return 1;
+    }
+    ksnprintf(s, 128, "%s\\*.*", src);
+    while (!e && (r = i_find(s, dta, first)) == 0) {
+        const char *name = (const char *)dta + 0x1E;
+        u8 attr = dta[0x15];
+        first = 0;
+        dta[0x1E + 12] = 0;
+        if (name[0] == '.' || (attr & 0x08))
+            continue;
+        if (strlen(src) + strlen(name) + 2 > 128 || strlen(dst) + strlen(name) + 2 > 128 || depth >= I_DEPTH) {
+            say(I->c, "DISK: %s\\%s lies too deep to copy\n", src, name);
+            e = 1;
+            break;
+        }
+        ksnprintf(s, 128, "%s\\%s", src, name);
+        ksnprintf(d, 128, "%s\\%s", dst, name);
+        if (attr & 0x10) {
+            if (fsv_mkdir(&ifs, d) != 0) {
+                say(I->c, "DISK: the folder %s can't be made on the new volume\n", d);
+                e = 1;
+            } else {
+                e = i_folder(I, s, d, depth + 1);
+                if (!e)                         /* (the folder's own date and time, as its files') */
+                    fsv_settime(&ifs, d, (unsigned short)rd16(dta + 0x18), (unsigned short)rd16(dta + 0x16));
+            }
+        } else {
+            e = i_file(I, s, d, dta, attr & 0x27);
+        }
+    }
+    if (!e && r < 0) {
+        say(I->c, "DISK: %s can't be listed\n", src);
+        e = 1;
+    }
+    kfree(dta);
+    return e;
+}
+
+static int do_install(struct diskcmd *c, u32 n, int erase, int yes)
+{
+    struct inst I;
+    struct vol *v;
+    char dir[80], ldr[96], part[80];
+    u32 i, junk = 0, t0;
+    u16 h;
+    int e;
+    if ((e = target(c, n)) != 0)
+        return e;
+    if (own_disk(c, &W)) {
+        say(c, "DISK: disk %u is the one GLOS runs from: GLOS is not installed over itself.\n", n);
+        return 1;
+    }
+    for (i = 0; i < 512; i++)
+        junk |= W.first[i];
+    /* The source: the folder GLOS.CFG is in, and a GLOSLDR.SYS. */
+    memset(dir, 0, sizeof dir);
+    strncpy(dir, vm.bi->cfg_path, sizeof dir - 1);
+    if (dir[1] != ':' || dir[2] != '\\' || !strrchr(dir + 3, '\\')) {
+        say(c, "DISK: GLOS's own folder isn't known (%s)\n", vm.bi->cfg_path);
+        return 1;
+    }
+    *strrchr(dir, '\\') = 0;
+    dos_hold();
+    ksnprintf(ldr, sizeof ldr, "%c:\\GLOSLDR.SYS", dir[0]);
+    if (f_open(ldr, 0, &h) != 0) {
+        ksnprintf(ldr, sizeof ldr, "%s\\GLOSLDR.SYS", dir);
+        if (f_open(ldr, 0, &h) != 0) {
+            dos_release();
+            say(c, "DISK: no GLOSLDR.SYS in %c:\\ or in %s: this GLOS has no loader of its own to install.\n"
+                "A USB stick made by `make usb-stick` has one.\n", dir[0], dir);
+            return 1;
+        }
+    }
+    f_close(h);
+    say(c, "Disk %u (%u MB): GLOS put on it, to start from it with no DOS. A new partition table with one partition\n"
+        "over all of the disk, an empty volume named GLOS, GLOS's boot records; then %s and\n%s copied there.\n",
+        n, mb(W.g.sectors), ldr, dir);
+    if (W.nv)
+        say(c, "Its %u partition%s and EVERYTHING ON THE DISK %s LOST.\n", W.nv, W.nv == 1 ? "" : "s",
+            yes && erase ? "ARE" : "WOULD BE");
+    else if (W.table < 0 && junk)
+        say(c, "It has no partition table, but its first sector isn't empty: whatever is on the disk %s lost.\n",
+            yes ? "is" : "would be");
+    if (W.nv && !erase) {
+        dos_release();
+        say(c, "Nothing was done. A disk that has partitions is taken only with /ERASE: DISK %u INSTALL /ERASE /Y\n", n);
+        return 2;
+    }
+    if (!yes) {
+        dos_release();
+        say(c, "Nothing was done. To do it: DISK %u INSTALL%s /Y\n", n, W.nv ? " /ERASE" : "");
+        return 2;
+    }
+    t0 = timer_ticks();
+    c->mute = 1;
+    e = do_new(c, n, 1);
+    if (!e)
+        e = do_format(c, n, 1, "GLOS", 1);
+    if (!e)
+        e = do_boot(c, n, 1, 1, 1);
+    if (!e)
+        e = target(c, n);
+    v = e ? 0 : part_of(c, n, 1);
+    c->mute = 0;
+    if (e || !v) {
+        dos_release();
+        if (!e)
+            say(c, "DISK: the new partition isn't there\n");
+        return e ? e : 1;
+    }
+    say(c, "The disk is laid out and formatted (%s, %u MB). Copying GLOS's files...\n", type_name(v->type), mb(v->sectors));
+    memset(&I, 0, sizeof I);
+    I.c = c, I.drive = (u8)(0x7F + n), I.base = v->start;
+    I.chunk = dos_xfer_size() & ~511u;
+    if (I.chunk > 32768)
+        I.chunk = 32768;
+    if (!I.chunk || !(I.buf = kmalloc(I.chunk))) {
+        dos_release();
+        say(c, "DISK: no memory\n");
+        return 1;
+    }
+    if (fsv_mount(&ifs, i_read, i_write, i_now, &I, 437, 0) != 0) {
+        kfree(I.buf);
+        dos_release();
+        say(c, "DISK: the new volume can't be read back\n");
+        return 1;
+    }
+    {                                           /* (the loader, with its own date and time) */
+        u8 dta[43];
+        e = i_file(&I, ldr, "\\GLOSLDR.SYS", i_find(ldr, dta, 1) == 0 ? dta : 0, 0x27);
+    }
+    for (i = 3; !e && dir[i - 1]; i++)          /* GLOS's folder's path, a folder at a time */
+        if (dir[i] == '\\' || !dir[i]) {
+            memcpy(part, dir + 2, i - 2);
+            part[i - 2] = 0;
+            if (fsv_mkdir(&ifs, part) != 0) {
+                say(c, "DISK: the folder %s can't be made on the new volume\n", part);
+                e = 1;
+            }
+        }
+    if (!e)
+        e = i_folder(&I, dir, dir + 2, 0);
+    if (!e) {
+        u8 dta[43];
+        if (i_find(dir, dta, 1) == 0)
+            fsv_settime(&ifs, dir + 2, (unsigned short)rd16(dta + 0x18), (unsigned short)rd16(dta + 0x16));
+    }
+    if (fsv_flush(&ifs) != 0 && !e) {
+        e = 1;
+        bios_failed(c, I.bios, "the copy");
+    }
+    kfree(I.buf);
+    dos_release();
+    kprintf("GLOS-DISK install disk=%02x files=%u kb=%u seconds=%u ok=%d\n", I.drive, I.files, I.kb,
+            (timer_ticks() - t0) / 1024, !e);
+    if (e) {
+        say(c, "The disk is left unfinished: it does not start GLOS. The same command again starts afresh.\n");
+        return 1;
+    }
+    say(c, "Done: %u files, %u KB, in %u seconds. Take out the disk GLOS runs from now and restart the PC\n"
+        "(REBOOT): it starts GLOS from disk %u, as its drive C:.\n", I.files, I.kb, (timer_ticks() - t0) / 1024, n);
+    return 0;
+}
+
 
 /* Bytes for the connection: into the ring, waiting for the reader while it is full. -1: the reader has gone. */
 static int conn_put(struct diskcmd *c, const u8 *d, u32 n)
@@ -978,7 +1299,9 @@ static const char usage[] =
     "DISK n                            disk n's alone (1: the first)\n"
     "DISK n NEW /Y                     a new table: one partition over all of the disk\n"
     "DISK n FORMAT [p] [/V:label] /Y   partition p (1 unless said) made an empty FAT volume\n"
-    "DISK n BOOT [p] /Y                boot records: the PC starts FreeDOS from partition p\n"
+    "DISK n BOOT [p] [/GLOS] /Y        boot records: the PC starts FreeDOS from partition p\n"
+    "                                  (/GLOS: GLOS itself, with no DOS)\n"
+    "DISK n INSTALL [/ERASE] /Y        GLOS put on disk n, to start from it with no DOS\n"
     "Without /Y a command says what would be lost and does nothing. The disk GLOS or DOS runs\n"
     "from is never written.\n";
 
@@ -1000,7 +1323,7 @@ static int run(struct diskcmd *c)
 {
     char *w[8], *label = 0, *verb;
     u32 nw = 0, i, n = 0, p = 1;
-    int yes = 0;
+    int yes = 0, native = 0, erase = 0;
     char *a = c->args;
     while (*a) {                                /* words, in capitals; the switches taken out */
         while (*a == ' ' || *a == '\t')
@@ -1023,6 +1346,10 @@ static int run(struct diskcmd *c)
         }
         if (!strcmp(w[i], "/Y"))
             yes = 1;
+        else if (!strcmp(w[i], "/GLOS"))
+            native = 1;
+        else if (!strcmp(w[i], "/ERASE"))
+            erase = 1;
         else if (!strncmp(w[i], "/V:", 3))
             label = w[i] + 3;
         else {
@@ -1046,8 +1373,10 @@ static int run(struct diskcmd *c)
     verb = w[1];
     if (!strcmp(verb, "NEW") && nw == 2)
         return do_new(c, n, yes);
+    if (!strcmp(verb, "INSTALL") && nw == 2)
+        return do_install(c, n, erase, yes);
     if ((!strcmp(verb, "FORMAT") || !strcmp(verb, "BOOT")) && (nw == 2 || (nw == 3 && number(w[2], &p) == 0)))
-        return verb[0] == 'F' ? do_format(c, n, p, label, yes) : do_boot(c, n, p, yes);
+        return verb[0] == 'F' ? do_format(c, n, p, label, yes) : do_boot(c, n, p, yes, native);
     say(c, "%s", usage);
     return 2;
 }

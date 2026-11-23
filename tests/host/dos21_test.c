@@ -563,6 +563,14 @@ int main(void)
     call(&r, 0x6900);
     CHECK(!(r.flags & 1) && (w(lin(psp, 0x402)) | (unsigned long)w(lin(psp, 0x404)) << 16) == vol.fat.serial
           && !memcmp(mem + lin(psp, 0x406), "DOS21      FAT16   ", 19), "6900h \"%.19s\"", (char *)mem + lin(psp, 0x406));
+    memset(mem + lin(psp, 0x400), 0, 32);       /* (the same by the drive's generic request 66h: DISK asks so) */
+    r.ds = psp, r.dx = 0x400, r.bx = 3, r.cx = 0x0866;
+    call(&r, 0x440D);
+    CHECK(!(r.flags & 1) && (w(lin(psp, 0x402)) | (unsigned long)w(lin(psp, 0x404)) << 16) == vol.fat.serial
+          && !memcmp(mem + lin(psp, 0x406), "DOS21      FAT16   ", 19), "440Dh 0866h");
+    r.bx = 3, r.cx = 0x0860;
+    call(&r, 0x440D);
+    CHECK((r.flags & 1) && r.ax == 0x01, "440Dh 0860h refused %x", r.ax);
     str(psp, 0x300, "nul.txt");
     r.ds = psp, r.si = 0x300, r.es = psp, r.di = 0x400;
     call(&r, 0x6000);

@@ -76,7 +76,10 @@ FORMAT and SYS did for this floppy, over the BIOS's disks.
     DISK n                            disk n's alone (1: the first)
     DISK n NEW /Y                     a new table: one partition over all of the disk, the one the PC starts from
     DISK n FORMAT [p] [/V:label] /Y   partition p (1 unless said) made an empty FAT volume (FAT12, FAT16 or FAT32)
-    DISK n BOOT [p] /Y                boot records: the PC starts FreeDOS (KERNEL.SYS) from partition p
+    DISK n BOOT [p] [/GLOS] /Y        boot records: the PC starts FreeDOS (KERNEL.SYS) from partition p
+                                      (/GLOS: GLOS itself, GLOSLDR.SYS, with no DOS)
+    DISK n INSTALL [/ERASE] /Y        GLOS put on disk n from the disk it runs from (a USB stick made by
+                                      `make usb-stick`), to start with no DOS: docs/v1/native-dos.md
 
 - **Without `/Y` nothing is written:** the command says what it would do and what would be lost, and ends with
   exit code 2. The same command with `/Y` is the plain yes.

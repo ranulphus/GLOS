@@ -71,10 +71,13 @@ struct fat_vol {
     struct {
         unsigned long lba;
         int used;
+        int held;                       /* changed and not yet written (a FAT's sector, during a write: hold) */
         unsigned age;
         unsigned char data[FAT_SECTOR];
     } cache[FAT_CACHE];
     unsigned clock;
+    int hold;                           /* fat_write is at work: the FATs' changed sectors are written once, at
+                                           the end of its data and before the file's entry (FAT16 and FAT32) */
 };
 
 /* An entry of a folder. */

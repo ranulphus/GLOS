@@ -39,8 +39,16 @@ static unsigned char *sector(struct fat_vol *v, unsigned long lba, int *err)
             victim = i;
             break;
         }
-        if (victim < 0 || v->cache[i].age < v->cache[victim].age)
-            victim = i;
+        if (victim < 0 || v->cache[i].held < v->cache[victim].held
+            || (v->cache[i].held == v->cache[victim].held && v->cache[i].age < v->cache[victim].age))
+            victim = i;                         /* (the oldest, one not held before one that is) */
+    }
+    if (v->cache[victim].used && v->cache[victim].held) {       /* a held sector goes to the disk first */
+        if (v->write(v->ctx, v->cache[victim].lba, v->cache[victim].data, 1)) {
+            *err = FAT_EIO;
+            return 0;
+        }
+        v->cache[victim].held = 0;
     }
     if (v->read(v->ctx, lba, v->cache[victim].data, 1)) {
         v->cache[victim].used = 0;
@@ -694,9 +702,42 @@ static void wr32(unsigned char *p, unsigned long v)
 }
 
 /* Sector lba written from data (a cached sector the caller changed in place). */
+/* A sector written. During a file's write (hold) a FAT's sector stays in the cache instead, marked, and is
+   written once when the write's data is out (held_out) or when the cache needs its place: a file of many clusters
+   changes the same FAT sectors for each of them. The order a volume stays repairable by is kept: the FATs' entries
+   before the directory entry that points at the chain. */
 static int put_sector(struct fat_vol *v, unsigned long lba, const unsigned char *data)
 {
+    int i;
+
+    for (i = 0; i < FAT_CACHE; i++)
+        if (v->cache[i].used && v->cache[i].lba == lba && v->cache[i].data == data) {
+            if (v->hold && lba >= v->fat0 && lba < v->fat0 + v->nfats * v->fat_sectors) {
+                v->cache[i].held = 1;
+                return FAT_OK;
+            }
+            v->cache[i].held = 0;
+        }
     return v->write(v->ctx, lba, data, 1) ? FAT_EIO : FAT_OK;
+}
+
+/* The held sectors written, in the disk's order. */
+static int held_out(struct fat_vol *v)
+{
+    int r = FAT_OK;
+
+    for (;;) {
+        int i, next = -1;
+
+        for (i = 0; i < FAT_CACHE; i++)
+            if (v->cache[i].used && v->cache[i].held && (next < 0 || v->cache[i].lba < v->cache[next].lba))
+                next = i;
+        if (next < 0)
+            return r;
+        v->cache[next].held = 0;
+        if (v->write(v->ctx, v->cache[next].lba, v->cache[next].data, 1))
+            r = FAT_EIO;
+    }
 }
 
 /* count sectors written straight from buf; the cache's copies of any of them brought up to date. */
@@ -709,8 +750,10 @@ static int write_run(struct fat_vol *v, unsigned long lba, const unsigned char *
     if (v->write(v->ctx, lba, buf, (unsigned)count))
         return FAT_EIO;
     for (i = 0; i < FAT_CACHE; i++)
-        if (v->cache[i].used && v->cache[i].lba >= lba && v->cache[i].lba < lba + count)
+        if (v->cache[i].used && v->cache[i].lba >= lba && v->cache[i].lba < lba + count) {
             memcpy(v->cache[i].data, buf + (v->cache[i].lba - lba) * FAT_SECTOR, FAT_SECTOR);
+            v->cache[i].held = 0;
+        }
     return FAT_OK;
 }
 
@@ -1016,8 +1059,9 @@ static int scan_names(struct fat_vol *v, unsigned long dir, const unsigned char 
     for (i = 0; (p = dir_entry(&d, i, &err)) != 0; i++) {
         if (!p[0])
             break;
-        if (p[0] == 0xE5 || (p[11] & 0x3F) == FAT_A_LFN)
-            continue;
+        if (p[0] == 0xE5 || (p[11] & 0x3F) == FAT_A_LFN || (p[11] & FAT_A_LABEL))
+            continue;                           /* (the volume's label is no file's name: a folder GLOS on a volume
+                                                   named GLOS is GLOS, as under DOS) */
         if (!memcmp(p, plain, 11))
             *taken = 1;
         if (memcmp(p + 8, ext, 3))
@@ -1506,20 +1550,26 @@ static int cluster_for(struct fat_file *f, unsigned long ord)
     return FAT_OK;
 }
 
+#define PUT_RUN 128                     /* sectors in one write of a file's data, at most */
+
 /* n bytes from buf (0: zeros) at the file's position, no size or entry change. */
 static long put_bytes(struct fat_file *f, const unsigned char *buf, unsigned long n)
 {
     static const unsigned char zero[FAT_SECTOR];
     struct fat_vol *v = f->v;
     unsigned long csize = v->spc * (unsigned long)FAT_SECTOR, done = 0;
+    /* Whole sectors of clusters that follow one another on the disk go out in one write (PUT_RUN sectors at
+       most): the run so far, its place, and the file's position at its start (where the file ends if it fails). */
+    unsigned long run_lba = 0, run_secs = 0, run_pos = 0, run_done = 0;
+    int r = FAT_OK;
 
     while (done < n) {
         unsigned long ord = f->pos / csize, in = f->pos % csize, sec = in / FAT_SECTOR, off = in % FAT_SECTOR;
         unsigned long lba, take;
-        int r = cluster_for(f, ord);
 
+        r = cluster_for(f, ord);
         if (r)
-            return r;
+            break;
         lba = v->data_start + (f->cl - 2) * v->spc + sec;
         if (!off && n - done >= FAT_SECTOR) {
             unsigned long secs = (n - done) / FAT_SECTOR, left = v->spc - sec, k;
@@ -1527,20 +1577,32 @@ static long put_bytes(struct fat_file *f, const unsigned char *buf, unsigned lon
             if (secs > left)
                 secs = left;
             if (buf) {
-                r = write_run(v, lba, buf + done, secs);
+                if (run_secs && run_lba + run_secs == lba && run_secs + secs <= PUT_RUN) {
+                    run_secs += secs;
+                } else {
+                    if (run_secs && (r = write_run(v, run_lba, buf + run_done, run_secs)) != 0)
+                        break;
+                    run_lba = lba, run_secs = secs, run_pos = f->pos, run_done = done;
+                }
             } else {
-                for (k = 0, r = 0; k < secs && !r; k++)
+                for (k = 0; k < secs && !r; k++)
                     r = write_run(v, lba + k, zero, 1);
+                if (r)
+                    break;
             }
-            if (r)
-                return r;
             take = secs * FAT_SECTOR;
         } else {
             int err = 0;
-            unsigned char *b = sector(v, lba, &err);
+            unsigned char *b;
 
-            if (!b)
-                return err;
+            if (run_secs && (r = write_run(v, run_lba, buf + run_done, run_secs)) != 0)
+                break;
+            run_secs = 0;
+            b = sector(v, lba, &err);
+            if (!b) {
+                r = err;
+                break;
+            }
             take = FAT_SECTOR - off;
             if (take > n - done)
                 take = n - done;
@@ -1550,12 +1612,22 @@ static long put_bytes(struct fat_file *f, const unsigned char *buf, unsigned lon
                 memset(b + off, 0, take);
             r = put_sector(v, lba, b);
             if (r)
-                return r;
+                break;
         }
         done += take;
         f->pos += take;
     }
-    return (long)done;
+    if (run_secs && r != FAT_EIO) {             /* the run still to write (a full disk stopped the loop, or its end) */
+        int w = write_run(v, run_lba, buf + run_done, run_secs);
+
+        if (w)
+            r = w;
+        else
+            run_secs = 0;
+    }
+    if (run_secs)                               /* a run that wasn't written: the file ends before it */
+        f->pos = run_pos;
+    return r ? r : (long)done;
 }
 
 /* What a put_bytes that stopped part way wrote still counts: the size covers it (DOS's short write when the disk
@@ -1579,8 +1651,14 @@ long fat_write(struct fat_file *f, const void *buf, unsigned long n)
         }
     }
     start = f->pos;
-    if (r >= 0)
+    if (r >= 0) {
+        f->v->hold = f->v->fat != 12;           /* (FAT12's entries across two sectors keep their own order) */
         r = put_bytes(f, buf, n);
+        f->v->hold = 0;
+        e = held_out(f->v);                     /* the FATs, before the entry */
+        if (e)
+            return e;
+    }
     if (f->pos > f->size)
         f->size = f->pos;
     if (f->pos != start)

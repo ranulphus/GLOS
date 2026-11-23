@@ -295,7 +295,10 @@ def native_args(name, args):
                             + (["CTMOUSE"] if mouse else []) + lines) + "\r\n")      # (as run.py's RUN.BAT has it)
     put = [os.path.join(work, "AUTOEXEC.BAT") + "=\\AUTOEXEC.BAT", os.path.join(work, "RUN.BAT") + "=\\RUN.BAT"]
     if mouse:                                   # (CuteMouse, the DOS programs' mouse until GLOS's own INT 33h: run.py's)
-        import run as loopa_run
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("loopa_run", os.path.join(MGA, "tools/loopa/run.py"))
+        loopa_run = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(loopa_run)
         put += [loopa_run.ctmouse(work) + "=\\HX\\CTMOUSE.EXE"]
     put += [os.path.join(MGA, "build/ow/dos", t) + "=\\HX\\" + t for t in HX_TOOLS]
     put += [os.path.join(WATCOM, "binw/dos4gw.exe") + "=\\HX\\DOS4GW.EXE"]
@@ -7590,6 +7593,113 @@ def nboot_dos_case(profile, card, bios=False):
                                "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+def nboot_install_case(profile, card, bios=False):
+    """DISK n INSTALL (docs/v1/native-dos.md, the BIOS's disks): GLOS started with no DOS from one disk puts itself on
+    another, which then starts it. The first disk is tools/ndos/native-image.sh's (GLOSLDR.SYS in its root, \\GLOS
+    with the kernel, GLOS's COMMAND.COM, a test program and KEYS\\), the second a blank one (Loop A's
+    --scratch-hdd). The disks listed, the first as the one GLOS runs from and never taken; INSTALL without /Y
+    says and does nothing; with /Y the blank disk is laid out, formatted, made to start GLOSLDR.SYS and given the
+    files; a second INSTALL wants /ERASE (the disk has a partition now), and with it starts afresh. The PC is then
+    started from the second disk alone: the kernel says C: is its own, SSH answers with the same host key, the
+    folder holds the same files with the same sizes, dates and times, and a program runs.
+
+    bios: the first start with /BIOSDISK, the files read through the BIOS's calls, as from a USB stick."""
+    import shutil
+    tag = "ninst%s-%s" % ("b" if bios else "", profile)
+    img = os.path.join(ROOT, "out", tag + "-img", "c.img")
+    os.makedirs(os.path.dirname(img), exist_ok=True)
+    cfg = batfile(tag + "/GLOS.CFG", ["; jobs.py nboot: DISK n INSTALL"])
+    mk = subprocess.run(["sh", "tools/ndos/native-image.sh", img, cfg + "=\\GLOS\\GLOS.CFG",
+                         "build/glos/COMMAND.COM=\\GLOS\\COMMAND.COM", "tests/keys/hostkey=\\GLOS\\KEYS\\HOSTKEY",
+                         "tests/keys/AUTHKEYS=\\GLOS\\KEYS\\AUTHKEYS", "build/ow/dos/NDOSTEST.EXE=\\GLOS\\NDOSTEST.EXE",
+                         "build/glos/COMMAND.COM=\\GLOS\\KEYS\\PKG\\DEEP.COM"],
+                        cwd=ROOT, capture_output=True, env=dict(os.environ, GLOS_CMDLINE="/BIOSDISK" if bios else ""))
+    checks, info = {"image": mk.returncode == 0}, ""
+    listing = lambda out: sorted(re.findall(r"^(\S+ +\S*) +([\d,]+|<DIR>) (\d\d-\d\d-\d{4} +\d\d:\d\d)", out, re.M))
+    agent = Agent(tag + "-" + card, profile, card, ["--hdd", img, "--scratch-hdd", "64", "--keep-vm"], timeout=1500,
+                  files=False)
+    before = []
+
+    def stopped(agent):                         # (a native end stops the PC: the run is ended here, not by its idle limit)
+        import time
+        t0 = time.time()
+        while time.time() - t0 < 60 and "GLOS-EXIT code=" not in agent.log():
+            time.sleep(0.5)
+
+    def disk(args, timeout=180):                # (what DISK says, refusals too)
+        rc, out, err = agent.ssh("disk " + args, timeout=timeout)
+        return rc, (out + err).replace("\r", "")
+
+    try:
+        checks["listen"] = agent.listening()
+        if checks["listen"]:
+            rc, out = disk("")
+            checks["list"] = rc == 0 and "GLOS or DOS runs from it" in out and "no partition table" in out
+            rc, out = disk("1 install /erase /y")
+            checks["own"] = rc == 1 and "runs from" in out
+            rc, out = disk("2 install")
+            checks["asks"] = rc == 2 and "Nothing was done" in out and "DISK 2 INSTALL /Y" in out
+            checks["not-done"] = "no partition table" in disk("2")[1]
+            rc, out = disk("2 install /y", 900)
+            m = re.search(r"Done: (\d+) files, (\d+) KB, in (\d+) seconds", out)
+            checks["install"] = rc == 0 and m is not None and int(m.group(1)) >= 8
+            info += " first=%s" % (m.group(0) if m else repr(out[-300:]))
+            rc, out = disk("2")
+            checks["listed"] = rc == 0 and re.search(r"  1  FAT\d\d \[\w\w\] +\d+ MB  active .*GLOS", out) is not None
+            rc, out = disk("2 install /y")
+            checks["wants-erase"] = rc == 2 and "/ERASE" in out and "Nothing was done" in out
+            rc, out = disk("2 install /erase /y", 900)
+            m = re.search(r"Done: (\d+) files, (\d+) KB, in (\d+) seconds", out)
+            checks["again"] = rc == 0 and m is not None and int(m.group(1)) >= 8
+            info += " again=%s" % (m.group(0) if m else repr(out[-300:]))
+            before = [listing(agent.ssh("dir " + d)[1]) for d in ("C:\\", "C:\\GLOS", "C:\\GLOS\\KEYS", "C:\\GLOS\\KEYS\\PKG")]
+            agent.ssh("glos exit")
+            stopped(agent)
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    agent.proc.kill()
+    agent.proc.wait()
+    text = agent.log()
+    checks["clean-1"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
+    checks["from-bios"] = ("step=c dl=80 disk=bios" in text) == bios
+    # The second disk alone.
+    scratch = os.path.join(ROOT, "out", tag + "-" + card, "vm", "scratch.img")
+    disk2 = os.path.join(ROOT, "out", tag + "-img", "installed.img")
+    checks["disk"] = os.path.exists(scratch)
+    if checks["disk"] and checks.get("again"):
+        shutil.copyfile(scratch, disk2)
+        agent = Agent(tag + "x-" + card, profile, card, ["--hdd", disk2], timeout=600, files=False)
+        try:
+            checks["starts"] = agent.listening()
+            if checks["starts"]:
+                after = [listing(agent.ssh("dir " + d)[1]) for d in ("C:\\", "C:\\GLOS", "C:\\GLOS\\KEYS", "C:\\GLOS\\KEYS\\PKG")]
+                checks["files"] = all(before) and before == after      # (names, sizes, dates and times; the folders' too)
+                if not checks["files"]:
+                    info += " before=%r after=%r" % (before, after)
+                job = agent.ssh("C:\\GLOS\\KEYS\\PKG\\DEEP.COM /C VER")
+                agent.ssh("cd \\GLOS")
+                nt = agent.ssh("NDOSTEST.EXE x two")
+                checks["runs"] = job[0] == 0 and "GLOS" in job[1] and nt[0] == 0 and "NDOSTEST: 0 failures" in nt[1]
+                attr = agent.ssh("attrib C:\\GLOSLDR.SYS")
+                info += " attrib=%r" % attr[1][:60]
+                agent.ssh("glos exit")
+                stopped(agent)
+        except subprocess.TimeoutExpired:
+            checks["timeout-2"] = False
+        agent.proc.kill()
+        agent.proc.wait()
+        text = agent.log()
+        m = re.search(r"GLOS-NATIVE step=c dl=80 disk=(\S+) .* mount=0", text)
+        # (the loader's command line is copied with it: /BIOSDISK there starts the installed disk so too)
+        checks["own-driver"] = m is not None and (m.group(1) == "bios") == bios
+        checks["clean-2"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-EXIT code=0" in text
+    bad = [k for k, v in checks.items() if not v]
+    if not checks["image"]:
+        info += " image=%r" % mk.stderr.decode("latin-1")[-200:]
+    return "  %-22s %s%s%s" % (tag, "PASS" if not bad else "FAIL", info, "" if not bad else " failed: " + " ".join(bad)), \
+        not bad
+
+
 def ndos_case(profile, card):
     """A native machine (docs/v1/native-dos.md, native-DOS sessions, NS1: kernel/vm/ndm.c): GLOS's second V86 machine,
     no DOS under it, its INT 21h GLOS's own. Through the agent, twice (the first machine's memory and thread
@@ -12717,6 +12827,8 @@ def main():
         res += matrix(nboot_dos_case, cases, a.jobs)
         cases = [c + (True,) for c in cases]    # (C: by the BIOS's calls: a start from a USB stick's way)
         res += matrix(nboot_dos_case, cases, a.jobs)
+        cases = [c for c in [("bf6", "ne2kpci", True), ("486dx2", "ne2k", False)] if not a.profile or c[0] in a.profile]
+        res += matrix(nboot_install_case, cases, a.jobs)        # (DISK n INSTALL, and a start from what it made)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "ndos":                       # (native machines: the bf6 with VME, the 486 without)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]

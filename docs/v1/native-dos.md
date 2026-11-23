@@ -692,7 +692,19 @@ missing came after the kernel's entry, where C: was GLOS's IDE driver's or nothi
   system in `\GLOS` as `install.py` puts it on a hard disk, a host key of its own and the owner's AUTHKEYS;
   written with `dd`. The PC's BIOS must be able to start from a USB disk (the P4 bench can; the 440BX PCs and the
   486 can't).
-- **Tested:** `loopa-nboot` has the NB2-NB4 case a second time with `/BIOSDISK` (bf6, 486): every file, program
+- **Installing from it** (the owner, the same day: "can we still use it to install to the hard drive? Otherwise
+  it's no use"). `DISK n INSTALL [/ERASE] /Y` (`kernel/disk/diskcmd.c`): `DISK n NEW`, `FORMAT` (the volume named
+  GLOS) and `BOOT /GLOS` (the boot records naming GLOSLDR.SYS, new with it), then GLOSLDR.SYS and the folder
+  GLOS's files are in copied from the disk GLOS runs from, whole, with their dates, times and attributes. The
+  sources are read through the DOS server (as `DD` reads a file) and written by GLOS's own FAT code over the
+  BIOS's sectors, so the new volume needs no drive letter and no restart in between. DISK's rules hold: nothing
+  without `/Y`, never the disk GLOS runs from (GLOS's own DOS now answers the volume's serial number by 440Dh
+  66h, which DISK asks), and a disk that has partitions only with `/ERASE`. At the PC: `DISK` (the disks; the
+  stick says "GLOS or DOS runs from it"), `DISK 2 INSTALL /Y`, the stick out, `REBOOT`. The installed system is
+  the stick's as it is: its GLOS.CFG (the name `glos-usb`, `/VERBOSE`) and its host key, to change afterwards.
+- **Tested:** `loopa-nboot` has `DISK 2 INSTALL` onto a blank second disk (and again with `/ERASE`), the PC then
+  started from that disk alone: the same files, a program run (bf6 with the first start by `/BIOSDISK`, 486). It
+  also has the NB2-NB4 case a second time with `/BIOSDISK` (bf6, 486): every file, program
   and console check through the BIOS's calls, USB left alone on the bf6. **Not yet proved on a real PC:** a BIOS
   whose USB disk code doesn't run in V86 mode (it would have to work under EMM386 too), a BIOS that reaches the
   stick through a controller whose interrupt line a driver of GLOS's shares, and the stick as 80h with the PC's

@@ -518,6 +518,18 @@ static int write_test(const char *image, const char *mirror_dir, unsigned long c
     memcpy(name, "\\Two hundred and fifty-five", 27);
     put_file(&v, name, 1, 0, 255, 17, 0);
     if (!cut) {
+        /* A folder of the volume's own name is that name, as under DOS: the label's entry is no file's (DISK n
+           INSTALL's \GLOS on a volume named GLOS was GLOS~1 until 2026-11-23). Made and removed again, its writes
+           not counted: the cuts' places stay where they were. */
+        if (v.label[0] && strcmp(v.label, "NO NAME") && !strchr(v.label, ' ') && strlen(v.label) <= 8) {
+            unsigned long w0 = writes;
+
+            snprintf(path, sizeof path, "\\%s", v.label);
+            expect("mkdir of the label's name", path, fat_mkdir(&v, path), 0);
+            want_short(&v, path, v.label, 0);
+            expect("rmdir of it", path, fat_rmdir(&v, path), 0);
+            writes = w0;
+        }
         want_short(&v, "\\short.txt", "SHORT.TXT", 1);
         want_short(&v, "\\README", "README", 0);
         want_short(&v, "\\A Longer Name With Spaces.data", "ALONGE~1.DAT", 1);

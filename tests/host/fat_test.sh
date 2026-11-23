@@ -176,7 +176,7 @@ repairable="$repairable"'\|^  Auto-correcting\.$\|^  Auto-deleting\.$'
 repairable="$repairable"'\|^Cluster [0-9]* out of range ([0-9]* > [0-9]*)\. Setting to EOF\.$'
 
 wvol wfloppy 1440 "-n N1BFLOPPY" N1BFLOPPY 150
-wvol wfat16 32768 "-F 16" - 100
+wvol wfat16 32768 "-F 16 -n N1BW16" N1BW16 100
 wvol wfat32 40960 "-F 32 -s 1" - 100
 wvol wglos12 1440 "glos 12" "GLOS N1A" 40
 wvol wglos16 65536 "glos 16" "GLOS N1A" 40
