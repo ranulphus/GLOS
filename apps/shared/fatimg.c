@@ -464,6 +464,8 @@ static int dos_name(const char *name, size_t n, unsigned char out[11])  /* NAME.
             return -1;
         out[k++] = (unsigned char)c;
     }
+    if (out[0] == 0xE5)                 /* (a first byte of E5h is written 05h: E5h there marks an entry deleted) */
+        out[0] = 0x05;
     return 0;
 }
 

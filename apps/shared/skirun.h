@@ -66,13 +66,14 @@ struct skirun {
         signed char side;               /* the clear line's side its lane is on */
         unsigned char known, has;       /* worked out; there is one */
         unsigned char speed;            /* 256ths of a pixel a step, from 128 */
-        unsigned short start;           /* the step it set off (0: not yet: it waits for the skier to come near) */
+        unsigned start;                 /* the step it set off (0: not yet: it waits for the skier to come near) */
     } other[SKI_OTHERS];
     struct {                            /* (phase F) a piste groomer a piece, at most (worked out as the others) */
         short y, x0;                    /* the line it crosses on; where it waits, beyond the piste's edge */
         signed char dir;                /* +1 rightwards, -1 leftwards */
         unsigned char known, has;
-        unsigned short start, travel;   /* the step it set off (0: not yet); how far it goes */
+        unsigned start;                 /* the step it set off (0: not yet) */
+        unsigned short travel;          /* how far it goes */
     } groomer[SKI_OTHERS];
 };
 

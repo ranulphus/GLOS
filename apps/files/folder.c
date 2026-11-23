@@ -1662,7 +1662,7 @@ static int img_take(struct fatimg *v, const char *name, int depth)     /* a file
 
 static void img_work(struct job *j)
 {
-    char tmp[270], bak[270], why[80];
+    char tmp[270], bak[270], why[80] = "";
     const char *dot = strrchr(gui_path_name(j->zfile), '.');
     size_t stem = dot ? (size_t)(dot - j->zfile) : strlen(j->zfile);
     struct fatimg *v = NULL;
@@ -1689,7 +1689,7 @@ static void img_work(struct job *j)
     if (b && fclose(b) != 0)
         bad = 1;
     if (!bad && (!(rw = gui_fopen(tmp, "r+b")) || !(v = fatimg_open(img_io, rw, why, sizeof why)))) {
-        snprintf(j->why, sizeof j->why, "%s", why);
+        snprintf(j->why, sizeof j->why, "%s", rw ? why : GUI_T("its copy couldn't be opened"));
         bad = 1;
     }
     for (i = 0; !bad && i < j->n && !job_stopped(j); i++) {

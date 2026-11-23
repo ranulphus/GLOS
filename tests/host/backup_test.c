@@ -171,7 +171,7 @@ int main(int argc, char **argv)
     static char big[5001];
     struct bk_job j;
     char sets[16][BK_SET], here[300], to[300], temp[300], name[BK_SET], first[BK_SET];
-    int n, r;
+    int n, r, k2;
     if (argc < 2)
         return 2;
     snprintf(base, sizeof base, "%s", argv[1]);
@@ -292,6 +292,46 @@ int main(int argc, char **argv)
         same("back1/A.TXT", "back4/A.TXT", "third after thinning");
         same("back1/NEW.TXT", "back4/NEW.TXT", "third after thinning");
         same("back1/SUB/DEEP/C.BIN", "back4/SUB/DEEP/C.BIN", "third after thinning");
+    }
+    /* a thinning cut short (the reviewer's case, 2026-11-23): sets S1 (full), S2 (what changed: Y.TXT held by S1),
+       S3 (full); thinned to one, stopped after the first set it thins: S2 goes first (the newest of the older
+       ones), so S1, still listed, restores whole; a second thinning then takes S1 too, and nothing is left of
+       either */
+    {
+        char t1[BK_SET], t3[BK_SET], rel[200];
+        dir("here2");
+        make("here2/X.TXT", "x one", 1);
+        make("here2/Y.TXT", "y stays", 2);
+        snprintf(here, sizeof here, "%s/here2", base);
+        j.where = "backups/STOP", j.changes = 0;
+        r = bk_backup(&j, here);
+        snprintf(t1, sizeof t1, "%s", j.set);
+        make("here2/X.TXT", "x two, longer", 1);
+        j.changes = 1;
+        r |= bk_backup(&j, here);
+        CHECK(r == BK_OK && j.copied == 1 && j.kept == 1, "stop: the second set copied=%u kept=%u", j.copied, j.kept);
+        j.changes = 0;
+        r = bk_backup(&j, here);
+        snprintf(t3, sizeof t3, "%s", j.set);
+        CHECK(r == BK_OK && bk_sets(&store, "backups/STOP", sets, 16) == 3, "stop: three sets");
+        stop_at = 2;
+        r = bk_thin(&j, 1);
+        stop_at = 0;
+        n = bk_sets(&store, "backups/STOP", sets, 16);
+        CHECK(r == BK_E_STOPPED && j.thinned == 1 && n == 2 && !strcmp(sets[0], t3) && !strcmp(sets[1], t1),
+              "stop: r=%d thinned=%u, %d sets left", r, j.thinned, n);
+        for (k2 = 0; k2 < n; k2++) {        /* every set still listed: whole */
+            snprintf(to, sizeof to, "%s/stop%d", base, k2);
+            r = bk_restore(&j, sets[k2], to);
+            CHECK(r == BK_OK && j.files == 2 && j.copied == 2 && j.failed == 0, "stop: set %s restored: r=%d copied=%u failed=%u",
+                  sets[k2], r, j.copied, j.failed);
+        }
+        r = bk_thin(&j, 1);
+        CHECK(r == BK_OK && j.thinned == 1 && bk_sets(&store, "backups/STOP", sets, 16) == 1, "stop: thinned again: r=%d %u",
+              r, j.thinned);
+        snprintf(rel, sizeof rel, "there/backups/STOP/%s", t1);
+        CHECK(!exists(rel), "stop: %s still there", rel);
+        j.where = "backups/DATA";
     }
     if (!fails)
         printf("backup_test: ok\n");

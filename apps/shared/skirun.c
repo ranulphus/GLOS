@@ -284,11 +284,11 @@ static void others_step(struct skirun *r)       /* those near set off; one skied
     int px = r->x >> 8, py = r->y >> 8, c, x, y, moving, heading;
     for (c = py / SKI_CHUNK; c <= (py + 400) / SKI_CHUNK && c < SKI_OTHERS; c++)
         if (skirun_other(r, c, &x, &y, &moving, &heading) && !r->other[c].start && y - py <= 400)
-            r->other[c].start = (unsigned short)(r->steps ? r->steps : 1);
+            r->other[c].start = r->steps ? r->steps : 1;
     for (c = py / SKI_CHUNK; c <= (py + 400) / SKI_CHUNK && c < SKI_OTHERS; c++) {   /* (and the groomers) */
         int dir, done;
         if (skirun_groomer(r, c, &x, &y, &dir, &moving, &done) && !r->groomer[c].start && y - py <= 400)
-            r->groomer[c].start = (unsigned short)(r->steps ? r->steps : 1);
+            r->groomer[c].start = r->steps ? r->steps : 1;
     }
     if (r->state != SKI_S_SKIING || r->grace)
         return;

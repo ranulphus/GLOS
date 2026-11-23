@@ -220,6 +220,17 @@ static void a_volume(const char *dir, const char *name, unsigned long sectors, u
               "and its own name again", name);
         CHECK(fatimg_rename(v, "SUB\\DEEP", "DEEPER") == 0 && fatimg_read(v, "SUB\\DEEPER\\MORE.BIN", 0, back, 5000) == 5000
               && fatimg_rename(v, "SUB\\DEEPER", "DEEP") == 0, "%s: a folder renamed and back", name);
+        {                                   /* a name whose first byte is E5h (CP437's sigma): kept as 05h, listed */
+            static const char sigma[] = "\xE5" "X.TXT";
+            int found = 0, k;
+            CHECK(fatimg_add(v, sigma, "s", 1, 0, 0) == 0, "%s: a name beginning E5h added", name);
+            n = fatimg_list(v, "", &e);
+            for (k = 0; k < n; k++)
+                found |= !strcmp(e[k].dos, sigma);
+            free(e), e = NULL;
+            CHECK(found && fatimg_read(v, sigma, 0, back, 10) == 1 && fatimg_remove(v, sigma) == 0,
+                  "%s: a name beginning E5h listed, read and taken away", name);
+        }
         fatimg_info(v, &now);
         CHECK(now.free_clusters == before.free_clusters, "%s: renames take nothing", name);
     }

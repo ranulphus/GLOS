@@ -749,6 +749,11 @@ static void number_draw(struct gui_widget *w, struct gfx_surface *s)
 
 static void number_set(struct number *n, int v, int tell)
 {
+    if (n->typing) {                    /* (any change of the value ends a number being typed: the typing paths
+                                           set it again after this; the arrows, the timer, gui_set_value don't) */
+        n->typing = n->minus = 0;
+        gui_damage(&n->w);
+    }
     if (v < n->min)
         v = n->min;
     if (v > n->max)
@@ -790,16 +795,19 @@ static int number_event(struct gui_widget *w, struct gui_ev *e)
                 if ((v > 0 && v > n->max) || (v < 0 && v < n->min))
                     v = n->minus ? -d : d;
             }
-            n->typing = 1, n->typed = v;
-            number_set(n, v > n->max ? n->max : v < n->min ? n->min : (int)v, 1);
+            {
+                unsigned char minus = n->minus;
+                number_set(n, v > n->max ? n->max : v < n->min ? n->min : (int)v, 1);
+                n->typing = 1, n->typed = v, n->minus = minus;
+            }
             gui_damage(w);
             return 1;
         }
         if (!n->slider && e->ch == '-' && n->min < 0) {
             if (n->typing && n->typed) {        /* (among the digits: the sign of what is typed) */
-                n->typed = -n->typed;
-                number_set(n, n->typed > n->max ? n->max : n->typed < n->min ? n->min : (int)n->typed, 1);
-                n->minus = n->typed < 0;
+                long t = -n->typed;
+                number_set(n, t > n->max ? n->max : t < n->min ? n->min : (int)t, 1);
+                n->typing = 1, n->typed = t, n->minus = t < 0;
                 gui_damage(w);
             } else {
                 n->minus = !n->minus;
@@ -807,9 +815,10 @@ static int number_event(struct gui_widget *w, struct gui_ev *e)
             return 1;
         }
         if (!n->slider && e->key == GUI_K_BACK) {
-            n->typed = (n->typing ? n->typed : n->value) / 10;
-            number_set(n, n->typed > n->max ? n->max : n->typed < n->min ? n->min : (int)n->typed, 1);
-            n->typing = 1;
+            long t = (n->typing ? n->typed : n->value) / 10;
+            unsigned char minus = n->minus;
+            number_set(n, t > n->max ? n->max : t < n->min ? n->min : (int)t, 1);
+            n->typing = 1, n->typed = t, n->minus = minus;
             gui_damage(w);
             return 1;
         }

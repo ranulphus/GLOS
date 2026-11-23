@@ -1062,10 +1062,14 @@ int gui_richview_tint(struct gui_widget *w, const char *what, unsigned flags)
                 return -1;
             }
             if (n == room) {
-                struct rtint *m = realloc(v->tint, (size_t)(room = room ? room * 2 : 32) * sizeof *m);
-                if (!m)
-                    break;
-                v->tint = m;
+                int more = room ? room * 2 : 32;
+                struct rtint *m = realloc(v->tint, (size_t)more * sizeof *m);
+                if (!m) {                       /* (no memory: those found so far, and no more) */
+                    free(t);
+                    v->ntint = n;
+                    return n;
+                }
+                v->tint = m, room = more;
             }
             v->tint[n].block = bi, v->tint[n].a = f.start, v->tint[n].b = f.end, n++;
             from = f.end > f.start ? f.end : f.start + 1;

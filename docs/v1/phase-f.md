@@ -1803,11 +1803,16 @@ the schedule's command. After a backup that succeeded, `bk_thin` (`apps/shared/b
 
 - A set of what changed holds what did not change by the set that copied it, so an older set cannot simply be
   deleted. The kept sets' manifests are read first: every file they hold by an older set is kept. Then each
-  older set, the oldest first, stops being a backup (its manifest is removed before anything else, so a thinning
-  cut short leaves sets passed over, never a listed one with files missing), and its own files go but for those
-  kept; folders left empty go, deepest first, and the set's folder when nothing is left in it.
+  older set, the NEWEST of them first, stops being a backup (its manifest is removed before anything else), and
+  its own files go but for those kept; folders left empty go, deepest first, and the set's folder when nothing
+  is left in it. Newest first, a thinning cut short (stopped, the other computer gone) leaves every set still
+  listed whole: an older set never holds files by a newer one. (Oldest first, as built at first, a stop between
+  two sets left a newer listed set missing the files it held by the older: found by a review the same day.)
 - A thinned set's kept files stay in its folder, held by newer sets. When those sets are thinned in turn, the
-  files they held by it go then too (unless a kept set still holds them), so nothing is left behind for good.
+  files they held by it go too, but only in a sweep at the end of a run that thinned every older set (until
+  then an older one may hold the same file), and not those a kept set holds; nothing is left behind for good.
+- **Tests (the review's case):** `backup_test` thins three sets (the second holding a file by the first) to one,
+  stopped after the first set thinned: the two still listed restore whole; thinned again, one set is left.
 - The backup's own report is as it was; thinning says `thinned keep=N sets=S removed=R held=H` beside it, and
   the Backed Up message adds how many older backups were thinned out (or that they could not be).
 - The store gains `remove` (a file, or an empty folder): `remote_remove` over SFTP; the host test's, the
@@ -1914,3 +1919,14 @@ The plan's velocity lane, in a smaller form: each note on the roll is shaded by 
 at 127, paler towards the field's as it is softer, a third of the way at 1), and **Edit, Velocity...** (Ctrl+E)
 sets the chosen notes' (or every note's) velocity, 1 to 127, one step of the history. `studio-step`: all six
 notes to 40 (paler in its picture). Not yet: a lane under the roll to draw velocities and controllers in.
+
+## A review of the day's work (2026-11-23)
+
+A reviewer read the 24 commits after gate 46's (30ce832) for correctness and found six real faults, all mended
+with tests: backups thinned oldest first could leave a listed set broken if stopped (now newest first, the
+earlier sets' files swept at a run's end: `backup_test`); a spin box's typing went on after its arrows or
+`gui_set_value` changed the value (any other change now ends the typing: `rich_test`); Files' image job could
+copy an uninitialised reason; a name whose first byte is E5h (CP437's sigma) was written raw into an image, so
+the entry read as deleted (now 05h, as DOS writes it: `fatimg_test`); Fall Line's other skiers' and groomers'
+start steps were 16 bits (a run past 18 minutes jumped them; now 32); and two lists recorded their doubled room
+before realloc succeeded (rich view tints, the thinning's folders).

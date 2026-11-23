@@ -113,6 +113,12 @@ int main(void)
         CHECK(gui_value(neg) == -42, "spin: -42 typed in -50 to 50 is %d", gui_value(neg));
         e.ch = '7', neg->cls->event(neg, &e);   /* -427: past -50, starts again: -7 */
         CHECK(gui_value(neg) == -7, "spin: -427 typed is %d", gui_value(neg));
+        e.ch = '9', sp->cls->event(sp, &e);     /* (still typing: 389) ... set from outside: typing ends */
+        gui_set_value(sp, 100);
+        e.ch = '5', sp->cls->event(sp, &e);     /* ... so "5" begins a number again: 5, held to 20 (not 1005) */
+        CHECK(gui_value(sp) == 20, "spin: typed, set to 100, then 5: %d", gui_value(sp));
+        e.ch = '0', sp->cls->event(sp, &e);
+        CHECK(gui_value(sp) == 50, "spin: ... then 50: %d", gui_value(sp));
     }
     if (!fails)
         printf("rich_test: ok\n");
