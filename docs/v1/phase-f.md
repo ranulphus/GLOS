@@ -1875,3 +1875,14 @@ The plan's "other skiers (slow ones who zigzag, to be passed)": `skirun_other` (
   mountains. (Set off first from the edge nearer the line, faster, it was met by the careful skier on a few
   black slaloms: the far edge, 18 pixels a second and 400 pixels' notice give it room.)
 - **Not yet:** the window doubled and full screen; the 486's frame rate (measured on the bench).
+
+## MIDI Studio: Quantise and Transpose (2026-11-23)
+
+From the plan's "Not yet": **Edit, Quantise** (Ctrl+Q): the chosen notes' starts (all the track's, with none
+chosen) to the nearest sixteenth, a sixteenth long at least, the track sorted again; **Transpose Up** and **Down**
+(Ctrl+Up, Ctrl+Down: a semitone) and **An Octave Up** and **Down** (Ctrl+Shift+Up and Down: twelve), the chosen
+notes or all; refused whole (a word in the status line) if any note would go past 0 or 127. Each is one step of
+the history (Undo).
+
+- **Tests:** `studio-step` (after its notes: up a semitone, down an octave, Quantise moving none, Undo; a
+  picture); `studio-click` (WALTZ.MID gains a D at tick 1000: Quantise moves it alone, to 960).

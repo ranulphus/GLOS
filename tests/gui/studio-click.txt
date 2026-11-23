@@ -1,13 +1,14 @@
 # MIDI Studio's click follows the song (apps/studio; phase F): C:\SND\WALTZ.MID is in 3/4 at 120 quarter notes a
 # minute, then 60 from its second bar (tick 1440); recording it in the suite's -demo time (F9: a second), the
 # clicks are each beat of the song: 0, 500 and 1000 ms, the second bar's first (accented) at 1500, its next at
-# 2500 (the slower tempo), and so on; five in the take's three seconds.
+# 2500 (the slower tempo), and so on; five in the take's three seconds. Then Quantise (Ctrl+Q): its D at tick
+# 1000 goes to 960, the nearest sixteenth (its C and E are on sixteenths already).
 run STUDIO.EXE -demo
 wait "MIDI Studio"
 key ctrl+o
 wait "Open"
 type C:\\SND\\WALTZ.MID\n
-said STUDIO opened WALTZ.MID tracks=1 notes=2
+said STUDIO opened WALTZ.MID tracks=1 notes=3
 key f7
 said STUDIO recording in=keys click=1 count=0
 said STUDIO click at=0 bar
@@ -25,6 +26,8 @@ said STUDIO take at 3000
 said STUDIO click at=4500 bar
 key f7
 said STUDIO recorded 0 notes keys=- at=- clicks=5
+key ctrl+q
+said STUDIO quantised 1
 key alt+f4
 wait "MIDI Studio"
 key alt+n

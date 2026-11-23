@@ -2,7 +2,8 @@
 # cursor, a step of an eighth (240 ticks) as it starts; D after it; Space, a rest; Ctrl+1, the step a sixteenth;
 # E; Backspace takes the E away and the cursor back; Shift+V an F with an accent (velocity 127) in its place;
 # a chord (C, E and G held together: Z, C and B) at one step; D after it, alone; F8 off. Each note is one step of
-# the history: Ctrl+Z takes the D away again.
+# the history: Ctrl+Z takes the D away again. Then all of them a semitone up (Ctrl+Up) and an octave down
+# (Ctrl+Shift+Down); Quantise (Ctrl+Q) finds them on sixteenths already; one more Ctrl+Z.
 run STUDIO.EXE -demo
 wait "MIDI Studio"
 key f8
@@ -31,6 +32,15 @@ said STUDIO step note 62 at=960
 shot chord "MIDI Studio"
 key f8
 said STUDIO step off notes=7
+key ctrl+z
+said STUDIO undone 6
+key ctrl+up
+said STUDIO transposed 6 by 1
+key ctrl+shift+down
+said STUDIO transposed 6 by -12
+key ctrl+q
+said STUDIO quantised 0
+shot moved "MIDI Studio"
 key ctrl+z
 said STUDIO undone 6
 key alt+f4

@@ -41,3 +41,7 @@ sixteenth, an eighth, a quarter or a half, and a click on the roll moves the cur
 
 Press keys together for a chord: a key pressed while another you just put in is still held goes at the
 same step, and the cursor moves on once.
+
+**Edit, Quantise** (Ctrl+Q) puts the chosen notes' starts (or all the track's, with none chosen) on the
+nearest sixteenth. **Transpose Up** and **Down** (Ctrl+Up, Ctrl+Down) move them a semitone, **An Octave Up**
+and **Down** (Ctrl+Shift+Up, Ctrl+Shift+Down) twelve; nothing moves if a note would go past the keyboard's end.

@@ -28,7 +28,8 @@
 #include "../shared/song.h"
 
 enum { C_NEW = 1, C_OPEN, C_SAVE, C_SAVEAS, C_EXIT, C_UNDO, C_REDO, C_DELETE, C_SELALL, C_TRACK, C_DRUMS, C_UNTRACK, C_INSTR,
-       C_MUTE, C_SOLO, C_PLAY, C_STOP, C_TEMPO, C_ZOOMIN, C_ZOOMOUT, C_RECORD, C_CLICK, C_COUNTIN, C_STEP, C_STEPLEN };
+       C_MUTE, C_SOLO, C_PLAY, C_STOP, C_TEMPO, C_ZOOMIN, C_ZOOMOUT, C_RECORD, C_CLICK, C_COUNTIN, C_STEP, C_STEPLEN,
+       C_QUANT = C_STEPLEN + 4, C_UP, C_DOWN, C_OCTUP, C_OCTDOWN };
                                         /* (C_STEPLEN + n: a sixteenth, an eighth, a quarter, a half) */
 
 #define ROW 8                           /* a key's row on the roll: pixels */
@@ -1179,6 +1180,48 @@ static void command(struct gui_window *w, int id)
             t->notes[i].sel = 1;
         gui_damage(roll);
         break;
+    case C_QUANT: {                             /* (2026-11-23) the chosen notes' starts (or all) to the nearest sixteenth */
+        int any = 0;
+        for (i = 0; i < t->nnotes; i++)
+            any |= t->notes[i].sel;
+        st = step_begin();
+        for (i = 0; i < t->nnotes; i++)
+            if (!any || t->notes[i].sel) {
+                unsigned long at = (t->notes[i].at + GRID / 2) / GRID * GRID;
+                n += at != t->notes[i].at;
+                t->notes[i].at = at;
+                if (t->notes[i].len < GRID)
+                    t->notes[i].len = GRID;
+            }
+        song_sort(t);
+        step_end(st, GUI_T("Quantise"));
+        say("quantised %lu", n);
+        gui_damage(roll);
+        break;
+    }
+    case C_UP: case C_DOWN: case C_OCTUP: case C_OCTDOWN: {    /* (2026-11-23) the chosen notes (or all) moved */
+        int by = id == C_UP ? 1 : id == C_DOWN ? -1 : id == C_OCTUP ? 12 : -12, any = 0, out = 0;
+        for (i = 0; i < t->nnotes; i++)
+            any |= t->notes[i].sel;
+        for (i = 0; i < t->nnotes; i++)
+            if ((!any || t->notes[i].sel) && ((int)t->notes[i].key + by < 0 || (int)t->notes[i].key + by > 127))
+                out = 1;
+        if (out) {                              /* (all or none: no note pushed off the keyboard's end) */
+            gui_set_text(status, GUI_T("That would take notes past the keyboard's end."));
+            say("transpose refused");
+            break;
+        }
+        st = step_begin();
+        for (i = 0; i < t->nnotes; i++)
+            if (!any || t->notes[i].sel) {
+                t->notes[i].key = (unsigned char)(t->notes[i].key + by);
+                n++;
+            }
+        step_end(st, GUI_T("Transpose"));
+        say("transposed %lu by %d", n, by);
+        gui_damage(roll);
+        break;
+    }
     case C_TRACK:
         new_track(-1);
         break;
@@ -1370,6 +1413,11 @@ static void build(void)
     gui_command(win, C_REDO, GUI_T("&Redo"), "Ctrl+Y", gui_glyph("redo"), GUI_T("Redo"));
     gui_command(win, C_DELETE, GUI_T("&Delete Notes"), "Del", gui_glyph("remove"), GUI_T("Delete the chosen notes"));
     gui_command(win, C_SELALL, GUI_T("Select &All"), "Ctrl+A", NULL, NULL);
+    gui_command(win, C_QUANT, GUI_T("&Quantise"), "Ctrl+Q", NULL, GUI_T("The chosen notes' starts (or all of them) to the nearest sixteenth"));
+    gui_command(win, C_UP, GUI_T("Transpose &Up"), "Ctrl+Up", NULL, GUI_T("The chosen notes (or all of them) a semitone up"));
+    gui_command(win, C_DOWN, GUI_T("Transpose Do&wn"), "Ctrl+Down", NULL, GUI_T("... a semitone down"));
+    gui_command(win, C_OCTUP, GUI_T("An &Octave Up"), "Ctrl+Shift+Up", NULL, NULL);
+    gui_command(win, C_OCTDOWN, GUI_T("An Octave Dow&n"), "Ctrl+Shift+Down", NULL, NULL);
     gui_command(win, C_TRACK, GUI_T("&New Track"), "Ctrl+T", gui_glyph("add"), GUI_T("A new track"));
     gui_command(win, C_DRUMS, GUI_T("New &Drum Track"), NULL, NULL, NULL);
     gui_command(win, C_UNTRACK, GUI_T("&Remove Track"), NULL, NULL, NULL);
@@ -1402,6 +1450,9 @@ static void build(void)
     gui_menu_command(m, C_UNDO), gui_menu_command(m, C_REDO);
     gui_menu_sep(m);
     gui_menu_command(m, C_DELETE), gui_menu_command(m, C_SELALL);
+    gui_menu_sep(m);
+    gui_menu_command(m, C_QUANT), gui_menu_command(m, C_UP), gui_menu_command(m, C_DOWN);
+    gui_menu_command(m, C_OCTUP), gui_menu_command(m, C_OCTDOWN);
     gui_menu_sep(m);
     gui_menu_command(m, C_STEP);
     {
