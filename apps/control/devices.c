@@ -305,6 +305,8 @@ static void status_lines(const struct dev *d, char *a, char *b, size_t room)
             snprintf(a, room, "%s", GUI_T("Off: the Network page's card setting is off."));
         else if (!strcmp(d->why, "usb-setting"))
             snprintf(a, room, "%s", GUI_T("Off: the USB page's setting is off."));
+        else if (!strcmp(d->why, "bios-disk"))
+            snprintf(a, room, "%s", GUI_T("Left to the BIOS, which reads the disk GLOS started from through it."));
         else if (!strcmp(d->why, "packet-driver"))
             snprintf(a, room, "%s", GUI_T("Left to a DOS packet driver, which was there first."));
         else

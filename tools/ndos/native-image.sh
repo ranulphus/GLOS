@@ -4,25 +4,31 @@
 # by GLOS's own formatter with GLOS's boot code naming GLOSLDR.SYS (tools/ndos/mkvol.c), \GLOSLDR.SYS
 # (build/ow/GLOSLDR.SYS) and \GLOS\ with GLOSK.BIN; then the files given (DOSPATH as \GLOS\GLOS.CFG, \X.EXE).
 # GLOS_CMDLINE in the environment: the loader's command line (a folder other than \GLOS for GLOS's files, flags).
-# For Loop A's --hdd. Run inside the dev container (tools/dev): gcc, mtools.
+# GLOS_DISK_MB: the disk's size (64); GLOS_HEADS: its heads (16; 255 is what a BIOS gives a USB stick);
+# GLOS_LABEL: the volume's name (GLOSNATIVE).
+# For Loop A's --hdd, and for tools/ndos/stick.py's USB stick. Run inside the dev container (tools/dev): gcc, mtools.
 set -eu
 out=${1:?"usage: native-image.sh OUT.img [SRC=DOSPATH...]"}
 shift
 here=$(cd "$(dirname "$0")/../.." && pwd)
-cyls=130
-total=$((cyls * 16 * 63))
+heads=${GLOS_HEADS:-16}
+if [ -n "${GLOS_DISK_MB:-}" ]; then
+    total=$((GLOS_DISK_MB * 2048 / (heads * 63) * heads * 63))
+else
+    total=$((130 * 16 * 63))
+fi
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 gcc -m32 -O1 -o "$tmp/mkmbr" "$here/tools/ndos/mkmbr.c" "$here/kernel/disk/mbr.c" "$here/kernel/disk/mbrboot.S"
 gcc -m32 -O1 -I"$here/kernel/include" -I"$here/include" -o "$tmp/mkvol" "$here/tools/ndos/mkvol.c" \
     "$here/kernel/disk/fatfmt.c" "$here/kernel/disk/mbr.c" "$here/kernel/disk/mbrboot.S" "$here/kernel/disk/fdboot.S" \
     "$here/sdk/config/cp.c" "$here/sdk/config/cp_tables.c"
-"$tmp/mkmbr" "$total" 0 > "$tmp/mbr" 2> "$tmp/part"
+"$tmp/mkmbr" "$total" 0 "$heads" > "$tmp/mbr" 2> "$tmp/part"
 read -r start sectors < "$tmp/part"
 rm -f "$out"
 truncate -s $((total * 512)) "$out"
 dd if="$tmp/mbr" of="$out" conv=notrunc status=none
-"$tmp/mkvol" "$out" "$start" "$sectors" GLOSNATIVE
+"$tmp/mkvol" "$out" "$start" "$sectors" "${GLOS_LABEL:-GLOSNATIVE}" "$heads"
 export MTOOLS_SKIP_CHECK=1
 i="$out@@$((start * 512))"
 # GLOSLDR.SYS, its command line (GLOS_CMDLINE: a folder for GLOS's files and GLOS.EXE's flags, 93 bytes at most)

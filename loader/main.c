@@ -438,6 +438,7 @@ static int cache_word(const char *v)
 static int flag_arg(const char *a)
 {
     if (!stricmp(a, "/ROUNDTRIP")) bi.flags |= BI_F_ROUNDTRIP;
+    else if (!stricmp(a, "/BIOSDISK")) bi.flags |= BI_F_BIOSDISK;
     else if (!stricmp(a, "/GDB")) bi.flags |= BI_F_GDB;
     else if (!stricmp(a, "/SELFTEST")) bi.flags |= BI_F_SELFTEST;
     else if (!stricmp(a, "/NOVME")) bi.flags |= BI_F_NOVME;
@@ -1278,6 +1279,39 @@ extern unsigned native_psp;
 extern unsigned char native_disk;
 int native_mount(void);
 
+/* How the BIOS reaches the disk GLOS started from, where it says: INT 13h 48h's interface type (EDD 3.0: the
+   device path, its key BEDDh at 1Eh, the type's name at 28h). The kernel leaves USB to the BIOS when its drive
+   C: is the BIOS's disk and this doesn't say it is something else (kernel/vm/vdos.c). */
+static unsigned long native_if(void)
+{
+    static unsigned char p[0x4A];
+    union REGS r;
+    struct SREGS sr;
+
+    if (native_disk < 0x80)
+        return BI_IF_OTHER;
+    memset(&r, 0, sizeof r);
+    r.h.ah = 0x41, r.x.bx = 0x55AA, r.h.dl = native_disk;
+    int86(0x13, &r, &r);
+    if (r.x.cflag || r.x.bx != 0xAA55 || !(r.x.cx & 1))
+        return BI_IF_UNKNOWN;
+    memset(p, 0, sizeof p);
+    *(unsigned *)p = 0x42;
+    segread(&sr);
+    memset(&r, 0, sizeof r);
+    r.h.ah = 0x48, r.h.dl = native_disk;
+    sr.ds = FP_SEG((void __far *)p);
+    r.x.si = FP_OFF((void __far *)p);
+    int86x(0x13, &r, &r, &sr);
+    if (r.x.cflag || *(unsigned *)p < 0x42 || *(unsigned *)(p + 0x1E) != 0xBEDD)
+        return BI_IF_UNKNOWN;
+    if (!memcmp(p + 0x28, "USB", 3))
+        return BI_IF_USB;
+    if (!memcmp(p + 0x28, "ATA", 3))
+        return BI_IF_ATA;
+    return BI_IF_OTHER;
+}
+
 /* GLOSLDR.SYS's (nstart.asm calls it): GLOS's files in \GLOS on the volume it started from, as if GLOS.EXE were
    C:\GLOS\GLOS.EXE. */
 void __cdecl native_main(void)
@@ -1300,6 +1334,9 @@ void __cdecl native_main(void)
         return;
     }
     bi.cache_mode = BI_CACHE_ON;
+    bi.boot_dl = native_disk;
+    bi.boot_if = native_if();
+    say("GLOS-BOOT step=disk dl=%02x if=%lu", native_disk, bi.boot_if);
     /* Its command line (the prelude's CMDLINE): the folder GLOS's files are in (a word that begins with a
        backslash: \GLOS if none), where GLOS.EXE would be under DOS, and GLOS.EXE's flags. GLOS.CFG's [shell]
        section is read as when GLOS is DOS's shell: natively it is the shell. */

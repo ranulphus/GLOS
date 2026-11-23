@@ -770,7 +770,9 @@ int main(void)
         memset(mem, 0, SIZE);
         memset(mem + 0x790, 0x55, (0x1744 - 0x79) * 16);           /* (the loader's code and data) */
         mem[0x790] = 0xCD, mem[0x791] = 0x20;
-        res = dos_m_init_vm(vm, mem, SIZE, 0x79, 0x1744, 0x9FC0, &vol, 2, 437);
+        res = dos_m_init_vm(vm, mem, SIZE, 0x79, 0x1744, 0x9FC0, &vol, 2, 437, 0x840, &seg);
+        CHECK(res == 0 && seg > 0x9000 && w((seg - 1) * 16 + 1) == 8 && w((seg - 1) * 16 + 3) == 0x840,
+              "the caller's block %04x", seg);
         vm->out = con, vm->now = now, vm->wait = no_more, vm->idle = idle;
         CHECK(res == 0 && dos_mem_check(&vm->mcb) == 0, "init_vm %d", res);
         CHECK(mem[0x780] == 'M' && w(0x781) == 0x79 && w(0x783) == 0x1744 - 0x79, "the loader's block %c %04x %04x",

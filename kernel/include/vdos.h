@@ -6,6 +6,8 @@
 struct bootinfo;
 struct trapframe;
 
+int vdos_c_bios(void);                  /* C: is read and written by the BIOS's calls (no driver of GLOS's has it) */
+int vdos_usb_bios(void);                /* ... and may be a USB disk: the USB controllers are left to the BIOS */
 int vdos_init(struct bootinfo *bi);     /* (vm_start, BI_F_NATIVE): the loader adopted, DOS's tables made; bootinfo's
                                            indos, sda and lol filled; 0, or -1 */
 int vdos_on(void);                      /* 1 once it answers the system VM's INT 20h and 21h */

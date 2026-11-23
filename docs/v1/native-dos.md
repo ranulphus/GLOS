@@ -660,6 +660,44 @@ bootinfo); and the ways out (`glos exit` back to DOS, DOWN, /ROUNDTRIP).
 - **NB5, the way out and the benches:** restart and power off; the 486 and bench-g400 booting natively from a
   partition of their own (with the owner's OK for each bench).
 
+### The BIOS's disks, and a USB stick (2026-11-23)
+
+The owner asked for a bootable USB stick for the next bench PCs. GLOS's boot chain (its MBR, its boot sector,
+GLOSLDR.SYS and its FAT code) reads by INT 13h alone, so it starts from whatever the BIOS can start from; what was
+missing came after the kernel's entry, where C: was GLOS's IDE driver's or nothing.
+
+- **Which disk.** The loader gives the kernel the BIOS's number of the disk it came from (`bootinfo.boot_dl`,
+  version 12) and, where the BIOS says, how it reaches that disk (`boot_if`: INT 13h 48h's interface type, EDD
+  3.0: ATA, USB, other; most BIOSes of these PCs' years don't say). At the first DOS call the kernel reads that
+  disk's first sector through the BIOS and looks for it among the ATA disks its own driver found: the same 512
+  bytes, and the disk's size (the size 48h gave, or up to a cylinder more; at least 08h's geometry's size on a
+  BIOS without 48h). Exactly one such disk: C: is GLOS's IDE driver's, through the disk cache, as before. None,
+  or two alike: **C: is read and written by the BIOS's calls** (`kernel/vm/vdos.c`, `bios_rw`). `/BIOSDISK` on
+  the loader's command line makes it so for an IDE disk too (the tests' way: 86Box has no USB disk to start from).
+- **The calls.** Nested real-mode INT 13h from the DOS call's trap, on the VM's thread (`rm_call`, as the disk
+  cache's own BIOS calls and `DISK`'s are made), 42h and 43h where the BIOS has them, else 02h and 03h a track's
+  rest at a time, three tries with a reset between. Their stack (2 KB) and their buffer (16 KB, 32 sectors, never
+  across a 64 KB boundary) are a block of DOS's memory under its tables at the top of conventional memory,
+  given back to DOS when C: turns out to be the IDE driver's. The disk cache sees the calls like a program's
+  INT 13h and answers what it holds. InDOS is set for the length of every DOS call, so nothing of the kernel's
+  enters GLOS's DOS a second time while the BIOS waits for a disk (the apps' calls are made only with it clear).
+- **USB is left to the BIOS** when C: is the BIOS's disk and the BIOS didn't say the disk is something other than
+  a USB one (`vdos_usb_bios`): taking a USB controller clears its legacy support, and the BIOS's calls for a stick
+  on it would stop there. `usb_late` says `GLOS-USB left to the BIOS: drive C: is its disk` and takes nothing
+  (the EHCI hand-off of phase H goes behind the same test); the Devices page says why. GLOS's own USB keyboards,
+  mice, pads and hubs are off on such a start; a USB keyboard works as far as the BIOS makes a PS/2 one of it.
+  GLOS's own USB storage driver (N4) ends this.
+- **The stick.** `make usb-stick` (`tools/ndos/stick.py`): `build/usb/glos-usb.img`, a disk of 255 heads by 63
+  (as a BIOS shows a stick) with GLOS's MBR, a disk signature of its own, one FAT volume, GLOSLDR.SYS and the whole
+  system in `\GLOS` as `install.py` puts it on a hard disk, a host key of its own and the owner's AUTHKEYS;
+  written with `dd`. The PC's BIOS must be able to start from a USB disk (the P4 bench can; the 440BX PCs and the
+  486 can't).
+- **Tested:** `loopa-nboot` has the NB2-NB4 case a second time with `/BIOSDISK` (bf6, 486): every file, program
+  and console check through the BIOS's calls, USB left alone on the bf6. **Not yet proved on a real PC:** a BIOS
+  whose USB disk code doesn't run in V86 mode (it would have to work under EMM386 too), a BIOS that reaches the
+  stick through a controller whose interrupt line a driver of GLOS's shares, and the stick as 80h with the PC's
+  own disk moved to 81h (GLOS's IDE driver doesn't mount the second disk yet: stage 3's drives).
+
 ## N3: booting and the boot manager
 
 ### GLOS's own start

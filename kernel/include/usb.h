@@ -81,6 +81,7 @@ void ehci_take_all(void);
 void ehci_leave(void);
 int usb_stat(char *b, u32 room);        /* glos usb */
 int usb_off(void);                      /* [usb] enabled = off */
+int usb_left(void);                     /* left to the BIOS: drive C: is a disk of the BIOS's (a USB stick's start) */
 u32 usb_hc_detail(const struct pci_dev *pd, char *b, u32 room);  /* the Devices list's: a controller of GLOS's */
 u32 usb_dev_lines(char *b, u32 room);   /* ... every device plugged in, a line each */
 

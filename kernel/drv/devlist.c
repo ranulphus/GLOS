@@ -249,6 +249,8 @@ static void pci_lines(struct out *o, char *tmp, u32 tmp_room)
             state = "off", why = refusal;
         } else if (d->class == 0x0C && d->subclass == 0x03 && d->progif == 0x00 && usb_off()) {
             state = "off", why = "usb-setting";
+        } else if (d->class == 0x0C && d->subclass == 0x03 && usb_left()) {
+            state = "off", why = "bios-disk";
         } else if (d->class == 0x03 && mga_is(d->bus, d->dev, d->fn)) {
             state = "on", driver = "mga";       /* (GLOS's engine: the desktop's drawing, and its apps' turns) */
         } else if (d->class == 0x03 && d == lfb_card) {

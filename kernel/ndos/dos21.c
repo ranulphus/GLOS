@@ -746,7 +746,7 @@ void dos_m_init(struct dos_m *m, unsigned char *mem, unsigned long size, const s
 }
 
 int dos_m_init_vm(struct dos_m *m, unsigned char *mem, unsigned long size, unsigned psp, unsigned top,
-                  unsigned low_top, struct fsv_vol *v, int drive, int cp)
+                  unsigned low_top, struct fsv_vol *v, int drive, int cp, unsigned extra, unsigned *extra_seg)
 {
     unsigned long bytes = 0x12 + 0x70 + DOS_SDA_SIZE + 0x10 + 6 + (unsigned long)DOS_FILES * DOS_SFT_SIZE;
     unsigned paras = (unsigned)((bytes + 15) / 16), seg, largest, i;
@@ -765,6 +765,8 @@ int dos_m_init_vm(struct dos_m *m, unsigned char *mem, unsigned long size, unsig
         return -1;
     dos_mem_strategy(&m->mcb, 0x02);
     if (dos_mem_alloc(&m->mcb, paras, 0x0008, &seg, &largest) != 0)
+        return -1;
+    if (extra && dos_mem_alloc(&m->mcb, extra, 0x0008, extra_seg, &largest) != 0)
         return -1;
     dos_mem_strategy(&m->mcb, 0x00);
     for (i = 0; i < 8; i++)                     /* (its name, as DOS's own blocks have "SC" or "SD") */

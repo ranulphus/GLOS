@@ -9,12 +9,17 @@
  * memory; INT 20h and 21h's vectors point at ARPLs there (a far call to "DOS's handler", as rm_call and the DPMI
  * host's reflection make, arrives as a #UD: vdos_arpl). A call that would wait for a key comes back to the program
  * at its INT, the VM idling in between as at DOS's own console wait (no wait in a trap: the VM thread is also the
- * apps' and the DOS server's). C: is the volume GLOS started from, mounted at the first call (fsv.c over GLOS's
- * IDE driver, in the trap, as the cache's own INT 13h is). */
+ * apps' and the DOS server's). C: is the volume GLOS started from, mounted at the first call: fsv.c over GLOS's
+ * IDE driver (in the trap, as the cache's own INT 13h is) when the BIOS's disk is an IDE disk GLOS drives, else
+ * over the BIOS's own calls (a USB stick, a SCSI or SATA disk: "the BIOS's disks" below). */
 #include <string.h>
 
 #include "glos/bootinfo.h"
+#include "agent.h"
+#include "app.h"
+#include "arch.h"
 #include "clock.h"
+#include "dpmi.h"
 #include "kprintf.h"
 #include "timer.h"
 #include "vm.h"
@@ -36,22 +41,121 @@ static struct ata_dev *cdev;
 static unsigned long cbase;
 static int ready, mounted, unanswered;
 
+/* ---- the BIOS's disks
+
+   A disk GLOS has no driver for is read and written by the BIOS's INT 13h, as nested real-mode calls from the
+   trap (the VM's thread: rm_call; the disk cache answers what it holds on the way, as for a program's INT 13h).
+   The calls' stack and the sectors' buffer are a block of DOS's memory under its tables (dos_m_init_vm's extra;
+   the BIOS wants its data below 1 MB), given back when C: turns out to be GLOS's own driver's: 2 KB for a
+   request packet at its start and the stack above it, then 16 KB of sectors, the part of them used never across
+   a 64 KB boundary (a BIOS's DMA). */
+#define X_HEAD      0x800u
+#define X_PARAS     (X_HEAD / 16 + 0x400)
+static unsigned xseg;                           /* the block; 0: none */
+static u32 xdata, xrun;                         /* the buffer (linear) and the sectors it holds */
+static struct bi_disk *bdsk;                    /* the BIOS's disk C: is on (bootinfo's) */
+static int cbios;                               /* C: is read by the BIOS's calls */
+
+/* INT 13h: 0, or the BIOS's error (FFh: none said). */
+static int bios13(struct rmregs *r)
+{
+    r->ss = (u16)xseg;
+    r->sp = X_HEAD;
+    r->flags = 2;
+    if (rm_call(0, r, RM_INT, 0x13, 0, 0) != 0)
+        return 0xFF;
+    if (!(r->flags & 1))
+        return 0;
+    return (r->eax >> 8) & 0xFF ? (int)((r->eax >> 8) & 0xFF) : 0xFF;
+}
+
+/* count sectors of the disk at lba: the BIOS's LBA calls where it has them, else cylinder, head and sector, a
+   track's rest at a time; a call that fails is made again after a reset, three times. 0, or the BIOS's error. */
+static int bios_rw(int write, u32 lba, u8 *buf, u32 count)
+{
+    struct rmregs r;
+    int e = 0, tries;
+
+    if (!xseg || !bdsk)
+        return 0xFF;
+    while (count) {
+        u32 k = count < xrun ? count : xrun, c = 0, h = 0, s = 0;
+
+        if (!(bdsk->flags & BI_DISK_EDD)) {
+            u32 track = bdsk->heads * bdsk->spt, t;
+
+            if (!track)
+                return 0x01;
+            c = lba / track, t = lba % track, h = t / bdsk->spt, s = t % bdsk->spt;
+            if (k > bdsk->spt - s)
+                k = bdsk->spt - s;
+            if (c > 1023)
+                return 0x01;
+        }
+        if (write)
+            memcpy(vm_ptr(xdata), buf, k * 512);
+        for (tries = 0; tries < 3; tries++) {
+            memset(&r, 0, sizeof r);
+            if (bdsk->flags & BI_DISK_EDD) {
+                u8 *p = vm_ptr((u32)xseg << 4);
+
+                memset(p, 0, 16);
+                p[0] = 16, p[2] = (u8)k, p[4] = (u8)(xdata & 15), p[6] = (u8)(xdata >> 4), p[7] = (u8)(xdata >> 12);
+                p[8] = (u8)lba, p[9] = (u8)(lba >> 8), p[10] = (u8)(lba >> 16), p[11] = (u8)(lba >> 24);
+                r.eax = write ? 0x4300 : 0x4200;
+                r.ds = (u16)xseg;
+            } else {
+                r.eax = (write ? 0x0300u : 0x0200u) | k;
+                r.ecx = ((c & 0xFF) << 8) | ((c >> 2) & 0xC0) | (s + 1);
+                r.edx = h << 8;
+                r.es = (u16)(xdata >> 4);
+                r.ebx = xdata & 15;
+            }
+            r.edx |= bdsk->dl;
+            if ((e = bios13(&r)) == 0)
+                break;
+            memset(&r, 0, sizeof r);
+            r.edx = bdsk->dl;
+            bios13(&r);
+        }
+        if (e)
+            return e;
+        if (!write)
+            memcpy(buf, vm_ptr(xdata), k * 512);
+        lba += k, buf += k * 512, count -= k;
+    }
+    return 0;
+}
+
+int vdos_c_bios(void) { return cbios; }
+
+/* GLOS leaves the PC's USB controllers to the BIOS when C: is the BIOS's disk and the BIOS doesn't say that the
+   disk is something other than a USB one: its calls for a USB stick stop the moment GLOS takes the controller
+   the stick is on (kernel/drv/uhci.c). */
+int vdos_usb_bios(void)
+{
+    if (ready && !mounted)
+        kprintf("GLOS-WARN native: USB asked about before C: was mounted\n");
+    return cbios && vm.bi->boot_if != BI_IF_ATA && vm.bi->boot_if != BI_IF_OTHER;
+}
+
 /* ---- C: */
 
+/* (through the disk cache, which a program's own INT 13h on the same disk goes through too) */
 static int c_read(void *ctx, unsigned long lba, unsigned char *buf, unsigned count)
 {
     (void)ctx;
-    return ata_read(cdev, cbase + lba, 0, count, buf, 0) != 0;
+    if (cbios)
+        return bios_rw(0, (u32)(cbase + lba), buf, count) != 0;
+    return cache_kread(0x80, cdev, (u32)(cbase + lba), count, buf) != 0;
 }
 
-/* (past the block cache, which then forgets those sectors: a program's INT 13h through it reads them again) */
 static int c_write(void *ctx, unsigned long lba, const unsigned char *buf, unsigned count)
 {
-    int r = ata_write(cdev, cbase + lba, 0, count, buf, 0);
-
     (void)ctx;
-    cache_forget(0x80, (u32)(cbase + lba), count);
-    return r != 0;
+    if (cbios)
+        return bios_rw(1, (u32)(cbase + lba), (u8 *)buf, count) != 0;
+    return cache_kwrite(0x80, cdev, (u32)(cbase + lba), count, buf) != 0;
 }
 
 static unsigned long c_now(void *ctx)
@@ -72,20 +176,39 @@ static int is_fat(unsigned t)
     return t == 0x01 || t == 0x04 || t == 0x06 || t == 0x0B || t == 0x0C || t == 0x0E;
 }
 
-/* The disk the BIOS calls 80h: the ATA disk of its size (bootinfo's disks), else the first; its active FAT
-   partition, else the whole disk. */
+/* The disk GLOS started from (the BIOS's number of it from the loader; 80h for a floppy's start): the one IDE
+   disk GLOS drives whose first sector is that disk's as the BIOS reads it, and whose size is its size (the size
+   the BIOS's 48h gives, or up to a cylinder more, a BIOS's rounding; at least the size of 08h's geometry on a
+   BIOS without 48h), by GLOS's IDE driver; none, or two alike, and the disk is read by the BIOS's calls (so is
+   every disk with /BIOSDISK: the tests'). If the BIOS can't be asked: the ATA disk of its size, else the first.
+   Then the disk's active FAT partition, else the whole disk. */
 static void mount_c(void)
 {
-    static unsigned char s[512];
-    unsigned long want = vm.bi->n_disks ? vm.bi->disks[0].sectors_lo : 0;
+    static unsigned char s[512], s0[512];
+    u32 dl = vm.bi->boot_dl >= 0x80 ? vm.bi->boot_dl : 0x80;
+    unsigned long want;
     struct ata_dev *d;
-    int i, r = -1;
+    int i, r = -1, hits = 0, asked;
 
     mounted = 1;
+    for (i = 0; i < (int)vm.bi->n_disks; i++)
+        if (vm.bi->disks[i].dl == dl && vm.bi->disks[i].bps == 512)
+            bdsk = &vm.bi->disks[i];
+    want = bdsk ? bdsk->sectors_lo : 0;
     ide_probe(ATA_PROBE_OWN);
+    asked = bios_rw(0, 0, s0, 1) == 0;
     for (i = 0; (d = ide_dev(i)) != 0; i++) {
         if (!d->present || d->atapi)
             continue;
+        if (asked) {
+            int size = d->sectors_hi || d->sectors_lo >= want;
+
+            if (size && (bdsk->flags & BI_DISK_PARAMS) && !bdsk->sectors_hi)
+                size = !d->sectors_hi && d->sectors_lo - want <= 255u * 63;
+            if (size && !(vm.bi->flags & BI_F_BIOSDISK) && ata_read(d, 0, 0, 1, s, 0) == 0 && !memcmp(s, s0, 512))
+                hits++, cdev = d;
+            continue;
+        }
         if (want && d->sectors_lo == want) {
             cdev = d;
             break;
@@ -93,7 +216,20 @@ static void mount_c(void)
         if (!cdev)
             cdev = d;
     }
-    if (cdev && ata_read(cdev, 0, 0, 1, s, 0) == 0) {
+    if (asked && hits != 1)
+        cdev = 0, cbios = 1;
+    if (!cbios && xseg) {                       /* (GLOS's own driver: the BIOS's calls' block back to DOS) */
+        dos_mem_free(&vd.mcb, xseg);
+        xseg = 0;
+    }
+    if (cbios) {
+        memcpy(s, s0, 512);
+        r = 0;
+    } else if (cdev) {
+        r = ata_read(cdev, 0, 0, 1, s, 0);
+    }
+    if (r == 0) {
+        r = -1;
         cbase = 0;
         if (s[510] == 0x55 && s[511] == 0xAA)
             for (i = 0; i < 4; i++)
@@ -106,16 +242,25 @@ static void mount_c(void)
     }
     vd.vol[2] = r == 0 ? &cvol : 0;
     vd.cds.valid = r == 0 ? 1u << 2 : 0;
-    kprintf("GLOS-NATIVE step=c disk=%s base=%u mount=%d\n", cdev ? cdev->model : "none", (u32)cbase, r);
+    kprintf("GLOS-NATIVE step=c dl=%02x disk=%s if=%u base=%u mount=%d\n", dl, cbios ? "bios" : cdev ? cdev->model : "none",
+            (u32)vm.bi->boot_if, (u32)cbase, r);
 }
 
 /* ---- the machine */
 
-/* A program's CON output: on the screen, as the BIOS's teletype writes it (the agent's capture has seen the call). */
+/* A program's CON output, a character at a time where a DOS's console driver would make INT 29h: the agent's
+   hook there first (a console job's window has it, and nothing else; a job whose output is kept has it too), then
+   the screen, as the BIOS's teletype writes it. */
 static void vd_out(void *ctx, const char *s, unsigned n)
 {
+    struct trapframe f;
+
     (void)ctx;
-    vcon_tty(s, n);
+    for (; n; n--, s++) {
+        f.eax = (u8)*s;
+        if (!agent_vm_int29(&f))
+            vcon_tty(s, 1);
+    }
 }
 
 static unsigned long vd_now(void *ctx)
@@ -179,9 +324,20 @@ int vdos_init(struct bootinfo *bi)
     u8 *mem = vm_ptr(0);
     int i;
 
-    if (dos_m_init_vm(&vd, mem, (unsigned long)low_top * 16, psp, top, low_top, 0, 2, 437) != 0) {
+    if (dos_m_init_vm(&vd, mem, (unsigned long)low_top * 16, psp, top, low_top, 0, 2, 437, X_PARAS, &xseg) != 0) {
         kprintf("GLOS-NATIVE step=dos error psp=%04x top=%04x low_top=%04x\n", psp, top, low_top);
         return -1;
+    }
+    {                                           /* the sectors' buffer: the larger side of a 64 KB boundary in it */
+        u32 lin = ((u32)xseg << 4) + X_HEAD, end = ((u32)xseg + X_PARAS) << 4, edge = (lin + 0xFFFF) & ~0xFFFFu;
+
+        if (edge > lin && edge < end) {
+            if (edge - lin >= end - edge)
+                end = edge;
+            else
+                lin = edge;
+        }
+        xdata = lin, xrun = (end - lin) / 512;
     }
     vd.out = vd_out, vd.now = vd_now, vd.wait = vd_wait, vd.fill = vd_fill;
     bi->indos = vd.lay.sda + 1;
@@ -248,7 +404,14 @@ void vdos_int(struct trapframe *tf, u8 n, u32 ret, u32 at, int via_arpl)
     if (!mounted)
         mount_c();
     to_regs(tf, &r, ret);
+    /* The call, its disk's waits giving the processor to other threads (ide_patient): an app's own threads, the
+       mixer and the network go on while a program is in DOS, as they do while a DOS under GLOS is in the BIOS. */
+    ide_patient(1);
+    vm_wr8(vm.indos, (u8)(vm_rd8(vm.indos) + 1));        /* (InDOS, as a DOS has it during a call: the agent's hooks
+                                                           and the kill look at it) */
     res = n == 0x20 ? dos20(&vd, &r) : dos21(&vd, &r);
+    vm_wr8(vm.indos, (u8)(vm_rd8(vm.indos) - 1));
+    ide_patient(0);
     if (res == DOS21_GONE) {                    /* a key waited for: back to the INT, the VM idling meanwhile */
         if (via_arpl) {
             push16(tf, tf->eflags & 0xFFFF);
@@ -259,7 +422,10 @@ void vdos_int(struct trapframe *tf, u8 n, u32 ret, u32 at, int via_arpl)
         } else {
             tf->eip = at;
         }
-        vm_idle(timer_ticks() + 8);
+        app_vm_idle_turn(0);                    /* (an app's own calls meanwhile, as at a DOS's wait for a key: its
+                                                   console job's keys may be what it is about to type) */
+        if (vm_rd16(0x41A) == vm_rd16(0x41C))
+            vm_idle(timer_ticks() + 8);
         return;
     }
     if (res == DOS21_CTRLC) {

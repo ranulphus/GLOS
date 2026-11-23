@@ -201,6 +201,23 @@ def hx_done(text):
     return "HX-DONE 0" in text or (NATIVE and "GLOS-EXIT code=" in text)
 
 
+def said_lines(text, line):
+    """How many times the PC said the line, as a line of its own (natively RUN.BAT's lines are run by GLOS's
+    shell, and the agent's log quotes each command)."""
+    return len(re.findall(r"^%s$" % re.escape(line), text, re.M))
+
+
+def home_prompt():
+    """The prompt on the PC's own screen at the start: the folder DOS was in when GLOS started (A:\\, Loop A's boot
+    floppy's), or natively the folder AUTOEXEC.BAT's session is left in (RUN.BAT's CD \\TEST)."""
+    return "C:\\TEST>" if NATIVE else "A:\\>"
+
+
+def vm_line():
+    """The line GLOS says when it starts as the agent; natively it starts as the shell and the agent at once."""
+    return "GLOS-VM shell own autoexec=" if NATIVE else "GLOS-VM agent comspec="
+
+
 def hx_vecchk(text):
     """DOS's vectors as they were before GLOS (VECCHK check, after GLOS.EXE): natively there is no DOS to give them
     back to, and nothing runs after GLOS."""
@@ -272,9 +289,14 @@ def native_args(name, args):
     with open(os.path.join(work, "AUTOEXEC.BAT"), "w", newline="") as f:
         f.write("@ECHO OFF\r\nSET PATH=C:\\HX;C:\\FREEDOS\\BIN\r\nIF EXIST C:\\RUN.BAT CALL C:\\RUN.BAT\r\n"
                 + ("IF EXIST C:\\RUN.BAT C:\\HX\\UTEXIT 125\r\n" if boot == "glosshell" else ""))
+    mouse = "--mouse" in rest and rest[rest.index("--mouse") + 1] != "none"
     with open(os.path.join(work, "RUN.BAT"), "w", newline="") as f:
-        f.write("\r\n".join(["C:", "CD \\TEST", "SERSAY HX-BOOT loop=A test=%s" % name] + lines) + "\r\n")
+        f.write("\r\n".join(["C:", "CD \\TEST", "SERSAY HX-BOOT loop=A test=%s" % name]
+                            + (["CTMOUSE"] if mouse else []) + lines) + "\r\n")      # (as run.py's RUN.BAT has it)
     put = [os.path.join(work, "AUTOEXEC.BAT") + "=\\AUTOEXEC.BAT", os.path.join(work, "RUN.BAT") + "=\\RUN.BAT"]
+    if mouse:                                   # (CuteMouse, the DOS programs' mouse until GLOS's own INT 33h: run.py's)
+        import run as loopa_run
+        put += [loopa_run.ctmouse(work) + "=\\HX\\CTMOUSE.EXE"]
     put += [os.path.join(MGA, "build/ow/dos", t) + "=\\HX\\" + t for t in HX_TOOLS]
     put += [os.path.join(WATCOM, "binw/dos4gw.exe") + "=\\HX\\DOS4GW.EXE"]
     if os.path.exists(CWSDPMI):
@@ -1867,6 +1889,7 @@ class Agent:
             "--machine", profile, "--net", card, "--net-fwd", "%d:22" % self.port, "--timeout", str(timeout),
             "--idle", "300"] + (GLOS_FILES + KEYS if files else []) + args, background=True)   # (files: a native
                                                                     # boot's disk has them: --hdd takes none)
+        self.autoexec = NATIVE and files        # (a native run's RUN.BAT is run by GLOS, after it starts: listening)
         self.serial = os.path.join(ROOT, "out", self.proc.run_name, "serial.log")
         self.tmp = tempfile.mkdtemp()
         self.key, known = os.path.join(self.tmp, "client"), os.path.join(self.tmp, "known")
@@ -1891,8 +1914,10 @@ class Agent:
             text = self.log()
             if after:
                 text = text[text.index(after):] if after in text else ""
-            if ("GLOS-NET dhcp" in text or "GLOS-NET cable member" in text) and "GLOS-SSH listen" in text:
-                return True                     # (an address by a card, or by a cable that is the PC's network)
+            if ("GLOS-NET dhcp" in text or "GLOS-NET cable member" in text) and "GLOS-SSH listen" in text \
+                    and (not self.autoexec or "GLOS-SHELL autoexec done" in text):
+                return True                     # (an address by a card, or by a cable that is the PC's network;
+                                                # natively, RUN.BAT's lines before GLOS.EXE done as well)
             time.sleep(1)
         return False
 
@@ -1999,7 +2024,7 @@ def reboot_case(profile, card):
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
     text = agent.wait()
-    checks["line"] = "GLOS-REBOOT\n" in text and text.count("HX-START reboot") == 2
+    checks["line"] = "GLOS-REBOOT\n" in text and said_lines(text, "HX-START reboot") == 2
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
     checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text)
     bad = [k for k, v in checks.items() if not v]
@@ -2152,7 +2177,7 @@ def idle_case(profile, card):
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
     text = agent.wait()
-    checks["line"] = "GLOS-REBOOT source=cad\n" in text and text.count("HX-START idle") == 2
+    checks["line"] = "GLOS-REBOOT source=cad\n" in text and said_lines(text, "HX-START idle") == 2
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
     checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text)
     bad = [k for k, v in checks.items() if not v]
@@ -3098,6 +3123,8 @@ def restart_case(profile, card):
     loops back on it to start GLOS.EXE again: no reset, GLOS answering again in seconds; then glos exit (0) falls
     through. VECCHK clean after both."""
     import time
+    if NATIVE:                                  # (natively glos restart restarts the PC, as when GLOS is DOS's shell)
+        raise HostedOnly("glos restart's loop in a DOS's batch file")
     tag = "restart-%s-%s" % (profile, card)
     agent = Agent("ssh-" + tag, profile, card, ["--cmd", "SERSAY HX-START restart", "--cmd", "VECCHK save",
                                                 "--cmd", ":again", "--cmd", "C:\\TEST\\GLOS.EXE",
@@ -3202,16 +3229,17 @@ def ssh_case(profile, card):
             return False
 
         ssh("cls")                              # (the DOS's CLS, as a job: the prompt again on the cleared screen)
-        checks["shot-cls"] = text_rows(["A:\\>"])
+        checks["shot-cls"] = text_rows([home_prompt()])
         ssh("echoargs GOLDEN")
-        checks["shot-rows"] = text_rows(["A:\\>", "GOLDEN", "nine two six int29", "echoargs: 1 arguments", "A:\\>"])
+        checks["shot-rows"] = text_rows([home_prompt(), "GOLDEN", "nine two six int29", "echoargs: 1 arguments",
+                                         home_prompt()])
         p = subprocess.run(opts + ["glos@127.0.0.1", "glos shot"], capture_output=True, timeout=180)
         open(os.path.join(ROOT, "out", "ssh-" + tag, "shot.png"), "wb").write(p.stdout)
         px = png_pixels(p.stdout)
         checks["shot"] = p.returncode == 0 and px is not None and px[:2] == (640, 400) \
-            and golden("shot-" + profile, px[2])
+            and (NATIVE or golden("shot-" + profile, px[2]))   # (the golden picture has the hosted prompt, A:\\>)
         rc, out, _ = ssh("glos log")
-        checks["log"] = rc == 0 and "GLOS-SSH exec=\"glos shot\"" in out and "GLOS-VM agent comspec=" in out
+        checks["log"] = rc == 0 and "GLOS-SSH exec=\"glos shot\"" in out and vm_line() in out
         rc, out, _ = ssh("glos ps")
         checks["ps"] = rc == 0 and "thread vm normal" in out and "dos psp=" in out
         slow = subprocess.Popen(opts + ["glos@127.0.0.1", "WAITSEC 120"], stdout=subprocess.DEVNULL,
@@ -3260,7 +3288,7 @@ def ssh_case(profile, card):
         # A second apart, or more: the ssh thread is a bulk one, and on a 486 a key exchange beside it (the
         # commands below) has held a line back by half a second.
         checks["stat-follow"] = len(ticks) >= 2 and all(900 <= b - a <= 3000 for a, b in zip(ticks, ticks[1:]))
-        checks["log-follow"] = ("GLOS-VM agent comspec=" in followed          # the log so far, then as it grows
+        checks["log-follow"] = (vm_line() in followed          # the log so far, then as it grows
                                 and 'GLOS-SSH exec="glos echo marker2-%s"' % tag in followed)
         if not (checks["stat-follow"] and checks["log-follow"]):
             info += " follow=%r/%d" % (ticks, len(followed))
@@ -7456,23 +7484,27 @@ def nboot_case(profile, card):
                                "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
-def nboot_dos_case(profile, card):
+def nboot_dos_case(profile, card, bios=False):
     """Native boot, NB2 (docs/v1/native-dos.md, native boot): GLOS started with no DOS, its own DOS in the system VM
     (kernel/vm/vdos.c): the loader adopted as the running program, the stub resident on GLOS's own DOS (4Ah, the
     master environment by 48h), the agent up and SSH listening; GLOS.CFG read by the kernel through the DOS server
     (the stub's INT 21h, GLOS's own DOS, C: the volume GLOS started from by GLOS's IDE driver); the shell's VER, a
-    folder listed, a file written and read back on C:, GLOS's own COMMAND.COM run as a job (COMSPEC /C)."""
-    img = os.path.join(ROOT, "out", "nboot2-img-" + profile, "c.img")
+    folder listed, a file written and read back on C:, GLOS's own COMMAND.COM run as a job (COMSPEC /C).
+
+    bios: the loader's /BIOSDISK, so C: is read and written by the BIOS's INT 13h as a disk GLOS has no driver for
+    is (a USB stick, a SCSI disk; 86Box has neither to start from), and the USB controller is left to the BIOS."""
+    tag = "nboot2b" if bios else "nboot2"
+    img = os.path.join(ROOT, "out", tag + "-img-" + profile, "c.img")
     os.makedirs(os.path.dirname(img), exist_ok=True)
-    cfg = batfile("nboot2-%s/GLOS.CFG" % profile, ["; jobs.py nboot: NB2 (SNTP on: the clock, as every run's)"])
+    cfg = batfile("%s-%s/GLOS.CFG" % (tag, profile), ["; jobs.py nboot: NB2 (SNTP on: the clock, as every run's)"])
     mk = subprocess.run(["sh", "tools/ndos/native-image.sh", img, cfg + "=\\GLOS\\GLOS.CFG",
                          "build/glos/COMMAND.COM=\\GLOS\\COMMAND.COM", "tests/keys/hostkey=\\GLOS\\KEYS\\HOSTKEY",
                          "tests/keys/AUTHKEYS=\\GLOS\\KEYS\\AUTHKEYS", "build/ow/dos/TYPEIN.EXE=\\GLOS\\TYPEIN.EXE",
                          "build/ow/dos/CONTEST.EXE=\\GLOS\\CONTEST.EXE", "build/ow/dos/NDOSTEST.EXE=\\GLOS\\NDOSTEST.EXE",
                          "build/ow/dos/DOSDIFF.EXE=\\GLOS\\DOSDIFF.EXE", "build/dj/DOSCALLS.EXE=\\GLOS\\DOSCALLS.EXE"],
-                        cwd=ROOT, capture_output=True)
+                        cwd=ROOT, capture_output=True, env=dict(os.environ, GLOS_CMDLINE="/BIOSDISK" if bios else ""))
     checks, info = {"image": mk.returncode == 0}, ""
-    agent = Agent("nboot2-%s-%s" % (profile, card), profile, card, ["--hdd", img], timeout=600, files=False)
+    agent = Agent("%s-%s-%s" % (tag, profile, card), profile, card, ["--hdd", img], timeout=600, files=False)
     try:
         checks["listen"] = agent.listening()
         if checks["listen"]:
@@ -7540,7 +7572,13 @@ def nboot_dos_case(profile, card):
         checks["timeout"] = False
     agent.proc.kill()
     text = agent.log()
-    checks["native"] = "GLOS-NATIVE step=dos" in text and re.search(r"GLOS-NATIVE step=c disk=\S.* mount=0", text) is not None
+    m = re.search(r"GLOS-NATIVE step=c dl=80 disk=(\S+) .* mount=0", text)
+    checks["native"] = "GLOS-NATIVE step=dos" in text and m is not None
+    # C: by GLOS's IDE driver (the BIOS's disk found among its own, and USB GLOS's), or by the BIOS's calls (USB the
+    # BIOS's: nothing says the disk isn't a USB one's).
+    checks["disk"] = m is not None and (m.group(1) == "bios") == bios
+    if profile == "bf6":                        # (it has a UHCI controller)
+        checks["usb"] = ("GLOS-USB left to the BIOS" in text) == bios and ("GLOS-USB uhci" in text) != bios
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-REFUSE" not in text
     asked = sorted(set(re.findall(r"GLOS-NATIVE unanswered int=(\w+) ax=(\w+)", text)))
     if asked:
@@ -7548,7 +7586,7 @@ def nboot_dos_case(profile, card):
     bad = [k for k, v in checks.items() if not v]
     if not checks["image"]:
         info += " image=%r" % mk.stderr.decode("latin-1")[-200:]
-    return "  %-22s %s%s%s" % ("nboot2-" + profile, "PASS" if not bad else "FAIL", info,
+    return "  %-22s %s%s%s" % (tag + "-" + profile, "PASS" if not bad else "FAIL", info,
                                "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
@@ -12676,6 +12714,8 @@ def main():
         cases = [c for c in [("bf6", None), ("486dx2", None)] if not a.profile or c[0] in a.profile]
         res = matrix(nboot_case, cases, a.jobs)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
+        res += matrix(nboot_dos_case, cases, a.jobs)
+        cases = [c + (True,) for c in cases]    # (C: by the BIOS's calls: a start from a USB stick's way)
         res += matrix(nboot_dos_case, cases, a.jobs)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "ndos":                       # (native machines: the bf6 with VME, the 486 without)

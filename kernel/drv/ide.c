@@ -45,9 +45,19 @@ static void k_out16s(void *ctx, unsigned port, const unsigned short *buf, unsign
     __asm__ volatile("cld; rep outsw" : "+S"(buf), "+c"(count) : "d"((u16)port) : "memory");
 }
 
+static int patient;
+
+void ide_patient(int on) { patient = on; }
+
 static unsigned long k_ms(void *ctx)
 {
     (void)ctx;
+    if (patient) {                      /* (other threads meanwhile: ide.h) */
+        sti();
+        thread_yield();
+        cli();
+        return timer_ticks();
+    }
     preempt_disable();                  /* (interrupts in for a moment, no other thread) */
     sti();
     __asm__ volatile("nop");

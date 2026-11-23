@@ -11,7 +11,7 @@ typedef unsigned int   bi_u32;
 #endif
 
 #define BOOTINFO_MAGIC   0x4F4F4247UL           /* "GBOO" */
-#define BOOTINFO_VERSION 11
+#define BOOTINFO_VERSION 12
 
 #define KERNEL_MAGIC     0x4B4F4C47UL           /* "GLOK", first word of GLOSK.BIN */
 #define KERNEL_LINK      0xC0100000UL           /* where the kernel is linked */
@@ -44,6 +44,7 @@ typedef unsigned int   bi_u32;
 #define BI_F_NOCARD      0x0400                 /* [net] card = off: no network card is looked for */
 #define BI_F_VERBOSE     0x0200                 /* /VERBOSE: the kernel's log lines on the text screen too */
 #define BI_F_NATIVE      0x1000                 /* GLOSLDR.SYS started GLOS: no DOS in the system VM (native boot) */
+#define BI_F_BIOSDISK    0x2000                 /* /BIOSDISK: a native boot's C: by the BIOS's calls, an IDE disk too */
 
 /* glos_call() functions (the ARPL at bp_call_off, AX = fn, EBX = arg). */
 #define GLOS_CALL_LEAVE  1                      /* stop the VM, back to real mode; arg = exit code */
@@ -179,7 +180,15 @@ struct bootinfo {
                                                    GLOS.CFG); empty: none */
     /* version 11: GLOS's own IDE driver (docs/v1/native-dos.md, N1c) */
     bi_u32 cache_driver;                        /* [cache] driver: 0 bios, 1 glos, 2 glos-read (its reads only) */
+    /* version 12: a native boot's disk (docs/v1/native-dos.md, the BIOS's disks) */
+    bi_u32 boot_dl;                             /* the BIOS's number of the disk GLOSLDR.SYS came from; 0: GLOS.EXE's */
+    bi_u32 boot_if;                             /* how the BIOS reaches it, where it says (INT 13h 48h, EDD 3.0's
+                                                   interface type): BI_IF_* */
 };
+#define BI_IF_UNKNOWN 0u
+#define BI_IF_ATA     1u                        /* "ATA", "ATAPI" */
+#define BI_IF_USB     2u
+#define BI_IF_OTHER   3u                        /* SCSI, 1394, a floppy drive, ... */
 #define BI_CABLE_SERVER 1u
 #define BI_CABLE_CLIENT 2u
 #define BI_INT2F_PSP 0x5Cu                     /* PSP:5Ch, the FCB area, which GLOS's own PSP doesn't use */

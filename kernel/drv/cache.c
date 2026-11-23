@@ -181,8 +181,8 @@ static u32 new_block(u32 key)
 
 static u8 bits(u32 first, u32 n) { return (u8)(((1u << n) - 1) << first); }
 
-/* Sectors [lba, lba + n) of drive di from linear src into the cache, unless everything was dropped since gen. */
-static void keep(u32 di, u32 lba, u32 n, u32 src, u32 gen)
+/* Sectors [lba, lba + n) of drive di from src into the cache, unless everything was dropped since gen. */
+static void keep_p(u32 di, u32 lba, u32 n, const u8 *src, u32 gen)
 {
     while (n) {
         u32 first = lba & 7, k = 8 - first, f, fl;
@@ -195,7 +195,7 @@ static void keep(u32 di, u32 lba, u32 n, u32 src, u32 gen)
                 f = new_block(CS_KEY(di, lba));
             if (f != CS_NIL) {
                 p = kmap(f << 12);
-                memcpy(p + first * 512, vm_ptr(src), k * 512);
+                memcpy(p + first * 512, src, k * 512);
                 kunmap(p);
                 c.s.b[f].valid |= bits(first, k);
             }
@@ -206,6 +206,9 @@ static void keep(u32 di, u32 lba, u32 n, u32 src, u32 gen)
         src += k * 512;
     }
 }
+
+/* ... from the system VM's memory at linear src. */
+static void keep(u32 di, u32 lba, u32 n, u32 src, u32 gen) { keep_p(di, lba, n, vm_ptr(src), gen); }
 
 /* Sectors [lba, lba + n) of drive di dropped (before a write). */
 static void forget(u32 di, u32 lba, u32 n)
@@ -258,9 +261,9 @@ static int have(u32 di, u32 lba)
     return r;
 }
 
-/* Sectors [lba, lba + n) to linear dst; promote: they were here before this request. 0, or -1 if one of them
+/* Sectors [lba, lba + n) to dst; promote: they were here before this request. 0, or -1 if one of them
    has gone meanwhile (reclaimed): the caller reads them from the disk instead. */
-static int give(u32 di, u32 lba, u32 n, u32 dst, int promote)
+static int give_p(u32 di, u32 lba, u32 n, u8 *dst, int promote)
 {
     u32 last = CS_NIL;
     while (n) {
@@ -275,7 +278,7 @@ static int give(u32 di, u32 lba, u32 n, u32 dst, int promote)
             return -1;
         }
         p = kmap(f << 12);
-        memcpy(vm_ptr(dst), p + first * 512, k * 512);
+        memcpy(dst, p + first * 512, k * 512);
         kunmap(p);
         if (promote && f != last)
             cs_hit(&c.s, f);
@@ -284,6 +287,68 @@ static int give(u32 di, u32 lba, u32 n, u32 dst, int promote)
         lba += k;
         n -= k;
         dst += k * 512;
+    }
+    return 0;
+}
+
+/* ... to the system VM's memory at linear dst. */
+static int give(u32 di, u32 lba, u32 n, u32 dst, int promote) { return give_p(di, lba, n, vm_ptr(dst), promote); }
+
+/* ---- the kernel's own file system (a native boot's volumes, kernel/vm/vdos.c): sectors of BIOS drive dl on IDE
+   disk dev read and written through the cache, from the VM's thread as every use of the cache is. A read takes
+   what is here and reads the rest from the disk, kept; a write goes to the disk and what was written is kept
+   (the cache writes through). 0, or kernel/drv/ata.c's error. */
+static struct drive *kdrive(u32 dl)
+{
+    u32 i;
+
+    if (c.ready && (c.mode == BI_CACHE_ON || c.mode == BI_CACHE_VERIFY) && !c.direct)
+        for (i = 0; i < c.nd; i++)
+            if (c.d[i].dl == dl)
+                return &c.d[i];
+    return 0;
+}
+
+int cache_kread(u32 dl, struct ata_dev *dev, u32 lba, u32 n, u8 *buf)
+{
+    struct drive *d = kdrive(dl);
+    u32 k, gen;
+    int r;
+
+    if (!d)
+        return ata_read(dev, lba, 0, n, buf, 0);
+    while (n) {
+        for (k = 0; k < n && have(d->idx, lba + k); k++)
+            ;
+        if (k && give_p(d->idx, lba, k, buf, 1) == 0) {
+            c.hits++, c.hit_sectors += k;
+        } else {
+            for (k = 1; k < n && !have(d->idx, lba + k); k++)
+                ;
+            gen = c.gen;
+            if ((r = ata_read(dev, lba, 0, k, buf, 0)) != 0)
+                return r;
+            keep_p(d->idx, lba, k, buf, gen);
+            c.misses++, c.miss_sectors += k;
+        }
+        lba += k, buf += k * 512, n -= k;
+    }
+    return 0;
+}
+
+int cache_kwrite(u32 dl, struct ata_dev *dev, u32 lba, u32 n, const u8 *buf)
+{
+    struct drive *d = kdrive(dl);
+    u32 gen = c.gen;
+    int r;
+
+    if (d)
+        forget(d->idx, lba, n);                 /* (a write that fails leaves nothing stale behind) */
+    if ((r = ata_write(dev, lba, 0, n, buf, 0)) != 0)
+        return r;
+    if (d) {
+        keep_p(d->idx, lba, n, buf, gen);
+        c.write_sectors += n;
     }
     return 0;
 }

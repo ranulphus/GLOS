@@ -108,9 +108,10 @@ void dos_m_init(struct dos_m *m, unsigned char *mem, unsigned long size, const s
 /* The system VM's DOS on a native boot (kernel/vm/vdos.c): the program already there (the loader: its PSP at psp,
    its memory to top) adopted as the running process and its own parent, its PSP made again (its five handles,
    no environment); the memory chain from the MCB before it to low_top; the tables in a block of DOS's own (owner
-   0008h) at the top of conventional memory. 0, or -1 if they don't fit. */
+   0008h) at the top of conventional memory, and under them another of extra paragraphs for the caller (*extra_seg:
+   vdos.c's stack and buffer for the BIOS's disk calls; 0: none). 0, or -1 if they don't fit. */
 int dos_m_init_vm(struct dos_m *m, unsigned char *mem, unsigned long size, unsigned psp, unsigned top,
-                  unsigned low_top, struct fsv_vol *v, int drive, int cp);
+                  unsigned low_top, struct fsv_vol *v, int drive, int cp, unsigned extra, unsigned *extra_seg);
 
 /* The running program's PSP, as the SDA has it (a writer of the SDA, as an app's switch is, is obeyed). */
 unsigned dos_cur_psp(struct dos_m *m);

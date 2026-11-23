@@ -38,6 +38,7 @@
 #include "timer.h"
 #include "usb.h"
 #include "usbkbd.h"
+#include "vdos.h"
 #include "vm.h"
 #include "xpad.h"
 
@@ -117,6 +118,7 @@ static void kbd_leds(struct hc *h, struct usb_dev *d, u8 leds)
     control(h, d->addr, d->maxp0, d->low, s, &leds, 0, &status);
 }
 static int started;
+static int left;                        /* left to the BIOS (usb_late) */
 
 #define PHYS(h, p) ((h)->pool_phys + (u32)((const u8 *)(p) - (h)->pool))
 
@@ -983,6 +985,12 @@ void usb_late(void)
         kprintf("GLOS-USB off\n");
         return;
     }
+    if (vdos_usb_bios()) {                      /* (a native start from a USB stick, by the BIOS's calls: taking
+                                                   its controller would end them; kernel/vm/vdos.c) */
+        left = 1;
+        kprintf("GLOS-USB left to the BIOS: drive C: is its disk\n");
+        return;
+    }
     ehci_take_all();                            /* (phase H: USB 2.0's ports to their UHCI companions first) */
     for (i = 0; (pd = pci_at(i)) != 0 && nhc < MAX_HC; i++)
         if (pd->class == 0x0C && pd->subclass == 0x03 && pd->progif == 0x00 && !dev_pci_off(pd, "uhci")) {
@@ -1010,6 +1018,8 @@ void usb_leave(void)
 }
 
 int usb_off(void) { char v[8]; v[0] = 0; kcfg_get("usb", "enabled", v, sizeof v); return !strcmp(v, "off"); }
+
+int usb_left(void) { return left; }
 
 /* The Devices list's (devlist.c): a controller's details, if it is GLOS's ... */
 u32 usb_hc_detail(const struct pci_dev *pd, char *b, u32 room)

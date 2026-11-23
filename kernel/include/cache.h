@@ -19,8 +19,11 @@ void cache_port_out(u16 port, u8 v);    /* a write to a trapped port (vdev.c): a
 void cache_direct(int on);              /* a direct-mode session starts (bypass) or ends (everything dropped) */
 void cache_apply(const char *key, const char *v);      /* [cache] enabled or size changed (config.c) */
 void cache_drop(const char *why);       /* every block */
-void cache_forget(u32 dl, u32 lba, u32 n);      /* BIOS drive dl's sectors [lba, lba + n) dropped: the kernel wrote
-                                                   them past the cache (a native boot's C:, vdos.c) */
+void cache_forget(u32 dl, u32 lba, u32 n);      /* BIOS drive dl's sectors [lba, lba + n) dropped: written past it */
+struct ata_dev;
+/* The kernel's own file system's sectors (a native boot's volumes, vdos.c), through the cache: 0 or ata.c's error. */
+int cache_kread(u32 dl, struct ata_dev *dev, u32 lba, u32 n, u8 *buf);
+int cache_kwrite(u32 dl, struct ata_dev *dev, u32 lba, u32 n, const u8 *buf);
 u32 cache_stat(char *b, u32 max);       /* glos cache: a line of JSON */
 u32 cache_lbas(char *b, u32 max);       /* glos cache lbas: count mode's sectors */
 u32 cache_kb(void);
