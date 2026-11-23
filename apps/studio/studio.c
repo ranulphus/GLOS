@@ -567,16 +567,34 @@ static unsigned long rec_now(void)     /* the song's time: where a note played n
     return raw > count_ms ? raw - count_ms : 0;
 }
 
-static unsigned long beat_ms(void)
+/* (2026-11-23) The clicks follow the song: a beat is its time signature's unit, a bar its beats (the first one
+   accented), each beat at the song's own time for it (its tempo's changes); the count-in is a bar at the opening
+   tempo. */
+static unsigned bar_beats(void) { return song->beats ? song->beats : 4; }
+
+static unsigned long beat_ms(void)      /* the opening tempo's beat */
 {
     unsigned t = song_tempo_at(song, 0);
-    return 60000ul / (t ? t : 120);
+    return 60000ul / (t ? t : 120) * 4 / (song->unit ? song->unit : 4);
+}
+
+static unsigned long click_at(unsigned long b, int *first)     /* the take's beat b (the count-in's first): when */
+{
+    unsigned long nci = count_ms ? bar_beats() : 0;
+    if (b < nci) {
+        *first = b == 0;
+        return b * beat_ms();
+    }
+    b -= nci;
+    *first = b % bar_beats() == 0;
+    return count_ms + song_ms(song, b * (SONG_PPQ * 4ul / (song->unit ? song->unit : 4)));
 }
 
 /* The clicks of the beats from now to a moment ahead queued; the song begun when the count-in is over. */
 static void click_poll(void)
 {
-    unsigned long raw, beat = beat_ms();
+    unsigned long raw, at;
+    int first;
     if (!recording)
         return;
     raw = rec_raw();
@@ -584,10 +602,10 @@ static void click_poll(void)
         song_waits = 0;
         play();                                 /* (its clock from here: rec_raw adds the count-in) */
     }
-    while (next_beat * beat <= raw + 1500) {
-        unsigned long at = next_beat * beat;
-        int first = next_beat % 4 == 0;
+    while ((at = click_at(next_beat, &first)) <= raw + 1500) {
         glos_handle h = playing ? mp.port : rec_out;
+        if (demo && (click_on || at < count_ms))
+            say("click at=%lu%s", at, first ? " bar" : "");    /* (the suite's: the clicks as they are queued) */
         if ((click_on || at < count_ms) && h && !demo) {
             struct glos_midi_msg m[2];
             memset(m, 0, sizeof m);
@@ -603,9 +621,10 @@ static void click_poll(void)
 
 static unsigned clicks_heard(void)     /* (the suite's) the beats clicked so far: their times are past */
 {
-    unsigned long raw = rec_raw(), beat = beat_ms(), k, n = 0;
-    for (k = 0; k * beat <= raw; k++)
-        n += click_on || k * beat < count_ms;
+    unsigned long raw = rec_raw(), k, n = 0, at;
+    int first;
+    for (k = 0; (at = click_at(k, &first)) <= raw; k++)
+        n += click_on || at < count_ms;
     return (unsigned)n;
 }
 
@@ -736,7 +755,7 @@ static void rec_start(void)
     rec_n = 0, rec_keys[0] = rec_ats[0] = 0;
     rec_step = step_begin();
     rec_in = demo ? 0 : glos_midi_in(GLOS_MIDI_PORT_MPU);   /* (none: the PC's keys alone) */
-    count_ms = count_in ? 4 * beat_ms() : 0, next_beat = 0, song_waits = 0;
+    count_ms = count_in ? bar_beats() * beat_ms() : 0, next_beat = 0, song_waits = 0;
     if (song_ticks(song) && !count_ms)
         play();                         /* (the song as it is, heard while the new notes are played) */
     else if (song_ticks(song))

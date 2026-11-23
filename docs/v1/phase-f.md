@@ -1621,7 +1621,12 @@ chosen.
 
 - **Tests:** `studio-record` (five clicks in its two seconds), `studio-countin` (host and the emulated
   desktops): the count-in's two seconds at 120, the C at 0 and the D at 960 ticks after it, seven clicks.
-- **Not yet:** the click following the song's tempo changes and its time signature.
+- **Since built** (2026-11-23): the click follows the song. A beat is its time signature's unit, a bar its
+  beats (the first accented), and each beat sounds at the song's own time for it (`song_ms`: the tempo's
+  changes); the count-in is one bar (its beats, not always four) at the opening tempo. In the suite's demo each
+  click is said as it is queued (`click at=MS [bar]`). `studio-click` (new; `C:\SND\WALTZ.MID`, made by hand:
+  3/4, 120 a minute, then 60 from bar 2): clicks at 0, 500, 1000, 1500 (bar), 2500, 3500, 4500 (bar); five in
+  the take's three seconds. `studio-countin` unchanged (4/4: still seven).
 
 ## Fall Line: four figures (2026-11-22)
 
