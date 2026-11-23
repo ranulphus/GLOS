@@ -181,6 +181,35 @@ The mixer tries it after a Crystal chip and before the PCI cards. The virtual So
 - **Tests:** Loop A's audio suite gains bf6 + G200 + 86Box's `ess_es1688` (BLASTER "A220 I5 D1 T4"). The Sound
   Recorder must say it can't record. Bench D's ES1887 is owed.
 
+## Tier 2: ISA Plug and Play (2026-11-23, night)
+
+`kernel/drv/isapnp.c` is the protocol, from Intel's and Microsoft's Plug and Play ISA Specification 1.0a: the
+initiation key, each card isolated by its 72-bit identifier and given a number, its resource data read, a
+logical device set up and turned on. It is plain C over port callbacks. `kernel/drv/pnpbus.c` is the kernel's
+side.
+
+- **When it runs:** only when a driver asks for a card, or at `glos pnp`. Never by itself at start, so a PC whose
+  cards are found by other means (BLASTER, the Crystal chips' own key, PCI) is not touched.
+- **What a scan changes:** the cards' numbers, nothing else. A logical device a BIOS or a DOS program has turned
+  on is reported and used as it is.
+- **Setting one up:** its preferred I/O ranges (its first dependent function's), an interrupt from 5, 7, 10, 11,
+  9, 3, 4 that no PCI device, serial port or device of the PC's own has, DMA channels from 1, 3, 0, 5, 6, 7.
+- **READ_DATA port:** 20Bh, then 213h, 23Bh and 3C3h if no card answers (something else answering on the first
+  looks like no card).
+- **First user, the ESS driver:** with no BLASTER, `ess.c` asks for ESS's audio device (the one with ports, an
+  interrupt and a DMA channel), has it turned on if it isn't, and probes there. That is for the ES1868 and
+  ES1869 class; bench D's ES1887 is not a PnP chip and wants BLASTER.
+- **`glos pnp`:** scans again and lists each logical device: its card, its ID, on or off, its resources.
+- **Tests:**
+  - host: `isapnp_test`, against a model of three cards on one bus (two alike but for one serial bit; logical
+    devices with dependent functions, fixed I/O, a three-byte interrupt item; one set up beforehand), an empty
+    bus, and a READ_DATA port that something else answers on;
+  - Loop A: 86Box's Crystal cards are ISA PnP cards. `glos pnp` finds the CS4236B (card CSCA736, four logical
+    devices) with the resources `crystal.c` gave it (WSS 534h, FM 388h, SB 220h, IRQ 5, DMA 1), twice running
+    while it plays; the Crystal audio cases check it.
+- **Not yet:** the PnP ESS cards in Loop A (86Box wants their PnP ROM images, which RetroGPU's ROM set lacks);
+  the Devices page listing PnP cards; the OPTi 82C931, the PnP Sound Blasters and PnP NE2000s through it.
+
 ## Tier 2: OPTi 82C93x (begun 2026-11-23)
 
 Not built yet. What was found:

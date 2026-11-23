@@ -21,8 +21,10 @@
  *   - the interrupt, at each half, is acknowledged by reading 2xEh; no command is sent from it;
  *   - the mixer's Extended Access registers (four bits a side): the master 32h, the voice 14h, FM 36h, the CD 38h,
  *     the line 3Eh, the microphone 1Ah; the master, the voice and FM set full when the chip is found.
+ * Found where BLASTER says; with no BLASTER, as a Plug and Play card (pnpbus.c): its audio device used as a BIOS
+ * set it up, or given its preferred resources and turned on.
  * Not yet: recording (the first DMA channel plays or records, not both; full duplex wants the second's), the
- * ESS mixer's finer registers, the chip's FM (ESFM) and MPU-401 for midi.c, ISA PnP set-up by GLOS itself.
+ * ESS mixer's finer registers, the chip's FM (ESFM) and MPU-401 for midi.c.
  * Proof: Loop A (86Box's ess_es1688); bench D's ES1887 is owed. */
 #include "devlist.h"
 #include "glos/bootinfo.h"
@@ -31,6 +33,7 @@
 #include "kprintf.h"
 #include "mixer.h"
 #include "mm.h"
+#include "pnpbus.h"
 #include "vm.h"
 
 static struct {
@@ -100,22 +103,48 @@ static const char *res(void)
 static void mix_wr(u8 reg, u8 v);
 
 /* BLASTER's A, I and D (an AudioDrive has no 16-bit channel: no H), the chip's answers to E1h and E7h. */
-int ess_init(const struct bootinfo *bi)
+/* An AudioDrive at es.base: 1, its DSP's version and its E7h answer given. */
+static int probe(int *hi, int *lo, int *id)
 {
-    int a, b, hi, lo;
-    if (!bi->sb_port || bi->sb_irq > 15 || bi->sb_dma8 > 3 || bi->sb_dma8 == 2)
-        return -1;
-    es.base = (u16)bi->sb_port, es.irq = (u8)bi->sb_irq, es.dma = (u8)bi->sb_dma8;
-    if (dev_turned_off("ess")) {
-        dev_note("ess", "ess", DEVS_OFF, "", res());
-        return -1;
-    }
-    if (reset_to(1) != 0 || dsp_write(0xE1) != 0 || (hi = dsp_read()) < 0 || (lo = dsp_read()) < 0)
-        return -1;
+    int a, b;
+    if (reset_to(1) != 0 || dsp_write(0xE1) != 0 || (*hi = dsp_read()) < 0 || (*lo = dsp_read()) < 0)
+        return 0;
     if (dsp_write(0xE7) != 0 || (a = dsp_read()) < 0 || (b = dsp_read()) < 0 || a != 0x68 || (b & 0xF0) != 0x80) {
         reset_to(1);
-        return -1;                              /* (not an AudioDrive with Extended Mode) */
+        return 0;                               /* (not an AudioDrive with Extended Mode) */
     }
+    *id = b;
+    return 1;
+}
+
+int ess_init(const struct bootinfo *bi)
+{
+    int hi = 0, lo = 0, b = 0, there = 0;
+    if (dev_turned_off("ess")) {
+        if (bi->sb_port) {
+            es.base = (u16)bi->sb_port, es.irq = (u8)bi->sb_irq, es.dma = (u8)bi->sb_dma8;
+            dev_note("ess", "ess", DEVS_OFF, "", res());
+        }
+        return -1;
+    }
+    if (bi->sb_port && bi->sb_irq <= 15 && bi->sb_dma8 <= 3 && bi->sb_dma8 != 2) {    /* where BLASTER says */
+        es.base = (u16)bi->sb_port, es.irq = (u8)bi->sb_irq, es.dma = (u8)bi->sb_dma8;
+        there = probe(&hi, &lo, &b);
+    }
+    if (!there && !bi->sb_port) {
+        /* No BLASTER at all: a Plug and Play AudioDrive (ES1868, ES1869 and their kin) that nothing has set up,
+           or that a BIOS has without saying. Its audio device is the one of ESS's with ports, an interrupt and
+           a DMA channel (the others: its game port, its MPU-401, a CD-ROM's IDE). */
+        struct pnp_dev *d = 0;
+        while (!there && (d = pnpbus_find(PNP_VENDOR(PNP_ID('E', 'S', 'S', 0)), 1, 1, 1, d)) != 0) {
+            if (pnpbus_on(d) != 0 || !d->io[0] || !d->irq[0] || d->dma[0] > 3 || d->dma[0] == 2)
+                continue;
+            es.base = d->io[0], es.irq = d->irq[0], es.dma = d->dma[0];
+            there = probe(&hi, &lo, &b);
+        }
+    }
+    if (!there)
+        return -1;
     es.id = (u8)b;
     es.found = 1;
     mix_wr(0x32, 0xFF);                         /* the master, the voice and FM full (88h after a reset: some 30 dB

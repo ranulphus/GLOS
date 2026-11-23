@@ -5537,6 +5537,12 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
             else ("GLOS-SB start", "GLOS-SB stop")
         checks["handed-over"] = (log.count(on) >= 2 and off in log) if not virtual else off not in log
         info += " periods=%d" % n
+        if crystal:                             # (phase H: 86Box's Crystal cards are ISA Plug and Play cards: GLOS's
+            rc_pnp, o_pnp, _ = agent.ssh("glos pnp")       # own scan finds the card, its devices as crystal.c set them)
+            checks["pnp"] = (rc_pnp == 0 and "pnp cards=1 " in o_pnp and re.search(
+                r"id=CSC0000 compat=\S+ on io0=534 io1=388 io2=220 irq0=5 dma0=1", o_pnp) is not None)
+            if not checks["pnp"]:
+                print("    %s pnp: rc=%d %r" % (tag, rc_pnp, o_pnp[-400:]))
         checks["exit"] = agent.ssh("glos exit")[0] == 0
     except subprocess.TimeoutExpired:
         checks["timeout"] = False

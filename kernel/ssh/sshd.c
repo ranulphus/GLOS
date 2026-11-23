@@ -32,6 +32,7 @@
 #include "io.h"
 #include "idle.h"
 #include "joy.h"
+#include "pnpbus.h"
 #include "usb.h"
 #include "kprintf.h"
 #include "mixer.h"
@@ -1590,6 +1591,11 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             ssh_chan_write(ch, 0, (const uint8_t *)b, (u32)joy_stat(b, sizeof b));
             ssh_chan_exit(ch, 0);
         }
+    } else if (!strcmp(cmd, "glos pnp")) {
+        /* glos pnp: the ISA Plug and Play cards, found again and listed (kernel/drv/pnpbus.c; phase H) */
+        static char b[4096];
+        ssh_chan_write(ch, 0, (const uint8_t *)b, pnpbus_stat(b, sizeof b));
+        ssh_chan_exit(ch, 0);
     } else if (!strcmp(cmd, "glos usb")) {
         /* glos usb: GLOS's USB controllers and the devices on them (kernel/drv/uhci.c, docs/gamepad.md) */
         char b[1024];
@@ -1809,7 +1815,7 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         }
     } else {
         say(ch, 1, "glos: no such command (glos ver, echo, run, shot, key, type, mouse, log, stat, ps, mem, net, tick, "
-                   "joy, usb, pci, devices, mtrr, services, kill, gdb, exit, restart, reboot)\n");
+                   "joy, usb, pci, pnp, devices, mtrr, services, kill, gdb, exit, restart, reboot)\n");
         ssh_chan_exit(ch, 127);
     }
     return 0;

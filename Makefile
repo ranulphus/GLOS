@@ -108,7 +108,7 @@ SSHC_FLAGS := -Iinclude -Ikernel/ssh -Ithird_party/tinyssh -Ithird_party/tinyssh
 HOST_TESTS := pmm_test:kernel/mm/pmm.c heap_test:kernel/mm/heap.c v86dec_test:kernel/vm/v86dec.c \
               cache_test:kernel/drv/cstore.c umapage_test:kernel/mm/umapage.c \
               vpic_test:kernel/vm/vpic.c png_test:kernel/lib/png.c uhci_test:kernel/drv/uhcitd.c \
-              hid_test:kernel/drv/hidparse.c xpad_test:kernel/drv/xpad.c ata_test:kernel/drv/ata.c share_test:kernel/ndos/share.c exe_test:kernel/ndos/exe.c mcb_test:kernel/ndos/mcb.c psp_test:kernel/ndos/psp.c dtime_test:kernel/ndos/dtime.c \
+              hid_test:kernel/drv/hidparse.c xpad_test:kernel/drv/xpad.c ata_test:kernel/drv/ata.c isapnp_test:kernel/drv/isapnp.c share_test:kernel/ndos/share.c exe_test:kernel/ndos/exe.c mcb_test:kernel/ndos/mcb.c psp_test:kernel/ndos/psp.c dtime_test:kernel/ndos/dtime.c \
               usbkbd_test:kernel/drv/usbkbd.c handle_test:kernel/app/handle.c \
               tsync_test:kernel/app/tsync.c region_test:sdk/config/region.c theme_test:kernel/wm/theme.c \
               clip_test:kernel/app/clipstore.c dnd_test:kernel/wm/dnd.c notes_test:kernel/wm/notes.c \
@@ -632,7 +632,7 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/arch/mtrr.c
          kernel/ssh/sshd.c \
          kernel/drv/serial.c kernel/lib/kprintf.c kernel/mm/pmm.c kernel/mm/heap.c kernel/mm/vmm.c kernel/mm/umapage.c \
          kernel/dbg/gdbstub.c kernel/dbg/gdbprog.c kernel/vm/v86.c kernel/vm/session.c kernel/vm/v86dec.c kernel/vm/vpic.c kernel/vm/vdev.c kernel/vm/vcon.c \
-         kernel/vm/vkbc.c kernel/vm/int15.c kernel/vm/vjoy.c kernel/vm/vdma.c kernel/vm/vsb.c kernel/vm/vsbdev.c kernel/drv/uhci.c kernel/drv/ehci.c kernel/drv/cmi8738.c kernel/drv/es1371.c kernel/drv/ess.c kernel/drv/ich97.c kernel/drv/via686.c kernel/drv/ac97.c kernel/drv/uhcitd.c kernel/drv/hidparse.c kernel/drv/xpad.c kernel/drv/usbkbd.c kernel/vm/xms.c kernel/dos/agent.c kernel/dos/watch.c \
+         kernel/vm/vkbc.c kernel/vm/int15.c kernel/vm/vjoy.c kernel/vm/vdma.c kernel/vm/vsb.c kernel/vm/vsbdev.c kernel/drv/uhci.c kernel/drv/ehci.c kernel/drv/cmi8738.c kernel/drv/es1371.c kernel/drv/ess.c kernel/drv/isapnp.c kernel/drv/pnpbus.c kernel/drv/ich97.c kernel/drv/via686.c kernel/drv/ac97.c kernel/drv/uhcitd.c kernel/drv/hidparse.c kernel/drv/xpad.c kernel/drv/usbkbd.c kernel/vm/xms.c kernel/dos/agent.c kernel/dos/watch.c \
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
          kernel/disk/bdisk.c kernel/disk/mbr.c kernel/disk/mbrboot.S kernel/disk/fatfmt.c kernel/disk/fdboot.S \
          kernel/disk/diskcmd.c kernel/drv/uart.c kernel/net/slip.c kernel/net/member.c kernel/drv/plip.c kernel/drv/rhine.c kernel/drv/pcnet.c kernel/drv/tulip.c \
