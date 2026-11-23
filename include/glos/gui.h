@@ -781,6 +781,9 @@ void gui_cview_zoom(struct gui_widget *w, int percent);        /* about the midd
 int gui_cview_get_zoom(struct gui_widget *w);                  /* the percentage shown */
 void gui_cview_cursor(struct gui_widget *w, int shape);        /* GLOS_CURSOR_: the pointer over the document */
 void gui_cview_scroll(struct gui_widget *w, int doc_x, int doc_y);     /* that point to the view's corner */
+/* (2026-11-23) The point at the view's corner, and how much of the document shows (its height), in document units:
+   any of them may be NULL. */
+void gui_cview_get_scroll(struct gui_widget *w, int *doc_x, int *doc_y, int *doc_h);
 void gui_cview_scale(struct gui_widget *w, int num, int den);  /* exactly num/den: an app's own zoom steps */
 void gui_cview_get_scale(struct gui_widget *w, int *num, int *den);
 void gui_cview_on_event(struct gui_widget *w, int (*event)(struct gui_widget *, struct gui_ev *, int x, int y));

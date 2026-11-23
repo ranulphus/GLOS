@@ -1,0 +1,43 @@
+#pentium (the PDF Viewer's floor is a Pentium)
+# The PDF Viewer's continuous pages (apps/pdf; phase F, 2026-11-23): tests/gui/mkpdf.py's two-page PDF at its actual
+# size, View, Continuous Pages (F7): the first page with the second under it, one picture; Page Down until the
+# view's top is in the second, which is then the page shown; at its top, Up goes back to the first, its end in
+# sight; F7 again: a page at a time. Two Pages (F8): the two side by side, at the actual size and fitted (each
+# half the view's width); F8 again: one.
+run PDF.EXE
+wait "PDF Viewer"
+key ctrl+o
+wait "Open"
+type C:\\GLOS\\GUIDE.PDF\n
+said PDF opened GUIDE.PDF pages=2
+key ctrl+1
+said PDF page 1 of 2 612x792 at 100%
+key f7
+said PDF continuous on
+said PDF continuous 1 and 2
+shot cont-first "PDF Viewer"
+key pgdn
+key pgdn
+key pgdn
+pause 500
+said PDF page 2 of 2 612x792 at 100%
+shot cont-second "PDF Viewer"
+key home
+pause 300
+key up
+said PDF continuous 1 and 2
+shot cont-back "PDF Viewer"
+key f7
+said PDF continuous off
+key f8
+said PDF two pages on
+said PDF two pages 1 and 2
+shot two "PDF Viewer"
+key ctrl+2
+said PDF two pages 1 and 2
+shot two-fit "PDF Viewer"
+key f8
+said PDF two pages off
+key alt+f4
+gone "PDF Viewer"
+expect PDF end

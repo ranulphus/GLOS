@@ -12,6 +12,8 @@ Reads PDF files, a page at a time.
 | Ctrl+1 | The page's real size |
 | Ctrl+2 | As wide as the window |
 | Ctrl+F, F3, Shift+F3 | Find words in the whole file; the next place, the one before |
+| F7 | Continuous Pages: the pages one under another, scrolled through |
+| F8 | Two Pages: two side by side, as a book opens |
 | Ctrl+T | Select Text: the mouse chooses text (press it again: the mouse moves the page again) |
 | Double click, three clicks | (Select Text) the word there; its whole line |
 | Shift+arrows | (Select Text) move the end of what is chosen a letter, or a line up or down |

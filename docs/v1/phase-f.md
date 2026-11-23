@@ -1548,8 +1548,18 @@ by `wrapcheck.py`).
   shows, then both served from the cache as they are turned; every other step as before.
 - **The page before** (later the same day): once the next page is kept, the one before is drawn ahead too (at
   the zoom the view gives it), so reading back is at once as well; the scripts wait for each.
-- **Not yet:** a page drawn in parts as it comes (a slow page shows only when whole); continuous and two-page
-  views.
+- **Continuous and two-page views** (since built, 2026-11-23): View, **Continuous Pages** (F7): the page shown
+  with the next under it in one picture (a grey gap between, two pages' pictures at a time, from the page cache
+  where it has them); once the view's top is in the next page (an idle look every tenth of a second) it is the
+  page shown, the same place in sight, and the one after goes under it; Up, Page Up or the wheel at the very
+  top go back a page, its end in sight. **Two Pages** (F8): the page shown and the next side by side, Fit Width
+  giving each half the view, Next and Previous Page two at a time. The one or the other, or neither. Find,
+  Select Text and the outline work on the page shown (the top or the left one). The toolkit gains
+  `gui_cview_get_scroll` (where a canvas view is scrolled to, and how much shows). `pdf-cont` (new, host and the
+  emulated desktops): continuous on, three Page Downs into page 2, Home and Up back to page 1 (pictures), two
+  pages at the actual size and fitted (33%).
+- **Not yet:** a page drawn in parts as it comes (a slow page shows only when whole); a choice of text over two
+  pages.
 
 ## The Games Library: the scan off the window's thread (2026-11-22)
 

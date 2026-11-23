@@ -34,7 +34,7 @@
 #include "../shared/picfile.h"
 
 enum { C_OPEN = 1, C_EXIT, C_PREV, C_NEXT, C_FIRST, C_LAST, C_GOTO, C_ZOOMIN, C_ZOOMOUT, C_ACTUAL, C_FITW, C_COPY, C_FIND, C_FINDNEXT,
-       C_FINDPREV, C_OUTLINE , C_SELECT};
+       C_FINDPREV, C_OUTLINE , C_SELECT, C_CONT, C_TWO};
 
 #define MAX_PIXELS 3000000l
 #define KEEP (2ul << 20)                /* the file's objects kept between pages: bytes */
@@ -50,8 +50,16 @@ static struct pdf *doc;
 static char path[260];
 static unsigned page;                   /* from 0 */
 static int zoom = 100, fit = 1;         /* percent (100: a point a pixel); fit: the zoom follows the view's width */
-static unsigned *bitmap;                /* the page shown: one of the cache's pictures */
+static unsigned *bitmap;                /* the page shown: one of the cache's pictures (continuous: comp) */
 static int bw, bh;
+/* (2026-11-23) Continuous pages: the page shown with the next under it, one picture (comp), the next's top at
+   split_y; once the view's top is in the next, it is the page shown (and the one after it goes under it); Up,
+   Page Up or the wheel at the very top go back a page. Two pages' pictures at a time, whatever the file's length. */
+#define CONT_GAP 12
+static int cont, two, split_y;          /* (two: two pages side by side, the next at the right; split_y 0 then) */
+static unsigned *comp;
+static int keep_x = -1, keep_y = -1;   /* (draw_page: where the view goes; -1: the page's top) */
+static void draw_page(void);
 
 /* (phase F) The pages drawn are kept (CACHED at most, CACHE_PIXELS in all), by page and zoom: going back to one
    is at once. After a page is shown, the next is drawn ahead on a worker's thread (the toolkit's tasks). The
@@ -353,10 +361,44 @@ static void choose_span(long k, int line)
     say_chosen();
 }
 
+/* (continuous) The view's top in the next page: it is the page shown now, the same place in sight. */
+static void cont_tick(void *arg)
+{
+    int x, y;
+    (void)arg;
+    if (!cont || !doc || !split_y || choosing)
+        return;
+    gui_cview_get_scroll(view, &x, &y, NULL);
+    if (y >= split_y && page + 1 < pdf_pages(doc)) {
+        page++;
+        hit = -1, sel_a = sel_b = -1;
+        keep_x = x, keep_y = y - split_y;
+        draw_page();
+    }
+}
+
 static int view_mouse(struct gui_widget *w, struct gui_ev *e, int x, int y)
 {
     long k;
     (void)w;
+    if (cont && doc && page > 0 && !(e->type == GUI_EV_KEY && e->mods)
+        && ((e->type == GUI_EV_KEY && (e->key == GUI_K_UP || e->key == GUI_K_PGUP)) || (e->type == GUI_EV_WHEEL && e->wheel > 0))) {
+        int sx, sy, vh;
+        gui_cview_get_scroll(view, &sx, &sy, &vh);
+        if (sy <= 0) {                          /* (at the very top: the page before, its end in sight) */
+            int step = e->type == GUI_EV_KEY && e->key == GUI_K_PGUP ? vh : 40;
+            page--;
+            hit = -1, sel_a = sel_b = -1;
+            keep_x = sx, keep_y = 0;            /* (put right once the picture is made: below) */
+            {
+                int sp;
+                draw_page();
+                sp = split_y;                   /* (the page that was shown starts there now) */
+                gui_cview_scroll(view, sx, sp - step > 0 ? sp - step : 0);
+            }
+            return 1;
+        }
+    }
     if (!text_tool || !doc)
         return 0;                               /* (the button moves the page, as ever) */
     if (e->type == GUI_EV_KEY && (e->mods & GLOS_MOD_SHIFT) && sel_a >= 0 && sel_b >= 0 && nletters
@@ -445,6 +487,8 @@ static int zoom_for(unsigned pg, double *w, double *h)
     pdf_page_size(doc, pg, w, h);
     if (fit) {                                  /* as wide as the view (less its bar), 25% to 400% */
         int room = view_width() - GUI_SB - 4;
+        if (two)                                /* (two pages: each half of it) */
+            room = (room - CONT_GAP) / 2;
         z = (int)((room > 100 ? room : 100) * 100 / *w);
         z = z < 25 ? 25 : z > 400 ? 400 : z;
     }
@@ -529,6 +573,54 @@ static void draw_ahead(void)            /* the next page, then the one before, i
     }
 }
 
+
+/* (continuous) The page shown and the next one in one picture, the next's top at split_y: 0, or -1 (none made:
+   the last page, or no memory) */
+static int compose(const unsigned *px, int pw, int ph, int z)
+{
+    double w, h;
+    unsigned *nx;
+    unsigned long ink = 0;
+    int nw = 0, nh = 0, k, cw, ch, y;
+    free(comp), comp = NULL, split_y = 0;
+    if ((!cont && !two) || page + 1 >= pdf_pages(doc))
+        return -1;
+    if ((k = cache_find(page + 1, z)) >= 0) {
+        nx = cache[k].px, nw = cache[k].w, nh = cache[k].h;
+        cache[k].used = ++cache_clock;
+    } else {
+        lock();
+        w = 612, h = 792;
+        pdf_page_size(doc, page + 1, &w, &h);
+        nx = draw(page + 1, z, w, h, &nw, &nh, &ink);
+        unlock();
+        if (!nx)
+            return -1;
+        cache_put(page + 1, z, nx, nw, nh, ink);
+    }
+    if (two)                                    /* side by side: the next at the right */
+        cw = pw + CONT_GAP + nw, ch = ph > nh ? ph : nh;
+    else                                        /* one under the other */
+        cw = pw > nw ? pw : nw, ch = ph + CONT_GAP + nh;
+    if (!(comp = malloc((size_t)cw * (size_t)ch * sizeof *comp)))
+        return -1;
+    for (y = 0; y < ch; y++)                    /* (grey round and between them, the page shown at the corner) */
+        for (k = 0; k < cw; k++)
+            comp[(size_t)y * cw + k] = 0x808080;
+    for (y = 0; y < ph; y++)
+        memcpy(comp + (size_t)y * cw, px + (size_t)y * pw, (size_t)pw * sizeof *px);
+    for (y = 0; y < nh; y++)
+        if (two)
+            memcpy(comp + (size_t)y * cw + pw + CONT_GAP, nx + (size_t)y * nw, (size_t)nw * sizeof *nx);
+        else
+            memcpy(comp + (size_t)(ph + CONT_GAP + y) * cw, nx + (size_t)y * nw, (size_t)nw * sizeof *nx);
+    split_y = two ? 0 : ph + CONT_GAP;
+    gui_image_view_set(view, comp, cw, ch, cw);
+    bitmap = comp, bw = cw, bh = ch;
+    say("%s %u and %u", two ? "two pages" : "continuous", page + 1, page + 2);
+    return 0;
+}
+
 static void draw_page(void)             /* the page into its picture, at the zoom (or the view's width) */
 {
     double w, h;
@@ -558,12 +650,16 @@ static void draw_page(void)             /* the page into its picture, at the zoo
         }
     }
     zoom = z;
-    gui_image_view_set(view, px, pw, ph, pw);
-    gui_cview_zoom(view, 100);
-    gui_cview_scroll(view, 0, 0);
-    bitmap = px, bw = pw, bh = ph;
     if (k < 0)
-        cache_put(page, z, px, pw, ph, ink);    /* (after: the page shown is never the one let go) */
+        cache_put(page, z, px, pw, ph, ink);
+    if (compose(px, pw, ph, z) != 0) {          /* (one page: its own picture) */
+        free(comp), comp = NULL, split_y = 0;
+        gui_image_view_set(view, px, pw, ph, pw);
+        bitmap = px, bw = pw, bh = ph;
+    }
+    gui_cview_zoom(view, 100);
+    gui_cview_scroll(view, keep_x > 0 ? keep_x : 0, keep_y > 0 ? keep_y : 0);
+    keep_x = keep_y = -1;
     show_hit();                                 /* (what was found on this page: marked at this size too) */
     gui_damage(view);
     show_status();
@@ -576,6 +672,7 @@ static void draw_page(void)             /* the page into its picture, at the zoo
 
 static void forget(void)                /* the file and its pictures let go (the view is not touched) */
 {
+    free(comp), comp = NULL, split_y = 0;
     marks_forget();
     free(letters);
     letters = NULL, nletters = 0, have_letters = 0, hit = -1, sel_a = sel_b = -1;
@@ -874,10 +971,10 @@ static void command(struct gui_window *w, int id)
         gui_quit(0);
         break;
     case C_PREV:
-        go((long)page - 1);
+        go((long)page - (two ? 2 : 1));
         break;
     case C_NEXT:
-        go((long)page + 1);
+        go((long)page + (two ? 2 : 1));
         break;
     case C_FIRST:
         go(0);
@@ -912,6 +1009,16 @@ static void command(struct gui_window *w, int id)
         break;
     case C_COPY:
         copy_text();
+        break;
+    case C_CONT:                                /* continuous pages, or one at a time */
+    case C_TWO:                                 /* ... two side by side (the one or the other: neither) */
+        if (id == C_CONT)
+            cont = !cont, two = 0;
+        else
+            two = !two, cont = 0;
+        say("%s %s", id == C_CONT ? "continuous" : "two pages", (id == C_CONT ? cont : two) ? "on" : "off");
+        if (doc)
+            draw_page();
         break;
     case C_SELECT:                              /* the mouse chooses text, or moves the page again */
         text_tool = !text_tool;
@@ -950,6 +1057,8 @@ static void update(struct gui_window *w)
     gui_command_check(w, C_FITW, fit);
     gui_command_enable(w, C_COPY, doc != NULL);
     gui_command_check(w, C_SELECT, text_tool);
+    gui_command_check(w, C_CONT, cont);
+    gui_command_check(w, C_TWO, two);
     gui_command_enable(w, C_FIND, doc != NULL);
     gui_command_enable(w, C_FINDNEXT, doc && needle[0]);
     gui_command_enable(w, C_FINDPREV, doc && needle[0]);
@@ -983,6 +1092,8 @@ static void build(void)
     gui_command(win, C_FINDNEXT, GUI_T("Find &Next"), "F3", NULL, NULL);
     gui_command(win, C_FINDPREV, GUI_T("Find &Previous"), "Shift+F3", NULL, NULL);
     gui_command(win, C_OUTLINE, GUI_T("&Outline"), "F9", NULL, NULL);
+    gui_command(win, C_CONT, GUI_T("&Continuous Pages"), "F7", NULL, GUI_T("The pages one under another, scrolled through"));
+    gui_command(win, C_TWO, GUI_T("&Two Pages"), "F8", NULL, GUI_T("Two pages side by side, as a book opens"));
     bar = gui_menubar(win);
     m = gui_menu(bar, GUI_T("&File"));
     gui_menu_command(m, C_OPEN);
@@ -997,7 +1108,7 @@ static void build(void)
     gui_menu_sep(m);
     gui_menu_command(m, C_ACTUAL), gui_menu_command(m, C_FITW);
     gui_menu_sep(m);
-    gui_menu_command(m, C_OUTLINE);
+    gui_menu_command(m, C_CONT), gui_menu_command(m, C_TWO), gui_menu_command(m, C_OUTLINE);
     m = gui_menu(bar, GUI_T("&Go"));
     gui_menu_command(m, C_PREV), gui_menu_command(m, C_NEXT);
     gui_menu_sep(m);
@@ -1035,6 +1146,7 @@ int main(int argc, char **argv)
     pdf_font_faces(a_face);
     reader = glos_lock();                       /* (the reader's: the window's thread and the one drawing ahead) */
     build();
+    gui_idle(cont_tick, NULL, 100);             /* (continuous pages: the page shown follows the scrolling) */
     show_status();
     gui_show(win, 1);
     gui_focus(view);

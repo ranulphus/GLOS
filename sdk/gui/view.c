@@ -436,6 +436,18 @@ void gui_cview_scroll(struct gui_widget *w, int doc_x, int doc_y)       /* that 
     gui_damage(w);
 }
 
+void gui_cview_get_scroll(struct gui_widget *w, int *doc_x, int *doc_y, int *doc_h)
+{
+    struct cview *v = CV(w);
+    place(v);
+    if (doc_x)
+        *doc_x = v->num ? (int)((long long)v->hsb.pos * v->den / v->num) : 0;
+    if (doc_y)
+        *doc_y = v->num ? (int)((long long)v->vsb.pos * v->den / v->num) : 0;
+    if (doc_h)
+        *doc_h = v->num ? (int)((long long)v->vsb.page * v->den / v->num) : 0;
+}
+
 /* ---- the image view */
 static void shrink(struct cview *v)             /* the picture averaged down to the scale, if it is less than 1 */
 {
