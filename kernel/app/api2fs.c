@@ -1003,12 +1003,18 @@ static void format_batch(struct app *a, void *arg)
     u32 seg, lin, buf, s, n, old1e, set1e = 0, room = SECT_MAX;
     int e;
     (void)a;
+    /* DOS's memory: as sect_batch's (a call's most of sectors, or with DOS's memory short one), the first 256
+       bytes a table of the drive's timings (17h's path), then the sectors' room, inside a 64 KB line, which holds
+       the format's address fields too: the DMA chip reads them as it reads sectors. */
     if (!(seg = low_get(SECT_PARAS(room)))) {
-        j->error = GLOS_E_MEMORY;
-        return;
+        room = 1;
+        if (!(seg = low_get(SECT_PARAS(room)))) {
+            j->error = GLOS_E_MEMORY;
+            return;
+        }
     }
     lin = seg << 4;
-    buf = lin + 0x100;                  /* (the read back's sectors: as sect_batch's, inside a 64 KB line) */
+    buf = lin + 0x100;
     if ((buf & 0xFFFF) + room * 512 > 0x10000)
         buf = (buf + 0xFFFF) & ~0xFFFFu;
     old1e = vm_rd32(0x1E * 4);
@@ -1039,20 +1045,33 @@ static void format_batch(struct app *a, void *arg)
             r.edx = j->disk;
             e = floppy_try(&r, &o, &j->bios);
         }
+        if (e == 0) {                   /* (17h's BIOS takes a track's sectors and gap from INT 1Eh's table: DOS's,
+                                           copied, with this disk's put in, while the track is formatted) */
+            static const u8 dflt[11] = { 0xDF, 0x02, 0x25, 0x02, 0x12, 0x1B, 0xFF, 0x6C, 0xF6, 0x0F, 0x08 };
+            u32 from = ((old1e >> 16) << 4) + (old1e & 0xFFFF), t = (seg << 16) | 0x80, b;
+            for (b = 0; b < 11; b++)
+                vm_wr8(lin + 0x80 + b, old1e && from < 0x100000 - 11 ? vm_rd8(from + b) : dflt[b]);
+            vm_wr8(lin + 0x80 + 3, 2);                          /* 512 bytes a sector */
+            vm_wr8(lin + 0x80 + 4, (u8)j->spt);                 /* the track's last sector */
+            vm_wr8(lin + 0x80 + 7, j->spt <= 9 ? 0x50 : j->spt <= 15 ? 0x54 : j->spt <= 18 ? 0x6C : 0x53);  /* the gap */
+            vm_wr8(lin + 0x80 + 8, 0xF6);
+            memcpy(vm_ptr(0x1E * 4), &t, 4);
+            set1e = 1;
+        }
     }
-    if (e == 0) {                       /* the track: its address fields, then 05h */
+    if (e == 0) {                       /* the track: its address fields (in the sectors' room), then 05h */
         for (s = 0; s < j->spt; s++) {
-            vm_wr8(lin + s * 4, (u8)j->cyl);
-            vm_wr8(lin + s * 4 + 1, (u8)j->head);
-            vm_wr8(lin + s * 4 + 2, (u8)(s + 1));
-            vm_wr8(lin + s * 4 + 3, 2);
+            vm_wr8(buf + s * 4, (u8)j->cyl);
+            vm_wr8(buf + s * 4 + 1, (u8)j->head);
+            vm_wr8(buf + s * 4 + 2, (u8)(s + 1));
+            vm_wr8(buf + s * 4 + 3, 2);
         }
         memset(&r, 0, sizeof r);
         r.eax = 0x0500 | j->spt;
         r.ecx = ((j->cyl & 0xFF) << 8) | ((j->cyl >> 2) & 0xC0);
         r.edx = (j->head << 8) | j->disk;
-        r.es = (u16)seg;
-        r.ebx = 0;
+        r.es = (u16)(buf >> 4);
+        r.ebx = buf & 0xF;
         e = floppy_try(&r, &o, &j->bios);
     }
     if (set1e)                          /* (DOS's own timings back) */

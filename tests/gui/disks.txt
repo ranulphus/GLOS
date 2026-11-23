@@ -48,7 +48,7 @@ key enter
 wait "The New Image: Save As"
 key alt+n
 type C:\\OUT\\SMALL.IMG\n
-said DISKS made SMALL.IMG files=7 bytes=4911 left=0 sectors=1440
+said DISKS made SMALL.IMG files=8 bytes=5189 left=0 sectors=1440
 wait "The New Image"
 key enter
 gone "The New Image"

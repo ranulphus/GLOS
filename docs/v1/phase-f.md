@@ -1026,6 +1026,13 @@ BIOS has them, images of them, and what is inside an image.
   720 KB full, looked at, a 720 KB image written and verified, 1.44 MB again); APITEST `fs-format`. **Owed:**
   a real floppy drive (bench) for a full format; 86Box's BIOS for 18h/05h on Loop A (the API suite doesn't
   format the suite's floppy).
+- **A review's faults** (the same afternoon): the format's address fields are in the DMA-safe room (they were at
+  the block's start, which could cross a 64 KB line); DOS's memory short, one sector's room (as SECTORS); on a
+  BIOS without 18h, a copy of DOS's INT 1Eh table with the disk's sectors a track, size and gap put in is INT
+  1Eh while the track is formatted (17h's BIOS takes them from it); Disk Tools tells GLOS's refusals from the
+  drive's ("GLOS could not do it" for memory); a disk with more than sixteen bad sectors gets no file system, and
+  one whose bad sectors are where the file system must be has its new first sector cleared again (a volume left
+  there would hide its bad sectors).
 - **Not yet** (the plan's rest): the system put on a formatted disk; images in parts for disks over 2 GB; logical drives in an extended partition; an image
   opened as a folder in Files; long names written; backups over SFTP and their schedule.
 
@@ -1658,6 +1665,12 @@ client asks by GET alone.
   choice; radio buttons with none checked: nothing, as browsers do). `web-form` (host and the emulated
   desktops): the dialog by the list's word; the text field typed in the page (Esc, Tab, Enter sending); the POST
   form typed in the page; the button's word. `html_test`'s field links.
+- **A review's faults** (the same afternoon, a reviewer reading the day's commits): a password field's box
+  shows stars, the page shows it as stars, and no line says it (`form N sent ... (a password in it)`), in the
+  dialog too; a field's own words are kept with the field (emptied, it shows them again, not what was typed
+  before); a page made again (its pictures come, the reader view) keeps what was typed and chosen in a form of
+  the same fields (`form N kept`), its words showing it (`gui_richview_set_words_of`). `web-login` (host and the
+  emulated desktops; C:\WEB\LOGIN.HTM new: Disk Tools' image of the folder has eight files now).
 - **Not yet:** a radio button's or a box's own words (the page's text beside it) as its label; the fields
   drawn as boxes in the page.
 
@@ -1850,6 +1863,10 @@ none unless they give it.
   the file byte for byte; Third's after it, on the emulated desktops, the host's player running one program a
   script) and `chat-net-start` (host-only: two words refused, Third started); by hand on the host, a file with a
   first network and Second keeps both when Third is added.
+- **A review's faults** (the same afternoon): each network's password is kept under its own name (`chat` for
+  the first, as it was; `chat-NAME` for another's), so no network is sent another's. CHAT.CFG is read whole
+  first (unread, it is left alone), written to CHAT.$$$ and put in its place only if written well, and a last
+  line with no end is ended before a new section.
 - **Not yet:** IRCv3's chat history, account-notify and message tags beyond the time; the networks in one window.
 
 ## Disk Tools: the older backups thinned out (2026-11-23)

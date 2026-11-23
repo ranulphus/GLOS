@@ -359,9 +359,16 @@ static void d_title(void *c, const char *title)
 static struct wform {
     char action[600], method[8];
     int n;
-    struct { char kind[12], name[48], value[120], label[64]; int on; } f[FIELDS];
-} forms[FORMS];
-static int nforms;
+    int touched;                        /* (2026-11-23) typed in or chosen since the page was made: kept if it is
+                                           made again (its pictures come, the reader view) */
+    struct {
+        char kind[12], name[48], value[120], label[64];
+        int on;
+        int typed;                      /* typed in the page: its words show what was typed */
+        char words[64];                 /* ... and its words as the page had them (shown again if it is emptied) */
+    } f[FIELDS];
+} forms[FORMS], forms_kept[FORMS];
+static int nforms, nforms_kept;
 
 static void d_form(void *c, const char *action, const char *method)
 {
@@ -374,6 +381,7 @@ static void d_form(void *c, const char *action, const char *method)
         return;
     snprintf(forms[nforms].action, sizeof forms[0].action, "%s", action);
     snprintf(forms[nforms].method, sizeof forms[0].method, "%s", method);
+    forms[nforms].touched = 0;
     forms[nforms++].n = 0;
 }
 
@@ -388,6 +396,7 @@ static void d_field(void *c, const char *kind, const char *name, const char *val
     snprintf(f->f[f->n].value, sizeof f->f[0].value, "%s", value);
     snprintf(f->f[f->n].label, sizeof f->f[0].label, "%s", label);
     f->f[f->n].on = on;
+    f->f[f->n].typed = 0, f->f[f->n].words[0] = 0;
     f->n++;
 }
 
@@ -441,6 +450,46 @@ static const char *ends_with(const char *url)   /* a URL's path's ending (".png"
     return e;
 }
 
+/* A field typed in the page: the words it shows (its value; a password's as stars; emptied, the page's own). */
+static void field_shown(const struct wform *f, int i, char *out, size_t room)
+{
+    const char *v = f->f[i].value;
+    if (!v[0])
+        snprintf(out, room, "%s", f->f[i].words);
+    else if (!strcmp(f->f[i].kind, "password"))
+        snprintf(out, room, "[%.*s]", (int)(strlen(v) < 12 ? strlen(v) : 12), "************");
+    else
+        snprintf(out, room, "[%.120s]", v);
+}
+
+/* The page made again (its pictures came, the reader view): the forms' fields as they were typed and chosen,
+   where the forms are the same (as many fields, of the same kinds and names). */
+static void forms_restore(void)
+{
+    int k, i;
+    for (k = 0; k < nforms_kept && k < nforms && k < FORMS; k++) {
+        struct wform *f = &forms[k];
+        const struct wform *was = &forms_kept[k];
+        if (!was->touched || was->n != f->n)
+            continue;
+        for (i = 0; i < f->n && !strcmp(f->f[i].kind, was->f[i].kind) && !strcmp(f->f[i].name, was->f[i].name); i++)
+            ;
+        if (i < f->n)
+            continue;
+        memcpy(f->f, was->f, sizeof f->f);
+        f->touched = 1;
+        say("form %d kept", k);
+        for (i = 0; i < f->n; i++)
+            if (f->f[i].typed) {
+                char link[32], shown[140];
+                snprintf(link, sizeof link, "about:form?%d.%d", k, i);
+                field_shown(f, i, shown, sizeof shown);
+                gui_richview_set_words_of(view, link, shown);
+            }
+    }
+    nforms_kept = 0;
+}
+
 /* What came, shown: by what its sender says it is, or by its name's ending. */
 static void show_page(const char *url, const char *bytes, unsigned long n, const char *type, int push)
 {
@@ -462,6 +511,11 @@ static void show_page(const char *url, const char *bytes, unsigned long n, const
         snprintf(page_url, sizeof page_url, "%s", url);
     }
     doc = gui_rdoc_new();
+    nforms_kept = 0;                            /* (made again: what was typed and chosen in its forms kept) */
+    if (remaking && nforms) {
+        nforms_kept = nforms < FORMS ? nforms : FORMS;
+        memcpy(forms_kept, forms, (size_t)nforms_kept * sizeof forms[0]);
+    }
     page_title[0] = 0, blocks = links = 0, nanchors = 0, text_in_block = 0, nforms = 0;
     if (!doc)
         return;
@@ -504,6 +558,7 @@ static void show_page(const char *url, const char *bytes, unsigned long n, const
     {
         int keep = remaking ? gui_richview_pos(view) : -1;
         gui_richview_set(view, doc);    /* (the view's now; the one before is freed, which pointed at the old picture) */
+        forms_restore();
         if (keep > 0)
             gui_richview_set_pos(view, keep);   /* (made again with its pictures: where it was) */
     }
@@ -951,6 +1006,7 @@ static void form_fill(int k)
         if (x->kind == W_TEXT) {
             x->w = gui_field(gui_row(form, label, NULL), 30);
             gui_set_text(x->w, f->f[x->field].value);
+            gui_field_mask(x->w, !strcmp(f->f[x->field].kind, "password"));     /* (a password: as stars) */
         } else {
             int j, chosen = 0;
             x->w = gui_choice(gui_row(form, label, NULL), 24);
@@ -979,6 +1035,7 @@ static void form_fill(int k)
         say("form left");
         return;
     }
+    f->touched = 1;
     for (c = 0; c < nctl; c++) {                /* what was typed and chosen, the form's (the page's words show it) */
         struct control *x = &ctl[c];
         if (x->kind == W_TEXT) {
@@ -999,8 +1056,8 @@ static void form_fill(int k)
 static void form_send(int k)
 {
     struct wform *f = &forms[k];
-    char url[1600], pairs[900];
-    int i, j, sent_button = 0;
+    char url[1600], pairs[900], said[900];     /* (said: what is said of it, a password's value as stars) */
+    int i, j, sent_button = 0, secret = 0;
     size_t at;
     if (strcmp(f->method, "get") && strcmp(f->method, "post")) {
         say("form %d %s refused", k, f->method);
@@ -1014,6 +1071,7 @@ static void form_send(int k)
             continue;
         if (!strcmp(kind, "hidden") || typed_kind(kind)) {
             add_pair(pairs, sizeof pairs, name, f->f[i].value);
+            secret |= !strcmp(kind, "password") && f->f[i].value[0];
         } else if (!strcmp(kind, "submit") || !strcmp(kind, "image")) {
             if (!sent_button++)                 /* (the first button is the one pressed) */
                 add_pair(pairs, sizeof pairs, name, f->f[i].value);
@@ -1031,14 +1089,18 @@ static void form_send(int k)
                 add_pair(pairs, sizeof pairs, name, f->f[pick].value);
         }
     }
+    snprintf(said, sizeof said, "%s", secret ? "(a password in it)" : pairs);
     if (!strcmp(f->method, "post")) {           /* POST: the pairs are the body, sent to the form's address */
-        say("form %d sent post %s body %s", k, f->action, pairs);
+        say("form %d sent post %s body %s", k, f->action, said);
         go_post(f->action, pairs);
         return;
     }
     at = strcspn(f->action, "?#");              /* GET: they are the query, in place of the address's */
     snprintf(url, sizeof url, "%.*s?%s", (int)(at < 600 ? at : 600), f->action, pairs);
-    say("form %d sent %s", k, url);
+    if (secret)
+        say("form %d sent %.*s?(a password in it)", k, (int)(at < 600 ? at : 600), f->action);
+    else
+        say("form %d sent %s", k, url);
     go(url, 1);
 }
 
@@ -1050,7 +1112,6 @@ static struct {
     struct gui_window *pop;
     struct gui_widget *box;
     int form, idx;
-    char words[140];                    /* the field's words in the page before (shown again if it is left empty) */
 } inp;
 
 static int typed_fields(const struct wform *f)
@@ -1072,12 +1133,13 @@ static void inpage_end(int keep, int send, int refocus)
         struct wform *f = &forms[k];
         char shown[140];
         snprintf(f->f[inp.idx].value, sizeof f->f[0].value, "%s", gui_get_text(inp.box));
-        if (f->f[inp.idx].value[0])
-            snprintf(shown, sizeof shown, "[%.120s]", f->f[inp.idx].value);
-        else
-            snprintf(shown, sizeof shown, "%s", inp.words);
+        f->f[inp.idx].typed = 1, f->touched = 1;
+        field_shown(f, inp.idx, shown, sizeof shown);
         gui_richview_set_link_words(view, shown);
-        say("field %d.%d typed %s", k, inp.idx, f->f[inp.idx].value);
+        if (!strcmp(f->f[inp.idx].kind, "password"))
+            say("field %d.%d typed (a password)", k, inp.idx);
+        else
+            say("field %d.%d typed %s", k, inp.idx, f->f[inp.idx].value);
     } else {
         say("field %d.%d left", k, inp.idx);
         send = 0;
@@ -1123,7 +1185,8 @@ static void inpage_open(int k, int i)
         form_fill(k);                           /* (its words not shown: the dialog) */
         return;
     }
-    gui_richview_link_words(view, inp.words, sizeof inp.words);
+    if (!forms[k].f[i].typed)                   /* (the page's own words, before anything was typed) */
+        gui_richview_link_words(view, forms[k].f[i].words, (int)sizeof forms[k].f[i].words);
     right = view->r.x + view->r.w - GUI_SB;
     w = r.w < 200 ? 200 : r.w;
     if (w > right - view->r.x)
@@ -1136,6 +1199,7 @@ static void inpage_open(int k, int i)
     inp.box = gui_field(inp.pop->root, 20);
     gui_grow(inp.box, 1);
     gui_set_text(inp.box, forms[k].f[i].value);
+    gui_field_mask(inp.box, !strcmp(forms[k].f[i].kind, "password"));     /* (a password: as stars) */
     gui_keys(inp.box, inpage_keys);
     mh = gui_font->height + 6;                  /* (as tall as a field, over the words' line) */
     gui_resize(inp.pop, w, mh);

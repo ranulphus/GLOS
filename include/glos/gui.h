@@ -920,6 +920,8 @@ const char *gui_richview_link(struct gui_widget *w);
 int gui_richview_link_place(struct gui_widget *w, struct gfx_rect *r);
 void gui_richview_set_link_words(struct gui_widget *w, const char *text);
 int gui_richview_link_words(struct gui_widget *w, char *out, int room);        /* its words now: their length */
+int gui_richview_set_words_of(struct gui_widget *w, const char *link, const char *text);       /* every link to
+                                           `link` given those words (a remade page's fields): how many */
 char *gui_richview_text(struct gui_widget *w, int chosen);     /* the text (all, or what is chosen): malloc'd */
 int gui_richview_show(struct gui_widget *w, int block);        /* (phase F) scrolled to put block i at the top (a
                                            closed block round it opened): 0; -1 no such block */

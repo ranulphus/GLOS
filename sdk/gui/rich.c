@@ -1012,6 +1012,30 @@ int gui_richview_link_words(struct gui_widget *w, char *out, int room)
     return (int)strlen(out);
 }
 
+/* Every link to `link`: its words replaced (a page made again: its fields show what was typed in them): how many. */
+int gui_richview_set_words_of(struct gui_widget *w, const char *link, const char *text)
+{
+    struct rview *v = RV(w);
+    int i, k, n = 0;
+    if (!v->doc || !link)
+        return 0;
+    for (i = 0; i < v->doc->n; i++)
+        for (k = 0; k < v->doc->b[i].nrun; k++) {
+            struct rrun *r = &v->doc->b[i].run[k];
+            char *t;
+            if (!r->link || strcmp(r->link, link) || !(t = strdup(text ? text : "")))
+                continue;
+            free(r->text);
+            r->text = t, r->len = (int)strlen(t);
+            n++;
+        }
+    if (n) {
+        v->laid_w = 0, v->sel_on = 0;
+        gui_damage(w);
+    }
+    return n;
+}
+
 /* ... and its words replaced (a form's field showing what was typed in it): laid out again. */
 void gui_richview_set_link_words(struct gui_widget *w, const char *text)
 {

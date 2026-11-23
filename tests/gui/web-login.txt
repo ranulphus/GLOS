@@ -1,0 +1,43 @@
+# The Web Reader's sign-in form (apps/web; phase F, 2026-11-23): a name and a password typed in the page; the
+# password's box shows stars, the page shows it as stars, and it is never said (the lines say "a password").
+# The page made again (the reader view on and off): what was typed kept. The name emptied: the page shows its
+# own words again. The button's words send it (POST).
+run WEB.EXE C:\WEB\LOGIN.HTM
+wait "Sign In - Web Reader"
+said WEB loaded file:///C:/WEB/LOGIN.HTM title=Sign In blocks=2 links=3
+key tab
+key enter
+said WEB field 0.0 typing
+type ann
+key tab
+said WEB field 0.0 typed ann
+key tab
+key enter
+said WEB field 0.1 typing
+type secret
+key tab
+said WEB field 0.1 typed (a password)
+shot typed "Sign In - Web Reader"
+key f9
+said WEB reader on
+said WEB form 0 kept
+key f9
+said WEB reader off
+said WEB form 0 kept
+shot kept "Sign In - Web Reader"
+key tab
+key enter
+said WEB field 0.0 typing
+key ctrl+a
+key del
+key tab
+said WEB field 0.0 typed 
+shot emptied "Sign In - Web Reader"
+key tab
+key tab
+key enter
+said WEB form 0 sent post file:///C:/WEB/RESULT.HTM body (a password in it)
+said WEB loaded file:///C:/WEB/RESULT.HTM title=Found blocks=1 links=0
+key alt+f4
+gone "Sign In - Web Reader"
+expect WEB end

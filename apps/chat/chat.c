@@ -943,6 +943,20 @@ static void settings_read(void)
     fclose(f);
 }
 
+/* (2026-11-23) The name its password is kept under (GLOS's secrets, the program's own): the first network's
+   "chat", as it always was; another's "chat-NAME", so that no network is sent another's. */
+static const char *secret_name(void)
+{
+    static char name[48];
+    char *c;
+    if (!net_name[0])
+        return "chat";
+    snprintf(name, sizeof name, "chat-%s", net_name);
+    for (c = name; *c; c++)                     /* (one spelling whatever the case the name was typed in) */
+        *c = (char)(*c >= 'A' && *c <= 'Z' ? *c + 32 : *c);
+    return name;
+}
+
 static void settings_put(FILE *f)
 {
     fprintf(f, "server %s\r\nport %u\r\ntls %d\r\nnick %s\r\nalt %s\r\nreal %s\r\naccount %s\r\njoin %s\r\nstart %d\r\n", cfg.server,
@@ -950,30 +964,34 @@ static void settings_put(FILE *f)
     fprintf(f, "again %d\r\nlogs %d\r\nquiet %d\r\nplain %d\r\ntell %d\r\n", cfg.again, cfg.logs, cfg.quiet, cfg.plain, cfg.tell);
 }
 
-/* This network's settings written; the file's other networks' as they were (read first, and written round it). */
+/* This network's settings written; the file's other networks' as they were (read first, and written round it):
+   into a new file beside it, which then takes the old one's place (a write that fails leaves the old file as it
+   was). If the old file can't be read whole, it is left alone and nothing is written. */
 static void settings_keep(void)
 {
-    char *old = NULL, line[300];
-    size_t n = 0, room = 0;
+    char *old = NULL, tmp[310];
+    long size = 0;
     FILE *f;
-    int ours, put = 0;
+    int ours, put = 0, bad;
     if (!cfg_path[0])
         return;
     if ((f = gui_fopen(cfg_path, "rb")) != NULL) {
-        while (fgets(line, sizeof line, f)) {
-            size_t k = strlen(line);
-            if (n + k + 1 > room) {
-                char *m = realloc(old, room = (n + k + 1) * 2);
-                if (!m)
-                    break;
-                old = m;
-            }
-            memcpy(old + n, line, k + 1);
-            n += k;
+        if (fseek(f, 0, SEEK_END) != 0 || (size = ftell(f)) < 0 || size > 256 * 1024L || fseek(f, 0, SEEK_SET) != 0
+            || !(old = malloc((size_t)size + 1)) || fread(old, 1, (size_t)size, f) != (size_t)size) {
+            fclose(f);
+            free(old);
+            say("settings not kept: CHAT.CFG unread");
+            return;
         }
+        old[size] = 0;
         fclose(f);
     }
-    if (!(f = gui_fopen(cfg_path, "wb"))) {
+    snprintf(tmp, sizeof tmp, "%s", cfg_path);
+    if (strlen(tmp) > 4 && tmp[strlen(tmp) - 4] == '.')
+        strcpy(tmp + strlen(tmp) - 4, ".$$$");
+    else
+        strncat(tmp, ".$$$", sizeof tmp - strlen(tmp) - 1);
+    if (!(f = gui_fopen(tmp, "wb"))) {
         free(old);
         return;
     }
@@ -991,10 +1009,14 @@ static void settings_keep(void)
                 snprintf(name, sizeof name, "%.*s", (int)(m < sizeof name ? m : sizeof name - 1), p + 1);
                 ours = net_name[0] && same_name(name, net_name);
                 fwrite(p, 1, (size_t)(e - p), f);
+                if (p[k] != '\n')              /* (the file's last line, with no end: ended) */
+                    fputs("\r\n", f);
                 if (ours)
                     settings_put(f), put = 1;
             } else if (!ours) {                 /* (another network's line: as it was) */
                 fwrite(p, 1, (size_t)(e - p), f);
+                if (p[k] != '\n')
+                    fputs("\r\n", f);
             }
             p = e;
         }
@@ -1003,8 +1025,17 @@ static void settings_keep(void)
         fprintf(f, "[%s]\r\n", net_name);
         settings_put(f);
     }
-    fclose(f);
+    bad = ferror(f) != 0;
+    bad |= fclose(f) != 0;
     free(old);
+    if (bad) {
+        gui_unlink(tmp);
+        say("settings not kept: written badly");
+        return;
+    }
+    gui_unlink(cfg_path);                       /* (DOS's rename doesn't put a file over another) */
+    if (gui_rename(tmp, cfg_path) != 0)
+        say("settings not kept: CHAT.$$$ not renamed");
 }
 
 static void make_irc(void)              /* IRC's state made anew from the settings (not while connected) */
@@ -1014,7 +1045,7 @@ static void make_irc(void)              /* IRC's state made anew from the settin
     unsigned len = 0;
     if (irc && irc_state(irc) != IRC_OFF)
         return;
-    if (!demo && cfg.account[0] && glos_secret_get("chat", password, sizeof password - 1, &len, 0) == 0)
+    if (!demo && cfg.account[0] && glos_secret_get(secret_name(), password, sizeof password - 1, &len, 0) == 0)
         password[len < sizeof password ? len : sizeof password - 1] = 0;
     memset(&o, 0, sizeof o);
     o.nick = cfg.nick[0] ? cfg.nick : "glos", o.alt = cfg.alt, o.user = "glos", o.real = cfg.real[0] ? cfg.real : "A GLOS user";
@@ -1100,7 +1131,7 @@ static void settings(void)
         return;
     }
     if (s_pw[0] && !demo)
-        glos_secret_put("chat", s_pw, (unsigned)strlen(s_pw), 0);
+        glos_secret_put(secret_name(), s_pw, (unsigned)strlen(s_pw), 0);
     memset(s_pw, 0, sizeof s_pw);
     settings_keep();
     say("settings %s %u %s nick=%s join=%s again=%d logs=%d quiet=%d plain=%d tell=%d", cfg.server, cfg.port,

@@ -51,6 +51,7 @@ enum { J_READ = 1, J_WRITE, J_CHECK, J_FORMAT, J_NEW, J_EXTRACT, J_BACKUP, J_SET
 enum { L_NOT = 0, L_VOLUME, L_NONE, L_OTHER, L_UNREAD = -1 };  /* what a look at a disk found */
 
 #define E_OWN 0x100                     /* dev_io: GLOS refused (the disk it runs from) */
+#define E_CALL 0x101                    /* (a full format) GLOS's call failed: its memory, or what it was asked */
 #define FLOPPY_MOST 5760ul
 
 struct disk {
@@ -646,8 +647,11 @@ static int track_format(void *ctx, unsigned cyl, unsigned head, unsigned long lo
     q.cylinder = cyl, q.head = head;
     q.cylinders = j->cyls, q.sectors = j->spt;
     q.verify = 1;
-    if (glos_fs_format(&q) != 0)
-        return q.error ? (int)q.error : E_OWN;
+    switch (glos_fs_format(&q)) {
+    case 0: break;
+    case GLOS_E_REFUSED: return q.error ? (int)q.error : E_OWN;        /* (the drive's error; or GLOS's own disk) */
+    default: return E_CALL;
+    }
     *bad = (unsigned long long)q.bad_hi << 32 | q.bad_lo;
     return 0;
 }
@@ -668,26 +672,33 @@ static int full_format(struct job *j)
     unsigned n;
     if (diskjob_format(track_format, j, j->cyls, j->heads, j->spt, tick, j, &j->r, &j->ferr) != 0) {
         if (!j->r.stopped)
-            snprintf(j->why, sizeof j->why, "%s", j->ferr == E_OWN ? GUI_T("GLOS itself runs from that disk.") : floppy_error(j->ferr));
+            snprintf(j->why, sizeof j->why, "%s", j->ferr == E_OWN ? GUI_T("GLOS itself runs from that disk.")
+                     : j->ferr == E_CALL ? GUI_T("GLOS could not do it (too little of DOS's memory free?).") : floppy_error(j->ferr));
         else
             snprintf(j->why, sizeof j->why, "%s", GUI_T("It was stopped: the disk is not usable as it is."));
         return -1;
     }
     fl_layout(j->bios, j->sectors, j->heads, j->spt);   /* (the disk's sectors read and written by its new layout) */
-    if (make_volume(j, dev_format, &j->bios) != 0)
-        return -1;
-    n = j->r.bad < 16 ? (unsigned)j->r.bad : 16;
-    if (j->r.bad > 16) {
+    if (j->r.bad > 16) {                        /* (no file system made: the disk is left formatted, empty) */
         snprintf(j->why, sizeof j->why, GUI_T("It has %lu bad sectors: too many to trust it."), j->r.bad);
         return -1;
     }
+    if (make_volume(j, dev_format, &j->bios) != 0)
+        return -1;
+    n = (unsigned)j->r.bad;
     switch (diskjob_mark_bad(dev_io, &j->bios, j->r.bad_list, n)) {
-    case 0: return 0;
+    case 0:
+        return 0;
     case -1:
         snprintf(j->why, sizeof j->why, "%s", GUI_T("It has bad sectors where its file system must be: it can't hold one."));
-        return -1;
+        break;
+    default:
+        snprintf(j->why, sizeof j->why, "%s", GUI_T("The disk could not be written."));
     }
-    snprintf(j->why, sizeof j->why, "%s", GUI_T("The disk could not be written."));
+    {                                           /* (the volume just made would hide its bad sectors: undone) */
+        static unsigned char none[512];
+        dev_io(&j->bios, 0, none, 1, 1);
+    }
     return -1;
 }
 
