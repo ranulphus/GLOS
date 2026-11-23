@@ -22,7 +22,9 @@ Undo is Ctrl+Z, Redo Ctrl+Y. Ctrl++ and Ctrl+- show more or less of the roll.
 
 ## Hearing it
 
-**F5** plays from the start, **F6** stops. **Transport, Tempo** sets the speed in quarter notes a minute.
+**F5** plays from the start, **F6** stops. **Transport, Tempo** sets the speed in quarter notes a minute, from
+the start or from a bar on (a change of tempo there). **Transport, Time Signature** sets the beats in a bar and
+the note a beat is.
 
 **F7** (Record) records into the chosen track while the song plays from its start: play a **MIDI keyboard**
 plugged into the sound card's MIDI port (an MPU-401), or the **PC's keys** as a piano: the bottom row
