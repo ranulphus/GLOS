@@ -133,9 +133,12 @@ static void ack(int c)
     wr32(INT_HLDCLR, v | INT_EN(c));
 }
 
+/* The chip's interrupt: each source said and cleared, again until it says none, so that the line is low when
+   this returns (an edge-triggered PIC sees no new edge from a line that stayed high). */
 static void irq(struct trapframe *tf)
 {
-    u32 st = rd32(INT_STATUS);
+    u32 st, rounds;
+    for (rounds = 0; rounds < 4 && ((st = rd32(INT_STATUS)) & (ST_UART | ST_CH(0) | ST_CH(1))); rounds++) {
     if (st & ST_UART)
         midi_mpu_drain();
     if (st & ST_CH(1)) {                        /* recording: a half filled */
@@ -152,6 +155,7 @@ static void irq(struct trapframe *tf)
             cm.fill((s16 *)(cm.buf + cm.half * cm.frames * 4), cm.frames, tf);
             cm.half ^= 1;
         }
+    }
     }
 }
 
@@ -175,6 +179,7 @@ static void channel(int c, int code, u32 phys, u32 frames, int rec)
     wr32(CHFORMAT, (fmt & ~(3u << (c * 2))) | (3u << (c * 2)));
     wr32(CH_ADDR(c), phys);
     wr32(CH_COUNT(c), ((frames - 1) << 16) | (frames * 2 - 1));
+    wr32(INT_HLDCLR, rd32(INT_HLDCLR) & ~INT_EN(c));   /* (anything left from before cleared, then on) */
     wr32(INT_HLDCLR, rd32(INT_HLDCLR) | INT_EN(c));
     wr32(FUNCTRL0, (f0 & ~F0_RST(c)) | F0_EN(c));
 }
@@ -230,7 +235,7 @@ static void cmi_stop(void)
     halt(0);
     cm.running = 0;
     legacy_back();
-    kprintf("GLOS-CMI stop irqs=%u\n", cm.irqs);
+    kprintf("GLOS-CMI stop irqs=%u st=%x hld=%x f0=%x\n", cm.irqs, rd32(INT_STATUS), rd32(INT_HLDCLR), rd32(FUNCTRL0));
 }
 
 static int cmi_running(void) { return cm.running; }

@@ -263,9 +263,16 @@ int es1371_init(void)
     return 0;
 }
 
+static u32 calls;                       /* (the handler's calls: said at stop) */
+
+/* The card's interrupt: each channel's said and acknowledged, again until it says none, so that the line is low
+   when this returns (an edge-triggered PIC sees no new edge from a line that stayed high: playback stopped for
+   good, once in Loop A's first runs). */
 static void irq(struct trapframe *tf)
 {
-    u32 st = rd32(STATUS);
+    u32 st, rounds;
+    calls++;
+    for (rounds = 0; rounds < 4 && ((st = rd32(STATUS)) & (ST_ADC | ST_DAC2)); rounds++) {
     if (st & ST_ADC) {                          /* a half recorded */
         wr32(SERIAL, es.serial & ~S_R1INT);
         wr32(SERIAL, es.serial);
@@ -282,6 +289,7 @@ static void irq(struct trapframe *tf)
             es.fill((s16 *)(es.buf + es.half * es.frames * 4), es.frames, tf);
             es.half ^= 1;
         }
+    }
     }
 }
 
@@ -318,12 +326,15 @@ static int es_start(u32 rate, u32 frames, mixer_fill fill)
     wr32(0x38, es.phys);
     wr32(0x3C, frames * 2 - 1);
     wr32(DAC2_SCOUNT, frames - 1);              /* an interrupt each half */
-    es.serial = (es.serial & ~(0x3Fu << 16 | 0x4000u | 0x1000u | 0x0Cu | 0x40u)) | (2u << 19) | (3u << 2) | S_P2INT;
+    es.serial = (es.serial & ~(0x3Fu << 16 | 0x4000u | 0x1000u | 0x0Cu | 0x40u | S_P2INT)) | (2u << 19) | (3u << 2);
+    wr32(SERIAL, es.serial);                    /* (its interrupt off a moment: anything left from before cleared) */
+    es.serial |= S_P2INT;
     wr32(SERIAL, es.serial);
     es.running = 1;
     es.control |= C_DAC2;
     wr32(CONTROL, es.control);
     kprintf("GLOS-ES start rate=%u frames=%u buf=%x\n", rate, frames, es.phys);
+
     return 0;
 }
 
@@ -336,7 +347,7 @@ static void es_stop(void)
     es.serial &= ~S_P2INT;
     wr32(SERIAL, es.serial);
     es.running = 0;
-    kprintf("GLOS-ES stop irqs=%u\n", es.irqs);
+    kprintf("GLOS-ES stop irqs=%u calls=%u\n", es.irqs, calls);
 }
 
 static int es_running(void) { return es.running; }
@@ -383,6 +394,8 @@ static void es_rec_stop(void)
 
 static int es_chan(int chan, int set, u8 *left, u8 *right, u8 *mute)
 {
+    if (set && es.found)                        /* (a change said, with how playback stands) */
+        kprintf("GLOS-ES chan %d set irqs=%u st=%x sctl=%x\n", chan, es.irqs, rd32(STATUS), rd32(SERIAL));
     return es.found ? ac97_chan(&es.ac, chan, set, left, right, mute) : -1;
 }
 

@@ -4979,9 +4979,10 @@ def gpu_case(profile, vcard, card):
 # (machine, video card, network card): GLOS's mixer (M8 step E); it is the desktop's, on any card
 AUDIO_CASES = [("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k"),
                ("bf6", "g200", "ne2kpci", "cs4236b"), ("bf6", "g200", "ne2kpci", "cs4232"),
-               ("bf6", "g200", "ne2kpci", "cs4235"),      # (docs/crystal-audio.md: GLOS sets the chip up; 86Box
-               ("bf6", "g200", "ne2kpci", "cmi8738"),     # (phase H: the PCI CMI8738, kernel/drv/cmi8738.c)
-               ("bf6", "g200", "ne2kpci", "es1371")]      # (... an ES1371 and its AC'97 codec, es1371.c, ac97.c)
+               ("bf6", "g200", "ne2kpci", "cs4235")]      # (docs/crystal-audio.md: GLOS sets the chip up; 86Box
+# (phase H's PCI cards, kernel/drv/cmi8738.c and es1371.c: run by LOOPA_AUDIO_SOUND=cmi8738,es1371 alone until their
+# playback no longer stops when recording starts: docs/v1/phase-h.md)
+AUDIO_CASES_H = [("bf6", "g200", "ne2kpci", "cmi8738"), ("bf6", "g200", "ne2kpci", "es1371")]
 #   offers these three Crystal cards, given MGA-Glide's sound/crystal ROMs)
 
 
@@ -5303,6 +5304,8 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
         o_s = bytes(stu.said).decode("latin-1").replace("\r", "")
         checks["studio-said"] = rc_s == 0 and all(l in o_s for l in (
             "STUDIO opened STUNE.MID tracks=1 notes=1", "STUDIO playing 5", "STUDIO ended", "STUDIO end"))
+        if es:                                  # (no FM synthesiser and no MIDI port: Studio says it can't play)
+            checks["studio-said"] = "STUDIO opened STUNE.MID tracks=1 notes=1" in o_s and "STUDIO refused midi" in o_s
         if not checks["studio-said"]:
             print("    %s studio: rc=%d %r" % (tag, rc_s, o_s[-400:]))
         if crystal or cmi:                      # the FM synthesiser in a session, at the AdLib's ports and the SB Pro's
@@ -12370,7 +12373,8 @@ def main():
             cases = [c for c in cases if c[1] in os.environ["GLWIN_ONLY"].split(",")]
         return 0 if all(r[1] for r in matrix(glwin_case, cases, a.jobs)) else 1
     if a.suite == "audio":
-        cases = [c for c in AUDIO_CASES if not a.profile or c[0] in a.profile]
+        cases = [c for c in AUDIO_CASES + (AUDIO_CASES_H if os.environ.get("LOOPA_AUDIO_SOUND") else [])
+                 if not a.profile or c[0] in a.profile]
         if os.environ.get("LOOPA_AUDIO_SOUND"):    # e.g. LOOPA_AUDIO_SOUND=cs4236b,cs4232
             cases = [c for c in cases if (c[3] if len(c) > 3 else "sb16") in os.environ["LOOPA_AUDIO_SOUND"].split(",")]
         res = matrix(audio_case, cases, a.jobs)
