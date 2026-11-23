@@ -903,7 +903,8 @@ def shell(profile, boot):
 
 
 NET_CASES = [("bf6", "ne2kpci"), ("bf6", "ne2k"), ("486dx2", "ne2k"), ("486dx2", "ne2kpci"), ("486dx4", "ne2kpci"),
-             ("bf6", "rtl8139c+"), ("bf6", "i82557"), ("bf6", "i82558"), ("486dx2", "rtl8139c+"), ("486dx4", "i82557")]
+             ("bf6", "rtl8139c+"), ("bf6", "i82557"), ("bf6", "i82558"), ("486dx2", "rtl8139c+"), ("486dx4", "i82557"),
+             ("bf6", "pcnetpci"), ("486dx2", "pcnetpci")]  # (phase H: AMD PCnet-PCI, kernel/drv/pcnet.c)
 if os.environ.get("NET_ONLY"):                  # e.g. NET_ONLY=rtl8139c+,i82557
     NET_CASES = [c for c in NET_CASES if c[1] in os.environ["NET_ONLY"].split(",")]
 
