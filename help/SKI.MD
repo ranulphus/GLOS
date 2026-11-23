@@ -23,7 +23,8 @@ mouse again.
 - The nearer the skis point to straight down, the faster you go. Skis across the slope stop you.
 - **The snow:** the piste in the middle is fast; the powder at its sides is slow; in the forest it is slower
   still. Pale blue patches are **ice**: fast, and the skis hardly hold, so turn before it.
-- **A tree, a rock, a fence, a pylon of the chair lift, the hut or another skier** is a fall. You are up again in a second or two, and nothing can
+- **A tree, a rock, a fence, a pylon of the chair lift, the hut, another skier or the piste groomer** is a
+  fall (the groomer crosses the piste slowly: go round it, or jump it). You are up again in a second or two, and nothing can
   knock you down in the first moment after.
 - **A ramp** taken fast throws you into the air. Turn while you are up there: land a half turn or a whole one
   for points, but land part way round, or with the skis across the slope, and you fall. Moguls, the small
