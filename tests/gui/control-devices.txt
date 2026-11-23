@@ -3,7 +3,7 @@
 # ones by name (PCIIDS.DAT), USB's under their controller by name too (USBIDS.DAT: the pad chosen at the end);
 # the chosen one's lines under the tree; Turn off asks
 # first for the network card (No: nothing written), and writes the field at once for the sound chip, Turn on
-# takes it out again; Esc leaves without applying.
+# takes it out again; the pad's Its Settings shows its page (2026-11-23); Esc leaves without applying.
 run CONTROL.EXE devices
 wait "Control Panel"
 pause 2500
@@ -29,6 +29,9 @@ key down
 key down
 pause 1500
 shot cp-devices-usb "Control Panel"
+key alt+s
+pause 500
+shot cp-devices-settings "Control Panel"
 key esc
 gone "Control Panel"
 expect CONTROL devices names=8 of 8
@@ -37,5 +40,6 @@ expect CONTROL devices=25
 expect CONTROL usb devices=4
 expect CONTROL devices kept 00:03.0
 expect CONTROL devices off=crystal
+expect CONTROL devices settings joystick
 expect CONTROL devices off=
 expect CONTROL end

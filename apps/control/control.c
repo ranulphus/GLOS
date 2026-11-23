@@ -58,6 +58,16 @@ static int nctl;
 
 static struct gui_window *win;
 static struct gui_widget *tabs, *help, *when_label, *status, *find;
+
+void control_show_section(const char *section)  /* (the Devices page's Settings: the section's page shown) */
+{
+    int s;
+    for (s = 0; cfg_sections[s]; s++)
+        if (!strcmp(cfg_sections[s], section)) {
+            gui_tabs_set(tabs, s);
+            return;
+        }
+}
 static int find_at = -1;                        /* the setting last found (ctls' index) */
 static int field_chars = 30;                    /* a text setting's field: as wide as this at most */
 static struct gui_widget *prog_list, *types_list, *prog_remove;

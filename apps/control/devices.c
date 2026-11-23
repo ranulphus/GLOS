@@ -38,7 +38,7 @@ struct dev {
 static struct dev dv[DEVS];
 static int ndv;
 static struct gui_window *d_win;
-static struct gui_widget *d_tree, *d_info, *d_button, *d_field;
+static struct gui_widget *d_tree, *d_info, *d_button, *d_field, *d_set;
 static char d_sig[2048], d_shown[INFO * 120];
 static struct pci_name names[40], unames[24];   /* (PCI's from PCIIDS.DAT; USB's from USBIDS.DAT, in the same form) */
 static int nnames, names_read, nunames, d_usb = -1, d_btn = -1;      /* d_btn: the button as last set */
@@ -378,9 +378,43 @@ static struct dev *chosen(void)
     return k > 0 && k <= ndv ? &dv[k - 1] : NULL;
 }
 
+/* (2026-11-23) The Control Panel's page with a device's own settings: the display's (its engine, its mode), the
+   sound's (the card, the mixer, the virtual Sound Blaster, MIDI out), the network's, the input's (a USB keyboard
+   or mouse too), the joystick's (a pad, the game port), USB's; NULL for one with none. */
+static const char *settings_of(const struct dev *d)
+{
+    static const char *const kinds[] = { "display", "net", "sound", "usb", "input", 0 };
+    int k;
+    if (!d)
+        return NULL;
+    for (k = 0; kinds[k]; k++)
+        if (!strcmp(d->kind, kinds[k]))
+            return kinds[k];
+    if (!strcmp(d->kind, "usbdev"))          /* (a USB device: by what serves it) */
+        return strstr(d->driver, "xbox") || strstr(d->driver, "pad") || strstr(d->driver, "joy") ? "joystick"
+             : strstr(d->driver, "keyboard") || strstr(d->driver, "mouse") ? "input" : "usb";
+    if (!strcmp(d->kind, "port") && strstr(d->label, "ame"))      /* (the game port) */
+        return "joystick";
+    if (!strcmp(d->kind, "virtual") && (strstr(d->label, "Sound Blaster") || strstr(d->name, "Sound Blaster")))
+        return "sound";
+    return NULL;
+}
+
+static void settings_pressed(struct gui_widget *b, int what)
+{
+    const char *sec = settings_of(chosen());
+    (void)b, (void)what;
+    if (sec) {
+        printf("CONTROL devices settings %s\n", sec);
+        control_show_section(sec);
+    }
+}
+
 static void info(void)
 {
     struct dev *d = chosen();
+    if (d_set)
+        gui_enable(d_set, settings_of(d) != NULL);
     char t[INFO][120], a[120], b[120];
     const struct pci_name *n;
     int i, k = 0;
@@ -576,6 +610,8 @@ void devices_add(struct gui_window *win, struct gui_widget *page, struct gui_wid
     gui_size(d_info, 0, 6 * 16 + 4);
     row = gui_hbox(page, 6, 0);
     gui_space(row, 0, 0);
+    d_set = gui_button(row, GUI_T("Its &settings"), settings_pressed, 2);
+    gui_enable(d_set, 0);
     d_button = gui_button(row, GUI_T("Turn &off"), toggle, 1);
     gui_enable(d_button, 0);
 }

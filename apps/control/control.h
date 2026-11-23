@@ -24,6 +24,8 @@ void status_poll(void);                 /* read again (the network once a second
 
 /* devices.c: the Devices page (phase F): every device, what serves it, Turn off and Turn on */
 void devices_add(struct gui_window *win, struct gui_widget *page, struct gui_widget *field, const char *argv0);
+/* (2026-11-23) The Devices page's Settings: control.c's, the page of a section shown ("display", "sound" ...). */
+void control_show_section(const char *section);
 void devices_poll(void);                /* read again every two seconds; the chosen one's lines each time */
 
 #endif

@@ -1266,9 +1266,13 @@ PCI ID Project's list under its BSD option.
   and the USB controller's lines, the setting named, a restart, each off; the network card off under GLOS
   /RUN with DEVLIST printing the list; host GUI script `control-devices` (the page, the question, Turn off
   and on); the control suite's run checks every emulated PCI device is named.
-- **Not yet:** the setting for devices with settings of their own (the display's engine, the virtual Sound
-  Blaster: their own pages); names for USB devices (usb.ids); the PC's ACPI and Plug and Play BIOS's lists
-  of ISA devices; a device's driver started or stopped without GLOS starting again.
+- **Its settings** (since built, 2026-11-23): a button beside Turn off, for a device with settings of its own,
+  shows the Control Panel page that has them: the display's, the network's, the sound's (the card, the virtual
+  Sound Blaster too), the input's (a USB keyboard or mouse), the joystick's (a pad, the game port), USB's.
+  `control-devices`: the Xbox pad's opens the Joystick page (`devices settings joystick`). USB names (usb.ids)
+  were built on 2026-11-22.
+- **Not yet:** the PC's ACPI and Plug and Play BIOS's lists of ISA devices; a device's driver started or stopped
+  without GLOS starting again.
 
 ## Help: the welcome tour and the tip of the day (2026-11-22)
 
