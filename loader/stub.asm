@@ -574,6 +574,8 @@ a20_put:
         call    putc
         mov     si, offset msg_crlf
         call    puts
+        cmp     sd_shell, 2             ; a native boot: nothing is under GLOS to go back to
+        je      native_end
         cmp     sd_shell, 0
         jne     shell_on
         cmp     sd_keep_psp, 0          ; INT 2Fh hooked over GLOS: PSP:5Ch is a JMP FAR on down the
@@ -612,6 +614,32 @@ keep_now:
         mov     al, exit_code
         mov     ah, 31h
         int     21h
+; A native boot's end (GLOSLDR.SYS started GLOS: docs/v1/native-dos.md): with code 200 (glos restart) the PC
+; restarts, by the keyboard controller's reset line; otherwise it says so on the screen and stops.
+native_end:
+        cmp     exit_code, 200
+        jne     native_stop
+        cli
+        call    kbc_wait
+        mov     al, 0FEh
+        out     64h, al
+native_stop:
+        mov     si, offset msg_stopped
+ns_put: mov     al, [si]
+        or      al, al
+        jz      ns_halt
+        mov     ah, 0Eh
+        xor     bx, bx
+        push    si
+        int     10h
+        pop     si
+        inc     si
+        jmp     ns_put
+ns_halt:
+        cli
+        hlt
+        jmp     ns_halt
+msg_stopped     db      13, 10, 'GLOS has stopped. It is safe to switch this PC off.', 13, 10, 0
 shell_on:                               ; the shell never ends: COMMAND.COM from now on
         push    cs
         pop     es

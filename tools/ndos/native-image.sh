@@ -3,6 +3,7 @@
 # (docs/v1/native-dos.md, native boot): 64 MB (130 cylinders of 16 heads by 63), GLOS's MBR, one FAT volume made
 # by GLOS's own formatter with GLOS's boot code naming GLOSLDR.SYS (tools/ndos/mkvol.c), \GLOSLDR.SYS
 # (build/ow/GLOSLDR.SYS) and \GLOS\ with GLOSK.BIN; then the files given (DOSPATH as \GLOS\GLOS.CFG, \X.EXE).
+# GLOS_CMDLINE in the environment: the loader's command line (a folder other than \GLOS for GLOS's files, flags).
 # For Loop A's --hdd. Run inside the dev container (tools/dev): gcc, mtools.
 set -eu
 out=${1:?"usage: native-image.sh OUT.img [SRC=DOSPATH...]"}
@@ -24,7 +25,14 @@ dd if="$tmp/mbr" of="$out" conv=notrunc status=none
 "$tmp/mkvol" "$out" "$start" "$sectors" GLOSNATIVE
 export MTOOLS_SKIP_CHECK=1
 i="$out@@$((start * 512))"
-mcopy -i "$i" "$here/build/ow/GLOSLDR.SYS" ::GLOSLDR.SYS
+# GLOSLDR.SYS, its command line (GLOS_CMDLINE: a folder for GLOS's files and GLOS.EXE's flags, 93 bytes at most)
+# written into its first sector at 01A0h (loader/nprelude.S).
+cp "$here/build/ow/GLOSLDR.SYS" "$tmp/GLOSLDR.SYS"
+if [ -n "${GLOS_CMDLINE:-}" ]; then
+    [ ${#GLOS_CMDLINE} -le 93 ] || { echo "native-image: GLOS_CMDLINE is over 93 bytes" >&2; exit 1; }
+    printf '%s\0' "$GLOS_CMDLINE" | dd of="$tmp/GLOSLDR.SYS" bs=1 seek=416 conv=notrunc status=none
+fi
+mcopy -i "$i" "$tmp/GLOSLDR.SYS" ::GLOSLDR.SYS
 mattrib -i "$i" +s +h +r ::GLOSLDR.SYS
 mmd -i "$i" ::GLOS
 mcopy -i "$i" "$here/build/kernel/GLOSK.BIN" ::GLOS/GLOSK.BIN

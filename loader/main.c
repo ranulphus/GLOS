@@ -1282,36 +1282,67 @@ int native_mount(void);
    C:\GLOS\GLOS.EXE. */
 void __cdecl native_main(void)
 {
-    static char *argv[2] = { "C:\\GLOS\\GLOS.EXE", 0 };
+    static char self[80] = "C:\\GLOS\\GLOS.EXE", tail[128], env[224];
+    static char *argv[2] = { self, 0 };
+    unsigned char __far *t = (unsigned char __far *)MK_FP(native_psp, 0x80);
+    unsigned n = t[0] < 127 ? t[0] : 126, i;
+    char *w;
 
     _psp = native_psp;
     outp(0x3FB, 0x80); outp(0x3F8, 1); outp(0x3F9, 0); outp(0x3FB, 0x03);
     outp(0x3FA, 0xC7); outp(0x3FC, 0x03);
-    say("GLOS-BOOT step=start build=" GLOS_BUILD " native=1 disk=%02x psp=%04x", native_disk, native_psp);
+    for (i = 0; i < n; i++)
+        tail[i] = (char)t[1 + i];
+    tail[n] = 0;
+    say("GLOS-BOOT step=start build=" GLOS_BUILD " native=1 disk=%02x psp=%04x tail=%s", native_disk, native_psp, tail);
     if (native_mount() != 0) {
         refuse("no-volume");
         return;
     }
     bi.cache_mode = BI_CACHE_ON;
-    read_cfg(argv[0], 1);                       /* ([shell] too: natively GLOS is the shell, and options carries flags) */
-    /* The agent, as GLOS.EXE with no mode is: GLOS's own COMMAND.COM its COMSPEC (S4c), and a master environment
-       for the stub to install, of PATH and COMSPEC (there's no DOS's to copy). */
-    {
-        static char env[160];
-        unsigned n;
-
+    /* Its command line (the prelude's CMDLINE): the folder GLOS's files are in (a word that begins with a
+       backslash: \GLOS if none), where GLOS.EXE would be under DOS, and GLOS.EXE's flags. GLOS.CFG's [shell]
+       section is read as when GLOS is DOS's shell: natively it is the shell. */
+    for (w = strtok(tail, " \t"); w; w = strtok(NULL, " \t"))
+        if (w[0] == '\\' && strlen(w) < sizeof self - 12)
+            sprintf(self, "C:%s\\GLOS.EXE", strupr(w));
+    read_cfg(argv[0], 1);
+    for (i = 0; i < n; i++)                     /* (strtok cut the tail up: the flags, a word at a time) */
+        if (tail[i] == '/' && (i == 0 || !tail[i - 1]))
+            flag_arg(tail + i);
+    if (!(bi.flags & BI_F_ROUNDTRIP)) {
+        /* The shell and the agent at once, as GLOS.EXE /SHELL with GLOS's own COMMAND.COM beside it (S4d): GLOS
+           runs AUTOEXEC.BAT (the root's, or [shell] autoexec's) and then its prompt; COMSPEC is GLOS's own
+           COMMAND.COM; the master environment is PATH and COMSPEC (there is no DOS's to copy). With nothing
+           under GLOS its end is the PC's: the stub stops or restarts it (stub.asm, sd_shell 2). */
+        kernel_path(env, argv[0]);
+        strcpy(strrchr(env, '\\') + 1, "COMMAND.COM");
         if (!bi.comspec[0])                     /* ([shell] comspec = in GLOS.CFG first) */
-            strcpy(bi.comspec, "C:\\GLOS\\COMMAND.COM");
+            strcpy(bi.comspec, env);
         if (access(bi.comspec, 0) == 0)
             bi.flags |= BI_F_OWNCMD;
-        n = (unsigned)sprintf(env, "PATH=C:\\GLOS;C:\\") + 1;
+        if (!bi.autoexec[0])
+            strcpy(bi.autoexec, "C:\\AUTOEXEC.BAT");
+        if (access(bi.autoexec, 0) != 0)
+            bi.autoexec[0] = 0;
+        shell = own_shell = 1;
+        stub_data.shell = 2;
+        kernel_path(env, argv[0]);
+        *strrchr(env, '\\') = 0;
+        memmove(env + 5, env, strlen(env) + 1);
+        memcpy(env, "PATH=", 5);
+        strcat(env, ";C:\\");
+        n = strlen(env) + 1;
         n += (unsigned)sprintf(env + n, "COMSPEC=%s", bi.comspec) + 1;
         env[n++] = 0;                           /* (the strings' end, and no program's name after them) */
         env[n++] = 0;
         env[n++] = 0;
+        if (envsize < 256) envsize = 256;
+        if (envsize > 32768U) envsize = 32768U;
         stub_data.env_src = far_addr(env);
         stub_data.env_len = n;
-        stub_data.env_paras = (1024 + 15) >> 4;
+        stub_data.env_paras = ((envsize > n ? envsize : n) + 15) >> 4;
+        say("GLOS-BOOT step=shell comspec=%s autoexec=%s", bi.comspec, bi.autoexec);
     }
     say("GLOS-EXIT code=%d", glos_main(1, argv));
 }

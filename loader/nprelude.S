@@ -7,6 +7,9 @@
    - a PSP for it in the 256 bytes before its image (over the header, read by then): INT 20h at 0, the segment
      past its memory at 2 (its image and its minimum allocation), the rest zero; the kernel adopts it as the
      first program when GLOS's own DOS starts in the system VM (NB2);
+   - its command tail, PSP:80h, from the 94 bytes at 01A0h of this sector (CMDLINE: an ASCIZ string, empty as
+     built; tools/ndos/native-image.sh writes one there): the loader's command line, as GLOS.EXE's is under DOS
+     (a folder for GLOS's files, \GLOS if none, and GLOS.EXE's flags);
    - DS and ES the PSP, SS:SP and CS:IP from the header, DL the disk.
 
    16-bit code, assembled once and linked as bytes (objcopy); it never runs again. Its code stays below 0700h:
@@ -96,6 +99,15 @@ relocated:
     addw %bp, %bx
     pushw %bx                           /* CS */
     pushw %es:0x14                      /* IP */
+    /* the command line, out of the PSP's way (the PSP may lie over this sector's end): to 7000:0000 */
+    pushw %ax
+    movw $0x7000, %ax
+    movw %ax, %es
+    movw $(cmdline - _start), %si
+    xorw %di, %di
+    movw $47, %cx
+    rep movsw
+    popw %ax
     /* the PSP: the paragraph 10h before the image */
     movw %bp, %bx
     subw $0x10, %bx
@@ -108,7 +120,24 @@ relocated:
     popw %ax
     movw $0x20CD, %es:0                 /* INT 20h */
     movw %ax, %es:2                     /* the segment past its memory */
-    movb $0x0D, %es:0x81                /* an empty tail */
+    pushw %ds                           /* its tail: the length, the text, a CR */
+    pushw %ax
+    movw $0x7000, %ax
+    movw %ax, %ds
+    xorw %si, %si
+    movw $0x81, %di
+    xorw %cx, %cx
+4:  lodsb
+    orb %al, %al
+    jz 5f
+    stosb
+    incw %cx
+    cmpw $93, %cx
+    jb 4b
+5:  movb $0x0D, %es:(%di)
+    movb %cl, %es:0x80
+    popw %ax
+    popw %ds
     popw %si                            /* IP */
     popw %di                            /* CS */
     popw %cx                            /* SP */
@@ -134,8 +163,10 @@ bad:
 3:  hlt
     jmp 3b
 msg:
-    .asciz "GLOSLDR.SYS: no loader after its first sector\r\n"
+    .asciz "GLOSLDR.SYS: no loader\r\n"
 said:
     .asciz "GLOS-BOOT step=prelude\r\n"
+    .org 0x1A0
+cmdline:                                /* CMDLINE: 93 bytes and their NUL */
     .org 510
     .byte 0x47, 0x4C                    /* ("GL": padding to 512 bytes) */
