@@ -39,6 +39,8 @@ struct dos_layout {
 };
 extern const struct dos_layout dos_layout_machine;
 
+#define DOS_LFN_FINDS 8                 /* long-name searches open at once (the oldest gives way to a ninth) */
+
 struct dos_m {
     unsigned char *mem;                 /* the machine's memory from its address 0 */
     unsigned long size;                 /* its bytes (640 KB: nothing at A0000h and above is the machine's yet) */
@@ -71,6 +73,18 @@ struct dos_m {
                                            for any other, only if it is Ctrl-C (as DOS's check takes it) */
     unsigned char after_cr;             /* (dos_type's: an LF after a CR is the same Enter) */
     unsigned char pend_scan;            /* 01h/07h/08h: an extended key's scan code, the next call's AL */
+    /* Long names (71xxh): the searches open (714Eh's handles, 1 on: a folder being listed, the pattern, what its
+       entries must have), and room for the calls' paths (too long for a kernel thread's stack). */
+    struct dos_lfn_find {
+        int used;
+        unsigned psp, age;
+        struct fsv_vol *v;
+        struct fat_dir dir;
+        char pat[DOS_LONG_PATH * 2];    /* (UTF-8) */
+        unsigned char search, must, dos_dates;
+    } lfn[DOS_LFN_FINDS];
+    unsigned lfn_age;
+    char lfn_in[DOS_LONG_PATH + 2], lfn_res[DOS_LONG_PATH + 2], lfn_p[2][DOS_LONG_PATH * 2];
     char line[132];                     /* 3Fh on CON, cooked: a line read, CR LF at its end, what's left of it */
     unsigned line_n, line_at;
     unsigned char cooked[132];          /* ... and the line being read for it */

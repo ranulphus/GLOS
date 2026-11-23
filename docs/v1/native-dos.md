@@ -762,6 +762,37 @@ missing came after the kernel's entry, where C: was GLOS's IDE driver's or nothi
   stick through a controller whose interrupt line a driver of GLOS's shares, and the stick as 80h with the PC's
   own disk moved to 81h (GLOS's IDE driver doesn't mount the second disk yet: stage 3's drives).
 
+### Long names: 71xxh answered (2026-11-23)
+
+MS-DOS 7.1 with no Windows refuses every 71xxh call (AX 7100h), and so did GLOS's own DOS, to match it line for
+line. A native GLOS has no Windows above it either, and its file system has had long names from the start, so
+its DOS now answers them itself (stage 2 of the route, its first step): a program that asks 71A0h is told the
+drive has long names (255 a name, 260 a path, case kept), and DJGPP's library and GLOS's own programs then use
+them. DOSDIFF's 71A0h line is the one answer that knowingly differs from MS-DOS 7.1's (`DOSDIFF_KNOWN`).
+
+- **Answered** (`kernel/ndos/dos21.c`, `lfn`): 7139h, 713Ah, 713Bh (folders), 7141h (delete, a name without a
+  pattern), 7143h (attributes, size, dates and times: BL 0 to 8), 7147h (the current folder, long), 714Eh, 714Fh
+  and 71A1h (searches: eight open at once in a machine, a program's closed at its end), 7156h (rename), 7160h
+  (a path made whole as given, short, or long), 716Ch (create or open), 71A0h, 71A6h (a file by its handle),
+  71A7h (DOS's date and time as Windows's 64-bit count and back). The rest (71A8h's short name for a long one,
+  71A9h, 71AAh) refuse as before.
+- **Paths** are the code page's bytes, resolved whole with their parts as given (`dos_resolve_long`: any length
+  to 259 bytes, spaces, several dots; a part's trailing dots and spaces dropped), then UTF-8 for `kernel/fs`,
+  which finds a part by its long or its short name: a long path may have short parts, and the short-name calls
+  open what a long-name call made. A drive's current folder stays as the CDS has it, short (713Bh stores each
+  part's short name; 47h shows it; 7147h gives the long names back).
+- **Searches** match a pattern (`*`, `?`, no regard to case in ASCII) against the long name and the short one; a
+  name with no dot matches as if it ended in one (`NAME.*`, `*.`). The record is Windows's: attributes, three
+  times (its 64-bit count of 100 ns since 1601, the local time taken as it is; or DOS's packed words if SI is 1),
+  the size, the long name, and the short name where the long one isn't it.
+- **Tested:** the host's `dos21_test` (each call, on a volume in memory); NDOSTEST's own check in `loopa-nboot`
+  (a folder and a file with long names made through Open Watcom's `intdosx`, found by a pattern with both names,
+  opened by their short names, removed): `long names: ok` on GLOS's own DOS, `long names: none` under a DOS that
+  refuses 71A0h.
+- **Still to come here:** deleting by a pattern (7141h, SI 1), names outside the code page (the calls' Unicode
+  flags), a longer current folder than the CDS's 64 bytes, and the kernel's own shell and SFTP, which still list
+  and take short names when they go through DOS.
+
 ## N3: booting and the boot manager
 
 ### GLOS's own start

@@ -9,6 +9,7 @@
 #include "find.h"
 #include "names.h"
 #include "psp.h"
+#include "glos/cp.h"
 
 #define CF      0x0001u
 #define ZF      0x0040u
@@ -684,7 +685,12 @@ static int end_program(struct dos_m *m, struct dos_regs86 *r, unsigned code, uns
 
         dos_mem_resize(&m->mcb, cur, paras, &largest);
     } else {
+        unsigned k;
+
         dos_close_all(&m->files, cur);
+        for (k = 0; k < DOS_LFN_FINDS; k++)     /* (its long-name searches left open) */
+            if (m->lfn[k].used && m->lfn[k].psp == cur)
+                m->lfn[k].used = 0;
         dos_mem_free_owner(&m->mcb, cur);
     }
     if ((parent == m->lay.root_psp && !m->root_runs) || parent == cur || cur == m->lay.root_psp) {
@@ -1261,6 +1267,438 @@ static int exec_call(struct dos_m *m, struct dos_regs86 *r, unsigned al)
     return DOS21_SWITCH;
 }
 
+
+/* ---- long names (71xxh: Windows 95's calls, which MS-DOS 7.1 on its own refuses; GLOS's own DOS answers them, so
+   that programs under a native GLOS have long names with no Windows: docs/v1/native-dos.md, N2)
+
+   Paths are the code page's bytes, resolved whole with their parts as given (path.c), then UTF-8 for kernel/fs,
+   which finds a part by its long or its short name. A drive's current folder stays as the CDS has it, short:
+   713Bh stores each part's short name, 7147h gives the long ones back. Searches are handles (714Eh, 714Fh,
+   71A1h) on a folder being listed; a pattern is matched against the long name and the short one, without regard
+   to case in ASCII. Times in a search's record are DOS's packed date and time if the caller asks so (SI 1), else
+   Windows's 64-bit count of 100 ns since 1601 (the local time taken as it is). */
+
+static void wr32(struct dos_m *m, unsigned long a, unsigned long v)
+{
+    wr16(m, a, (unsigned)(v & 0xFFFF));
+    wr16(m, a + 2, (unsigned)(v >> 16));
+}
+
+static int lfn_refuse(struct dos_m *m, struct dos_regs86 *r)
+{
+    (void)m;
+    r->ax = 0x7100;
+    r->flags |= CF;
+    return DOS21_DONE;
+}
+
+/* The path at seg:off resolved: its volume, drive, and the whole path as UTF-8 in out (2 * DOS_LONG_PATH). */
+static int lfn_path(struct dos_m *m, unsigned seg, unsigned off, struct fsv_vol **v, int *drive, char *out)
+{
+    int e;
+
+    if (str_in(m, seg, off, m->lfn_in, sizeof m->lfn_in) != 0)
+        return 0x03;
+    if ((e = dos_resolve_long(&m->cds, m->lfn_in, drive, m->lfn_res, sizeof m->lfn_res)) != 0)
+        return e;
+    if (!(*v = m->vol[*drive]))
+        return 0x0F;
+    cp_to_utf8(m->cp, m->lfn_res, out, DOS_LONG_PATH * 2);
+    return 0;
+}
+
+/* A whole path (UTF-8) with each part that is there given its short name (want_long 0) or its long one (1), the
+   parts that aren't there as they stand: into out (room bytes, the code page's). 0, or 03h if it doesn't fit. */
+static int lfn_names(struct dos_m *m, struct fsv_vol *v, const char *path, int want_long, char *out, unsigned room)
+{
+    char *pre = m->lfn_p[1];
+    char one[FAT_NAME_MAX];
+    struct fat_ent fe;
+    unsigned at = 0, n = 0, k;
+
+    out[0] = 0;
+    while (path[at]) {
+        unsigned start;
+
+        while (path[at] == '\\')
+            at++;
+        if (!path[at])
+            break;
+        start = at;
+        while (path[at] && path[at] != '\\')
+            at++;
+        if (at >= DOS_LONG_PATH * 2)
+            return 0x03;
+        memcpy(pre, path, at);
+        pre[at] = 0;
+        if (fsv_lookup(v, pre, &fe) == 0) {
+            if (want_long)
+                cp_from_utf8(m->cp, fe.name[0] == '\\' ? fe.name + 1 : fe.name, one, sizeof one);
+            else
+                strcpy(one, fe.sname[0] == '\\' ? fe.sname + 1 : fe.sname);
+        } else {
+            char raw[FAT_NAME_MAX];
+
+            if (at - start >= sizeof raw)
+                return 0x03;
+            memcpy(raw, path + start, at - start);
+            raw[at - start] = 0;
+            cp_from_utf8(m->cp, raw, one, sizeof one);
+        }
+        k = (unsigned)strlen(one);
+        if (n + 1 + k + 1 > room)
+            return 0x03;
+        out[n++] = '\\';
+        memcpy(out + n, one, k + 1);
+        n += k;
+    }
+    if (!n) {
+        if (room < 2)
+            return 0x03;
+        out[0] = '\\', out[1] = 0;
+    }
+    return 0;
+}
+
+static int lfn_fold(int c) { return c >= 'a' && c <= 'z' ? c - 32 : c; }
+
+/* A pattern with * and ? against a name. */
+static int lfn_glob(const char *p, const char *s)
+{
+    for (; *p; p++, s++) {
+        if (*p == '*') {
+            while (p[1] == '*')
+                p++;
+            if (!p[1])
+                return 1;
+            for (; *s; s++)
+                if (lfn_glob(p + 1, s))
+                    return 1;
+            return lfn_glob(p + 1, s);
+        }
+        if (!*s || (*p != '?' && lfn_fold((unsigned char)*p) != lfn_fold((unsigned char)*s)))
+            return 0;
+    }
+    return !*s;
+}
+
+/* A name with no dot is matched as if it ended in one too: "NAME.*" and "*." find it, as under DOS and Windows. */
+static int lfn_match1(const char *pat, const char *name)
+{
+    char dotted[FAT_NAME_MAX + 2];
+    unsigned n;
+
+    if (lfn_glob(pat, name))
+        return 1;
+    if (strchr(name, '.') || (n = (unsigned)strlen(name)) >= FAT_NAME_MAX)
+        return 0;
+    memcpy(dotted, name, n);
+    dotted[n] = '.', dotted[n + 1] = 0;
+    return lfn_glob(pat, dotted);
+}
+
+static int lfn_match(const char *pat, const struct fat_ent *e)
+{
+    return !strcmp(pat, "*.*") || !strcmp(pat, "*") || lfn_match1(pat, e->name) || lfn_match1(pat, e->sname);
+}
+
+/* A packed date and time as Windows's count of 100 ns since 1601-01-01, at a (8 bytes); or, dos_dates, the time
+   and date words and four zero bytes. */
+static void lfn_time_out(struct dos_m *m, unsigned long a, unsigned date, unsigned time, int dos_dates)
+{
+    struct dos_date d;
+    struct dos_time t;
+    unsigned long long ft;
+
+    if (dos_dates || !date) {
+        wr16(m, a, dos_dates ? time : 0), wr16(m, a + 2, dos_dates ? date : 0);
+        wr32(m, a + 4, 0);
+        return;
+    }
+    d.year = 1980 + (date >> 9), d.month = (date >> 5) & 15, d.day = date & 31, d.dow = 0;
+    t.hour = time >> 11, t.minute = (time >> 5) & 63, t.second = (time & 31) * 2, t.hundredths = 0;
+    ft = ((unsigned long long)dos_to_seconds(&d, &t) + 11960006400ULL) * 10000000ULL;
+    wr32(m, a, (unsigned long)(ft & 0xFFFFFFFFUL)), wr32(m, a + 4, (unsigned long)(ft >> 32));
+}
+
+/* That count made seconds since 1980 (0 before it): a division of 64 bits by hand (the kernel has no library's). */
+static unsigned long lfn_ft_seconds(unsigned long lo, unsigned long hi)
+{
+    unsigned long long n = (unsigned long long)hi << 32 | lo, q = 0, rem = 0;
+    int i;
+
+    for (i = 0; i < 64; i++) {                  /* (shifts by one alone: no library call for them either) */
+        rem = rem << 1 | n >> 63;
+        n <<= 1;
+        q <<= 1;
+        if (rem >= 10000000ULL)
+            rem -= 10000000ULL, q |= 1;
+    }
+    return q > 11960006400ULL ? (unsigned long)(q - 11960006400ULL) : 0;
+}
+
+/* An entry as a search's record at a (318 bytes). */
+static void lfn_record(struct dos_m *m, unsigned long a, const struct fat_ent *e, int dos_dates)
+{
+    char name[FAT_NAME_MAX];
+    unsigned i;
+
+    for (i = 0; i < 318; i++)
+        wr8(m, a + i, 0);
+    wr32(m, a, e->attr);
+    lfn_time_out(m, a + 0x04, e->cdate, e->ctime, dos_dates);
+    lfn_time_out(m, a + 0x0C, e->adate, 0, dos_dates);
+    lfn_time_out(m, a + 0x14, e->wdate, e->wtime, dos_dates);
+    wr32(m, a + 0x20, e->size);
+    cp_from_utf8(m->cp, e->name, name, sizeof name);
+    for (i = 0; name[i] && i < 259; i++)
+        wr8(m, a + 0x2C + i, (unsigned char)name[i]);
+    if (e->has_long)                            /* (the short name, where the long one isn't it) */
+        for (i = 0; e->sname[i] && i < 13; i++)
+            wr8(m, a + 0x130 + i, (unsigned char)e->sname[i]);
+}
+
+/* The search's next entry that matches into the record: 0, or 12h. */
+static int lfn_next(struct dos_m *m, struct dos_lfn_find *f, unsigned long rec)
+{
+    struct fat_ent e;
+
+    while (fsv_readdir(f->v, &f->dir, &e) == 1) {
+        if (!dos_attr_match(f->search, e.attr))
+            continue;
+        if ((e.attr & f->must) != f->must || !lfn_match(f->pat, &e))
+            continue;
+        lfn_record(m, rec, &e, f->dos_dates);
+        return 0;
+    }
+    return 0x12;
+}
+
+static int lfn(struct dos_m *m, struct dos_regs86 *r, unsigned al)
+{
+    char *p = m->lfn_p[0], *p2 = m->lfn_p[1];
+    struct fsv_vol *v, *v2;
+    struct fat_ent fe;
+    int drive, drive2, e, d;
+    unsigned h, k;
+
+    switch (al) {
+    case 0x39:
+    case 0x3A:
+        if ((e = lfn_path(m, r->ds, r->dx, &v, &drive, p)) != 0)
+            return err(m, r, e == 0x02 ? 0x03 : (unsigned)e);
+        if (al == 0x3A && !strcmp(p, "\\"))
+            return err(m, r, 0x05);
+        if (al == 0x3A && lfn_names(m, v, p, 0, m->lfn_res, sizeof m->lfn_res) == 0
+            && !strcmp(m->lfn_res, m->cds.cwd[drive]))
+            return err(m, r, 0x10);             /* (the current folder) */
+        return done(m, r, fs_err(al == 0x39 ? fsv_mkdir(v, p) : fsv_rmdir(v, p), 0x03));
+    case 0x3B:
+        if ((e = lfn_path(m, r->ds, r->dx, &v, &drive, p)) != 0)
+            return err(m, r, e == 0x02 ? 0x03 : (unsigned)e);
+        if (strcmp(p, "\\")) {
+            if ((e = fsv_lookup(v, p, &fe)) != 0)
+                return err(m, r, (unsigned)fs_err(e, 0x03));
+            if (!(fe.attr & FAT_A_DIR))
+                return err(m, r, 0x03);
+        }
+        if (lfn_names(m, v, p, 0, m->lfn_res, sizeof m->lfn_res) != 0 || strlen(m->lfn_res) >= sizeof m->cds.cwd[0])
+            return err(m, r, 0x03);             /* (the CDS holds the short path: 64 bytes of it) */
+        strcpy(m->cds.cwd[drive], m->lfn_res);
+        return ok(r);
+    case 0x41:
+        if ((e = lfn_path(m, r->ds, r->dx, &v, &drive, p)) == 0) {
+            if (strchr(p, '*') || strchr(p, '?'))
+                e = 0x02;                       /* (patterns, SI 1: not here) */
+            else
+                e = no_file(v, p, fs_err(fsv_unlink(v, p), 0x02));
+        }
+        return done(m, r, e);
+    case 0x43: {
+        unsigned bl = r->bx & 0xFF;
+
+        if ((e = lfn_path(m, r->ds, r->dx, &v, &drive, p)) != 0)
+            return err(m, r, (unsigned)e);
+        if (bl == 1) {
+            if (r->cx & (FAT_A_LABEL | FAT_A_DIR | 0xC0))
+                return err(m, r, 0x05);
+            return done(m, r, fs_err(fsv_setattr(v, p, (unsigned char)r->cx), 0x02));
+        }
+        if (bl == 3)
+            return done(m, r, fs_err(fsv_settime(v, p, (unsigned short)r->di, (unsigned short)r->cx), 0x02));
+        if ((e = fsv_lookup(v, p, &fe)) != 0)
+            return err(m, r, (unsigned)no_file(v, p, fs_err(e, 0x02)));
+        switch (bl) {
+        case 0: r->cx = fe.attr; return ok(r);
+        case 2: r->ax = (unsigned)(fe.size & 0xFFFF), r->dx = (unsigned)(fe.size >> 16); return ok(r);
+        case 4: r->cx = fe.wtime, r->di = fe.wdate; return ok(r);
+        case 5: case 7: return ok(r);           /* (the last access's date, the creation's: kept as they are) */
+        case 6: r->di = fe.adate; return ok(r);
+        case 8: r->cx = fe.ctime, r->di = fe.cdate, r->si = fe.ctime_10ms; return ok(r);
+        }
+        return err(m, r, 0x01);
+    }
+    case 0x47:
+        d = (r->dx & 0xFF) ? (int)(r->dx & 0xFF) - 1 : m->cds.current;
+        if (d < 0 || d >= DOS_DRIVES || !(v = m->vol[d]))
+            return err(m, r, 0x0F);
+        cp_to_utf8(m->cp, m->cds.cwd[d], p, DOS_LONG_PATH * 2);
+        if (lfn_names(m, v, p, 1, m->lfn_res, sizeof m->lfn_res) != 0)
+            return err(m, r, 0x03);
+        str_out(m, r->ds, r->si, m->lfn_res + 1);       /* (no drive, no first backslash, as 47h's) */
+        return ok(r);
+    case 0x4E: {
+        struct dos_lfn_find *f = 0;
+        char *last;
+
+        if ((e = lfn_path(m, r->ds, r->dx, &v, &drive, p)) != 0)
+            return err(m, r, e == 0x02 ? 0x03 : (unsigned)e);
+        last = strrchr(p, '\\');                /* (the folder; its last part the pattern) */
+        for (k = 0; k < DOS_LFN_FINDS; k++)
+            if (!m->lfn[k].used) {
+                f = &m->lfn[k];
+                break;
+            } else if (!f || m->lfn[k].age < f->age)
+                f = &m->lfn[k];                 /* (none free: the oldest's) */
+        memset(f, 0, sizeof *f);
+        if (strlen(last + 1) >= sizeof f->pat)
+            return err(m, r, 0x03);
+        strcpy(f->pat, last[1] ? last + 1 : "*");
+        if (last == p)
+            last[1] = 0;                        /* (the root) */
+        else
+            *last = 0;
+        if (fsv_opendir(v, p, &f->dir) != 0)
+            return err(m, r, 0x03);
+        f->v = v, f->psp = cur_psp(m), f->age = ++m->lfn_age;
+        f->search = (unsigned char)(r->cx & 0xFF), f->must = (unsigned char)(r->cx >> 8);
+        f->dos_dates = (r->si & 0xFFFF) == 1;
+        if ((e = lfn_next(m, f, lin(r->es, r->di))) != 0)
+            return err(m, r, (unsigned)e);
+        f->used = 1;
+        r->ax = (unsigned)(f - m->lfn) + 1;
+        r->cx = 0;                              /* (nothing lost in the names' conversion) */
+        return ok(r);
+    }
+    case 0x4F:
+    case 0xA1:
+        k = (r->bx & 0xFFFF) - 1;
+        if (k >= DOS_LFN_FINDS || !m->lfn[k].used)
+            return err(m, r, 0x06);
+        if (al == 0xA1) {
+            m->lfn[k].used = 0;
+            return ok(r);
+        }
+        m->lfn[k].age = ++m->lfn_age;
+        if ((e = lfn_next(m, &m->lfn[k], lin(r->es, r->di))) != 0)
+            return err(m, r, (unsigned)e);
+        r->cx = 0;
+        return ok(r);
+    case 0x56:
+        e = lfn_path(m, r->ds, r->dx, &v, &drive, p);
+        if (!e && (e = lfn_path(m, r->es, r->di, &v2, &drive2, p2)) == 0 && drive != drive2)
+            e = 0x11;
+        if (!e)
+            e = no_file(v, p, fs_err(fsv_rename(v, p, p2), 0x02));
+        return done(m, r, e);
+    case 0x60: {
+        unsigned how = r->cx & 0xFF;
+
+        if (how > 2)
+            return err(m, r, 0x01);
+        if ((e = lfn_path(m, r->ds, r->si, &v, &drive, p)) != 0)
+            return err(m, r, (unsigned)e);
+        if (how == 0)                           /* (as given, made whole) */
+            cp_from_utf8(m->cp, p, m->lfn_res, sizeof m->lfn_res);
+        else if (lfn_names(m, v, p, how == 2, m->lfn_res, sizeof m->lfn_res) != 0)
+            return err(m, r, 0x03);
+        m->lfn_in[0] = (char)('A' + drive), m->lfn_in[1] = ':';
+        strcpy(m->lfn_in + 2, m->lfn_res);
+        str_out(m, r->es, r->di, m->lfn_in);
+        return ok(r);
+    }
+    case 0x6C: {
+        unsigned mode = r->bx & 0xFF, there_act = r->dx & 0x0F, none_act = (r->dx >> 4) & 0x0F, did = 1;
+        int there;
+
+        if (str_in(m, r->ds, r->si, m->lfn_in, sizeof m->lfn_in) != 0)
+            return err(m, r, 0x03);
+        if ((d = dev_name(m->lfn_in)) != 0) {
+            if ((e = dos_open(&m->files, cur_psp(m), 0, 0, "", d, mode, &h)) != 0)
+                return err(m, r, (unsigned)e);
+            r->ax = h, r->cx = 1;
+            return ok(r);
+        }
+        if ((e = lfn_path(m, r->ds, r->si, &v, &drive, p)) != 0)
+            return err(m, r, (unsigned)e);
+        there = fsv_lookup(v, p, &fe) == 0;
+        if (there && (fe.attr & (FAT_A_DIR | FAT_A_LABEL)))
+            return err(m, r, 0x05);
+        if (there ? there_act == 0 : none_act == 0)
+            return err(m, r, there ? 0x50 : (unsigned)no_file(v, p, 0x02));
+        if (there_act > 2 || none_act > 1)
+            return err(m, r, 0x01);
+        if (there && there_act == 1)
+            e = dos_open(&m->files, cur_psp(m), v, (unsigned)drive, p, 0, mode, &h);
+        else
+            e = dos_create(&m->files, cur_psp(m), v, (unsigned)drive, p, (unsigned char)r->cx, there, &h),
+            did = there ? 3 : 2;
+        if (e)
+            return err(m, r, (unsigned)no_file(v, p, e));
+        r->ax = h, r->cx = did;
+        return ok(r);
+    }
+    case 0xA0:
+        if ((e = lfn_path(m, r->ds, r->dx, &v, &drive, p)) != 0)
+            return err(m, r, (unsigned)e);
+        if ((r->cx & 0xFFFF) >= 6)
+            str_out(m, r->es, r->di, v->fat.fat == 32 ? "FAT32" : "FAT");
+        r->bx = 0x4006;                         /* case kept, Unicode on the disk, long names */
+        r->cx = 255, r->dx = 260;
+        return ok(r);
+    case 0xA6: {
+        int i = dos_entry(&m->files, cur_psp(m), r->bx);
+        unsigned long en, a = lin(r->ds, r->dx);
+
+        if (i < 0)
+            return err(m, r, 0x06);
+        en = m->files.table + 6 + (unsigned long)i * DOS_SFT_SIZE;
+        for (k = 0; k < 52; k++)
+            wr8(m, a + k, 0);
+        wr32(m, a, rd8(m, en + 0x04));
+        lfn_time_out(m, a + 0x04, rd16(m, en + 0x0F), rd16(m, en + 0x0D), 0);
+        lfn_time_out(m, a + 0x0C, rd16(m, en + 0x0F), 0, 0);
+        lfn_time_out(m, a + 0x14, rd16(m, en + 0x0F), rd16(m, en + 0x0D), 0);
+        if (m->files.k[i].f.v)
+            wr32(m, a + 0x1C, m->files.k[i].f.v->fat.serial);
+        wr32(m, a + 0x24, rd16(m, en + 0x11) | (unsigned long)rd16(m, en + 0x13) << 16);
+        wr32(m, a + 0x28, 1);                   /* (one name for it) */
+        wr32(m, a + 0x30, (unsigned long)i + 1);
+        return ok(r);
+    }
+    case 0xA7:
+        if ((r->bx & 0xFF) == 0) {              /* Windows's count at DS:SI to DOS's words */
+            struct dos_date dd;
+            struct dos_time tt;
+            unsigned long a = lin(r->ds, r->si);
+            unsigned long secs = lfn_ft_seconds(rd16(m, a) | (unsigned long)rd16(m, a + 2) << 16,
+                                                rd16(m, a + 4) | (unsigned long)rd16(m, a + 6) << 16);
+
+            dos_from_seconds(secs, &dd, &tt);
+            r->cx = dos_pack_time(&tt), r->dx = dos_pack_date(&dd);
+            r->bx &= 0x00FF;
+            return ok(r);
+        }
+        if ((r->bx & 0xFF) == 1) {
+            lfn_time_out(m, lin(r->es, r->di), r->dx, r->cx, 0);
+            return ok(r);
+        }
+        return err(m, r, 0x01);
+    }
+    m->unanswered++;
+    return lfn_refuse(m, r);
+}
+
 /* ---- INT 21h */
 
 static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
@@ -1702,11 +2140,8 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
             return ok(r);
         }
         break;
-    case 0x71:
-        m->unanswered++;                        /* (long names: refused as 7.1 refuses them with no Windows) */
-        r->ax = 0x7100;
-        r->flags |= CF;
-        return DOS21_UNANSWERED;
+    case 0x71:                                  /* (long names: MS-DOS 7.1 with no Windows refuses them all) */
+        return lfn(m, r, al);
     }
     m->unanswered++;
     if (ah >= 0x2F) {                           /* (MS-DOS 7.1's way with a function it hasn't got: to check) */

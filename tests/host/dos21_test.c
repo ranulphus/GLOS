@@ -576,6 +576,140 @@ int main(void)
     call(&r, 0x6000);
     CHECK(!(r.flags & 1) && !strcmp((char *)mem + lin(psp, 0x400), "C:/NUL"), "60h of a device \"%s\"",
           (char *)mem + lin(psp, 0x400));
+
+    /* ---- long names (71xxh): Windows 95's calls, answered with no Windows */
+    {
+        unsigned fh, sh;
+        unsigned long rec = lin(psp, 0x600);
+        char *out = (char *)mem + lin(psp, 0x400);
+
+        str(psp, 0x300, "C:\\");
+        r.ds = psp, r.dx = 0x300, r.es = psp, r.di = 0x400, r.cx = 32;
+        call(&r, 0x71A0);
+        CHECK(!(r.flags & 1) && r.bx == 0x4006 && r.cx == 255 && r.dx == 260 && !strcmp(out, "FAT"),
+              "71A0h bx=%x cx=%u dx=%u \"%s\"", r.bx, r.cx, r.dx, out);
+        str(psp, 0x300, "C:\\A long folder name");
+        r.ds = psp, r.dx = 0x300;
+        call(&r, 0x7139);
+        CHECK(!(r.flags & 1), "7139h %x", r.ax);
+        str(psp, 0x300, "C:\\A long folder name\\Read me first.text");
+        r.ds = psp, r.si = 0x300, r.bx = 2, r.cx = 0, r.dx = 0x12, r.di = 0;
+        call(&r, 0x716C);
+        fh = r.ax;
+        CHECK(!(r.flags & 1) && r.cx == 2, "716Ch made: cf=%u ax=%x cx=%u", r.flags & 1, r.ax, r.cx);
+        str(psp, 0x500, "long names with no Windows");
+        r.bx = fh, r.cx = 26, r.ds = psp, r.dx = 0x500;
+        call(&r, 0x4000);
+        CHECK(r.ax == 26, "40h on it %u", r.ax);
+        r.bx = fh, r.ds = psp, r.dx = 0x700;
+        r.flags |= 1;
+        call(&r, 0x71A6);
+        CHECK(!(r.flags & 1) && w(lin(psp, 0x700 + 0x24)) == 26 && w(lin(psp, 0x700 + 0x28)) == 1, "71A6h size %u",
+              w(lin(psp, 0x700 + 0x24)));
+        r.bx = fh;
+        call(&r, 0x3E00);
+        r.ds = psp, r.si = 0x300, r.bx = 0, r.cx = 0, r.dx = 0x10, r.di = 0;       /* (make it only if it isn't there) */
+        call(&r, 0x716C);
+        CHECK((r.flags & 1) && r.ax == 0x50, "716Ch: it is there %x", r.ax);
+        /* a search by a pattern: the record's long and short names, its size, DOS's date and time */
+        str(psp, 0x300, "C:\\A long folder name\\*.text");
+        r.ds = psp, r.dx = 0x300, r.es = psp, r.di = 0x600, r.cx = 0x0000, r.si = 1;
+        call(&r, 0x714E);
+        sh = r.ax;
+        CHECK(!(r.flags & 1) && sh >= 1 && !strcmp((char *)mem + rec + 0x2C, "Read me first.text")
+              && !strcmp((char *)mem + rec + 0x130, "README~1.TEX") && w(rec + 0x20) == 26 && w(rec) == 0x20,
+              "714Eh cf=%u \"%s\" \"%s\" size %u", r.flags & 1, (char *)mem + rec + 0x2C, (char *)mem + rec + 0x130,
+              w(rec + 0x20));
+        CHECK(w(rec + 0x14 + 2) == ((2026 - 1980) << 9 | 11 << 5 | 22) || w(rec + 0x14 + 2) == 0, "714Eh date %x",
+              w(rec + 0x14 + 2));
+        r.bx = sh, r.es = psp, r.di = 0x600, r.si = 1;
+        call(&r, 0x714F);
+        CHECK((r.flags & 1) && r.ax == 0x12, "714Fh: no more %x", r.ax);
+        r.bx = sh;
+        call(&r, 0x71A1);
+        CHECK(!(r.flags & 1), "71A1h");
+        r.bx = sh;
+        call(&r, 0x71A1);
+        CHECK((r.flags & 1) && r.ax == 6, "71A1h twice %x", r.ax);
+        str(psp, 0x300, "C:\\A long folder name\\*.none");
+        r.ds = psp, r.dx = 0x300, r.es = psp, r.di = 0x600, r.cx = 0, r.si = 1;
+        call(&r, 0x714E);
+        CHECK((r.flags & 1) && r.ax == 0x12, "714Eh: none %x", r.ax);
+        /* the folder everything in the root by "*": the long folder among them, by its short name too */
+        str(psp, 0x300, "C:\\alongf~1.*");
+        r.ds = psp, r.dx = 0x300, r.es = psp, r.di = 0x600, r.cx = 0x0010, r.si = 0;
+        call(&r, 0x714E);
+        CHECK(!(r.flags & 1) && !strcmp((char *)mem + rec + 0x2C, "A long folder name") && (w(rec) & 0x10),
+              "714Eh by the short name \"%s\"", (char *)mem + rec + 0x2C);
+        CHECK(w(rec + 0x14 + 6) > 0x01D0 || w(rec + 0x14 + 6) == 0, "its time is Windows's count %04x", w(rec + 0x14 + 6));
+        r.bx = r.ax;
+        call(&r, 0x71A1);
+        /* the current folder: short in the CDS (47h), long by 7147h */
+        str(psp, 0x300, "C:\\A long folder name");
+        r.ds = psp, r.dx = 0x300;
+        call(&r, 0x713B);
+        CHECK(!(r.flags & 1), "713Bh %x", r.ax);
+        r.dx = 0, r.ds = psp, r.si = 0x400;
+        call(&r, 0x4700);
+        CHECK(!(r.flags & 1) && !strcmp(out, "ALONGF~1"), "47h \"%s\"", out);
+        r.dx = 0, r.ds = psp, r.si = 0x400;
+        call(&r, 0x7147);
+        CHECK(!(r.flags & 1) && !strcmp(out, "A long folder name"), "7147h \"%s\"", out);
+        /* a file by its long name from there; its short path and back */
+        str(psp, 0x300, "read ME first.TEXT");
+        r.ds = psp, r.si = 0x300, r.es = psp, r.di = 0x400, r.cx = 1;
+        call(&r, 0x7160);
+        CHECK(!(r.flags & 1) && !strcmp(out, "C:\\ALONGF~1\\README~1.TEX"), "7160h short \"%s\"", out);
+        str(psp, 0x300, "C:\\ALONGF~1\\README~1.TEX");
+        r.ds = psp, r.si = 0x300, r.es = psp, r.di = 0x400, r.cx = 2;
+        call(&r, 0x7160);
+        CHECK(!(r.flags & 1) && !strcmp(out, "C:\\A long folder name\\Read me first.text"), "7160h long \"%s\"", out);
+        r.ds = psp, r.dx = 0x300;                   /* (the short path opens it, by 3Dh) */
+        call(&r, 0x3D00);
+        CHECK(!(r.flags & 1), "3Dh by the short path %x", r.ax);
+        r.bx = r.ax;
+        call(&r, 0x3E00);
+        /* attributes, a new name, gone */
+        str(psp, 0x300, "Read me first.text");
+        r.ds = psp, r.dx = 0x300, r.bx = 0;
+        call(&r, 0x7143);
+        CHECK(!(r.flags & 1) && r.cx == 0x20, "7143h %x", r.cx);
+        str(psp, 0x500, "Another name, with a comma.txt");
+        r.ds = psp, r.dx = 0x300, r.es = psp, r.di = 0x500;
+        call(&r, 0x7156);
+        CHECK(!(r.flags & 1), "7156h %x", r.ax);
+        r.ds = psp, r.dx = 0x500, r.bx = 2;
+        call(&r, 0x7143);
+        CHECK(!(r.flags & 1) && r.ax == 26 && r.dx == 0, "7143h size %u", r.ax);
+        str(psp, 0x300, "C:\\A long folder name");
+        r.ds = psp, r.dx = 0x300;
+        call(&r, 0x713A);
+        CHECK((r.flags & 1) && r.ax == 0x10, "713Ah of the current folder %x", r.ax);
+        str(psp, 0x300, "\\");
+        r.ds = psp, r.dx = 0x300;
+        call(&r, 0x713B);
+        str(psp, 0x300, "C:\\A long folder name");
+        r.ds = psp, r.dx = 0x300;
+        call(&r, 0x713A);
+        CHECK((r.flags & 1) && r.ax == 0x05, "713Ah of a folder with a file %x", r.ax);
+        str(psp, 0x300, "C:\\A long folder name\\Another name, with a comma.txt");
+        r.ds = psp, r.dx = 0x300, r.si = 0;
+        call(&r, 0x7141);
+        CHECK(!(r.flags & 1), "7141h %x", r.ax);
+        str(psp, 0x300, "C:\\A long folder name");
+        r.ds = psp, r.dx = 0x300;
+        call(&r, 0x713A);
+        CHECK(!(r.flags & 1), "713Ah %x", r.ax);
+        /* DOS's date and time as Windows's count and back; a call there isn't */
+        r.bx = 1, r.cx = 12 << 11 | 34 << 5 | 28, r.dx = (2026 - 1980) << 9 | 11 << 5 | 23, r.es = psp, r.di = 0x700;
+        call(&r, 0x71A7);
+        r.bx = 0, r.ds = psp, r.si = 0x700;
+        call(&r, 0x71A7);
+        CHECK(!(r.flags & 1) && r.cx == (12 << 11 | 34 << 5 | 28) && r.dx == ((2026 - 1980) << 9 | 11 << 5 | 23),
+              "71A7h there and back %x %x", r.dx, r.cx);
+        call(&r, 0x71FF);
+        CHECK((r.flags & 1) && r.ax == 0x7100, "71FFh %x", r.ax);
+    }
     str(psp, 0x300, "\\");
     r.dx = 0x300;
     call(&r, 0x3A00);
@@ -733,8 +867,8 @@ int main(void)
 
     /* ---- what isn't there */
     r.flags = 0;
-    res = call(&r, 0x7143);
-    CHECK(res == DOS21_UNANSWERED && (r.flags & 1) && r.ax == 0x7100, "71h %x", r.ax);
+    res = call(&r, 0x71AA);                     /* (a long-name call GLOS's DOS hasn't got: Windows's SUBST) */
+    CHECK(res == DOS21_DONE && (r.flags & 1) && r.ax == 0x7100, "71AAh %x", r.ax);
     r.flags = 0;
     res = call(&r, 0x5F02);
     CHECK(res == DOS21_UNANSWERED && (r.flags & 1) && r.ax == 1, "5Fh (not yet) %x", r.ax);

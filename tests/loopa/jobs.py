@@ -7434,6 +7434,7 @@ def ndos_nhello():
 # (tests/dos/dosdiff.msdos71.txt is MS-DOS 7.1's, made by tools/ndos/msdos-image.sh's disk: docs/v1/native-dos.md).
 DOSDIFF_KNOWN = {
     "5D06h": "GLOS's own swappable data area, 16 bytes",
+    "71A0h": "long names: GLOS's own DOS answers the 71xxh calls, which MS-DOS 7.1 with no Windows refuses",
 }
 
 
@@ -7565,6 +7566,7 @@ def nboot_dos_case(profile, card, bios=False):
             dc = agent.ssh("C:\\GLOS\\DOSCALLS.EXE")
             dca = agent.ssh("C:\\GLOS\\DOSCALLS.EXE app")
             checks["ndostest"] = nt[0] == 0 and "NDOSTEST: 0 failures" in nt[1] and "child: 7 word" in nt[1]
+            checks["long-names"] = "long names: ok" in nt[1]    # (71xxh, with no Windows: NDOSTEST's own check)
             checks["dosdiff"] = dd[0] == 0 and "DOSDIFF end" in dd[1] and not diffs
             checks["djgpp"] = dc[0] == 0 and "DOSCALLS as=dos" in dc[1]
             checks["app"] = dca[0] == 0 and "DOSCALLS as=app" in dca[1]

@@ -29,6 +29,59 @@ static void check(int ok, const char *what)
 
 static char big[16384];
 
+/* Long names (INT 21h 71xxh, Windows 95's calls): where the DOS has them (GLOS's own; MS-DOS and FreeDOS on their
+   own refuse 71A0h) a folder and a file with long names made, found by a pattern with both its names, and
+   removed. "long names: ok", or "long names: none". */
+static void long_names(void)
+{
+    static unsigned char rec[318];
+    static char fsname[32];
+    union REGS r;
+    struct SREGS s;
+    unsigned h, sh, before = fails;
+
+    segread(&s);
+    s.es = s.ds;
+    r.x.ax = 0x71A0, r.x.dx = (unsigned)"C:\\", r.x.di = (unsigned)fsname, r.x.cx = sizeof fsname;
+    r.x.cflag = 1;
+    intdosx(&r, &r, &s);
+    if (r.x.cflag || r.x.ax == 0x7100) {
+        printf("long names: none\n");
+        return;
+    }
+    check(r.x.cx == 255 && r.x.dx == 260 && (r.x.bx & 0x4000), "71A0h's limits");
+    r.x.ax = 0x7139, r.x.dx = (unsigned)"Long folder of NDOSTEST";
+    intdosx(&r, &r, &s);
+    check(!r.x.cflag, "7139h");
+    r.x.ax = 0x716C, r.x.bx = 2, r.x.cx = 0, r.x.dx = 0x12, r.x.si = (unsigned)"Long folder of NDOSTEST\\A file, with a long name.text";
+    r.x.di = 0;
+    intdosx(&r, &r, &s);
+    h = r.x.ax;
+    check(!r.x.cflag && r.x.cx == 2, "716Ch");
+    check(_dos_write(h, "long", 4, &sh) == 0 && sh == 4, "a write to it");
+    _dos_close(h);
+    r.x.ax = 0x714E, r.x.cx = 0, r.x.si = 1, r.x.dx = (unsigned)"Long folder of NDOSTEST\\*.text", r.x.di = (unsigned)rec;
+    intdosx(&r, &r, &s);
+    sh = r.x.ax;
+    check(!r.x.cflag && !strcmp((char *)rec + 0x2C, "A file, with a long name.text") && !strcmp((char *)rec + 0x130, "AFILE_~1.TEX")
+          && rec[0x20] == 4, "714Eh's record");
+    r.x.ax = 0x714F, r.x.bx = sh, r.x.si = 1, r.x.di = (unsigned)rec;
+    intdosx(&r, &r, &s);
+    check(r.x.cflag, "714Fh: no more");
+    r.x.ax = 0x71A1, r.x.bx = sh;
+    intdosx(&r, &r, &s);
+    check(!r.x.cflag, "71A1h");
+    check(access("LONGFO~1\\AFILE_~1.TEX", 0) == 0, "the file by its short names");
+    r.x.ax = 0x7141, r.x.si = 0, r.x.dx = (unsigned)"Long folder of NDOSTEST\\A file, with a long name.text";
+    intdosx(&r, &r, &s);
+    check(!r.x.cflag, "7141h");
+    r.x.ax = 0x713A, r.x.dx = (unsigned)"Long folder of NDOSTEST";
+    intdosx(&r, &r, &s);
+    check(!r.x.cflag, "713Ah");
+    if (fails == before)
+        printf("long names: ok\n");
+}
+
 static void files(void)
 {
     static const char text[] = "line one\r\nline two\r\n";
@@ -188,6 +241,7 @@ int main(int argc, char **argv)
     memory();
     programs(argv[0]);
     clock_();
+    long_names();
     printf("NDOSTEST: %d failures\n", fails);
     return fails;
 }

@@ -20,6 +20,14 @@ struct dos_cds {
    that can't be a name). A '\' or '/' at the end is dropped. */
 int dos_resolve(const struct dos_cds *c, int cp, const char *path, int *drive, char *out, unsigned room);
 
+/* ... for the long-name calls (71xxh): the parts as they are given, any length and case, spaces and several dots
+   in them (a part's trailing dots and spaces dropped, as Windows drops them), a current folder's parts as the
+   CDS has them (short); out is a whole path of 259 bytes at most. '*' and '?' pass (a search's last part: what
+   takes no pattern refuses them itself). 0, 0Fh, 03h (too long, or above the root), 02h (a part with a character
+   no name has). */
+#define DOS_LONG_PATH 260
+int dos_resolve_long(const struct dos_cds *c, const char *path, int *drive, char *out, unsigned room);
+
 /* 60h's form: "C:\DIR\FILE.EXT". */
 int dos_truename(const struct dos_cds *c, int cp, const char *path, char *out, unsigned room);
 
