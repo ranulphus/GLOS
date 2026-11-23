@@ -563,6 +563,16 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
 
 ## Open faults (noted, not yet chased)
 
+- **The Games Library's output overwritten by a folder's pattern** (gate 46, 2026-11-23, local:
+  `native-486dx2-vbe-8 games-run`; then 3 of 3 alone passed). The second "GAMES playing Blip" was never said:
+  in its place the output has `C:\GAMES\KEEN\*.* `, eighteen bytes (the pattern and its NUL) over the line's
+  first eighteen, its line end the line's own. A watch-triggered scan (6683f62: the library's folders watched)
+  was listing C:\GAMES\KEEN on its worker thread while the window's thread printed. So DJGPP's transfer
+  buffer was written by the scan's listing between the write's copy into it and DOS's reading of it, though
+  findfirst, findnext, printf and fflush all take the C library's lock (gloswrap.c; GAMES.map shows them
+  wrapped). Not yet explained. Next: GAMES built with a check of the transfer buffer before and after each
+  write (a log line when it changed), run on the 486 until it happens.
+
 - **The SB16's playback dead after a recording** (the fortieth gate, 2026-11-22, devserver:
   `audio-486dx2-vbe`; not seen in three runs here). The Player's stream was never mixed (`periods=0` for its
   246 seconds), and the stream that had been playing when the Sound Recorder began got nothing after it
