@@ -518,4 +518,4 @@ static int crystal_input(int set, int *input)
 
 const struct sound_card crystal_card = { "crystal", crystal_start, crystal_stop, crystal_running, crystal_irqs,
                                          crystal_errors, crystal_chan, crystal_input, crystal_rec_start,
-                                         crystal_rec_stop };
+                                         crystal_rec_stop, 0 };

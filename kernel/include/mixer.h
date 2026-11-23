@@ -40,7 +40,12 @@ struct sound_card {                             /* what the mixer plays through 
        the end of each, `got` has that half as 16-bit stereo. 0, or -1: it can't. NULL: no recording. */
     int (*rec_start)(u32 rate, u32 frames, mixer_got got);
     void (*rec_stop)(void);
+    /* The card has stopped interrupting while it plays (mixer_tick): its handler run by hand, so that what it
+       has pending is answered and its next interrupt is a new edge. NULL: never done (an ISA card's line is its
+       own). */
+    void (*kick)(void);
 };
+void mixer_tick(void);                          /* every kernel tick (vdev.c): the card's watchdog */
 enum { MX_CH_MASTER, MX_CH_WAVE, MX_CH_FM, MX_CH_CD, MX_CH_LINE, MX_CH_MIC, MX_CHANNELS };
 enum { MX_IN_MIC, MX_IN_LINE, MX_IN_CD, MX_IN_MIX };
 enum { MX_VOLUME, MX_BALANCE, MX_MUTE, MX_PAUSE, MX_THRESHOLD, MX_POSITION, MX_QUEUED };

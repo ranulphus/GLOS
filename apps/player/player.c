@@ -174,7 +174,9 @@ static void stop(void)
     say("stopped");
 }
 
-static int play_row(int i)              /* 1 if it plays */
+/* 1 if it plays. One that can't is said; `quiet` (the list going on by itself) shows no message, so that the
+   list goes on past it (next): an unattended list is not stopped by a box at a file this PC can't play. */
+static int play_row_as(int i, int quiet)
 {
     struct source_info info;
     char t[300];
@@ -186,6 +188,8 @@ static int play_row(int i)              /* 1 if it plays */
         show_list(i);
         show_now();
         say("refused %s %d", gui_path_name(items[i].path), err);
+        if (quiet)
+            return 0;
         snprintf(t, sizeof t, GUI_T("%s can't be played: %s."), gui_path_name(items[i].path), GUI_T(source_error(err)));
         gui_message(win, GUI_T("Player"), t, GUI_MB_OK);
         return 0;
@@ -196,6 +200,11 @@ static int play_row(int i)              /* 1 if it plays */
     show_now();
     if ((err = eng_play()) != 0) {
         say(err == -2 ? "refused midi" : "refused card");
+        if (quiet) {
+            current = -1;
+            show_now();
+            return 0;
+        }
         gui_message(win, GUI_T("Player"), err == -2 ? GUI_T("There is no MIDI device to play through: no FM chip and no MPU-401, "
                                                             "or another program is using it.")
                                                     : GUI_T("There is no sound card to play through."), GUI_MB_OK);
@@ -205,27 +214,40 @@ static int play_row(int i)              /* 1 if it plays */
     return 1;
 }
 
-static void next(int by_itself)         /* the row after the one that plays (by itself: its file ended) */
+static int play_row(int i) { return play_row_as(i, 0); }
+
+/* The row after the one that plays (by itself: its file ended). Going on by itself, a row that can't play is
+   passed over for the one after it, once round the list at most. */
+static void next(int by_itself)
 {
-    int i;
+    int i, at = current, tries;
     if (!nitems)
         return;
-    if (shuffle && nitems > 1) {
-        do {
-            seed = seed * 1103515245ul + 12345ul;
-            i = (int)((seed >> 16) % (unsigned)nitems);
-        } while (i == current);
-    } else {
-        i = current + 1;
-        if (i >= nitems) {
-            if (by_itself && !repeat) {         /* the list is through */
-                say("through");
-                return;
+    for (tries = 0; tries < nitems; tries++) {
+        if (shuffle && nitems > 1) {
+            do {
+                seed = seed * 1103515245ul + 12345ul;
+                i = (int)((seed >> 16) % (unsigned)nitems);
+            } while (i == at);
+        } else {
+            i = at + 1;
+            if (i >= nitems) {
+                if (by_itself && !repeat) {     /* the list is through */
+                    say("through");
+                    return;
+                }
+                i = 0;
             }
-            i = 0;
         }
+        if (!by_itself) {
+            play_row(i);
+            return;
+        }
+        if (play_row_as(i, 1))
+            return;
+        at = i;
     }
-    play_row(i);
+    say("through");
 }
 
 static void tick(void *arg)

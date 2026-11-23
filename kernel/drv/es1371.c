@@ -351,6 +351,8 @@ static void es_stop(void)
 }
 
 static int es_running(void) { return es.running; }
+static void es_kick(void) { irq(0); }
+
 static u32 es_irqs(void) { return es.irqs; }
 static u32 es_errors(void) { return 0; }
 
@@ -412,4 +414,4 @@ void es1371_leave(void)                 /* glos exit: both channels stopped (a b
 }
 
 const struct sound_card es1371_card = { "es1371", es_start, es_stop, es_running, es_irqs, es_errors, es_chan, es_input,
-                                        es_rec_start, es_rec_stop };
+                                        es_rec_start, es_rec_stop, es_kick };

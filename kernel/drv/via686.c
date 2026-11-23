@@ -299,5 +299,7 @@ void via686_leave(void)                 /* glos exit: both channels stopped, the
     kprintf("GLOS-VIA left\n");
 }
 
+static void via_kick(void) { irq(0); }      /* (mixer_tick: a lost edge) */
+
 const struct sound_card via686_card = { "via686", via_start, via_stop, via_running, via_irqs, via_errors, via_chan,
-                                        via_input, via_rec_start, via_rec_stop };
+                                        via_input, via_rec_start, via_rec_stop, via_kick };

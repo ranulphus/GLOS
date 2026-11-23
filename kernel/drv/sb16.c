@@ -359,4 +359,4 @@ static int sb16_input(int set, int *input)
 }
 
 const struct sound_card sb16_card = { "sb16", sb16_start, sb16_stop, sb16_running, sb16_irqs, sb16_errors, sb16_chan,
-                                      sb16_input, sb16_rec_start, sb16_rec_stop };
+                                      sb16_input, sb16_rec_start, sb16_rec_stop, 0 };

@@ -18,3 +18,5 @@ and MIDI files (MID, RMI).
 - The slider moves through the file; Volume is the Player's own, apart from the [Mixer](MIXER.MD)'s.
 - MIDI files are played by the sound card's music chip or a MIDI device. See [Sound](SOUND.MD).
 - MP3 and Ogg files need a Pentium. On a slower PC the Player says so and stops the file.
+- When the list goes on by itself, a file this PC can't play (a MIDI file on a card with no music chip, say) is
+  passed over for the next. Chosen by hand, the Player says why it can't play it.

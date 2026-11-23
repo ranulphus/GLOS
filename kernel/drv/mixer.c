@@ -80,6 +80,7 @@ static struct {
     u8 mute;                                    /* ... and its mute ([sound] mute) */
     u16 level[2];                               /* the output's peaks in the period played last */
 } mx;
+static u32 kicks;                               /* the card run by hand (mixer_tick) */
 
 static void fill(s16 *out, u32 frames, const struct trapframe *tf);
 
@@ -609,9 +610,9 @@ u32 mixer_stat(char *buf, u32 max)
         n = (u32)ksnprintf(buf, max, "audio off\n");
         return n + midi_stat(buf + n, max - n);
     }
-    n = (u32)ksnprintf(buf, max, "audio %s rate=%u period=%u periods=%u irqs=%u card=%s errors=%u\n",
+    n = (u32)ksnprintf(buf, max, "audio %s rate=%u period=%u periods=%u irqs=%u card=%s errors=%u kicks=%u\n",
                        mx.out ? "idle" : "on", mx.rate, PERIOD, mx.periods, mx.card->irqs(), mx.card->name,
-                       mx.card->errors());
+                       mx.card->errors(), kicks);
     for (i = 0; i < STREAMS && n < max; i++)
         if (st[i].a)
             n += (u32)ksnprintf(buf + n, max - n, "stream %u app=%u rate=%u channels=%u periods=%u underruns=%u\n",
@@ -780,6 +781,43 @@ int mixer_levels(u32 id, u16 *left, u16 *right)
 }
 
 /* A stream of a's has fallen below its threshold since its app was last told: 1 and its id (once each time). */
+/* The card's watchdog. A PCI card's line that rises while the PIC's request for it is wiped never interrupts
+   again: the card waits, high, for an answer, and an edge-triggered PIC sees no new edge. 86Box's keyboard
+   controller lowers IRQ 12 at every byte it sends (kbc_at.c's kbc_do_irq), and its BIOS gives IRQ 12 to PCI
+   when there is no PS/2 mouse: the CMI8738 and the ES1371 stopped for good, now and then, at a keystroke
+   (Loop A, 2026-11-23: the card pending, the PIC's request gone; the handler run by hand set it going again).
+   On a real PC the ELCR makes a PCI line level-triggered, but a lost edge must not cost the sound for good: a
+   card that has not interrupted for 125 ms while it plays has its handler run by hand (card->kick). The first
+   few are said, with both PICs' request, in-service and mask registers; all are counted (glos audio). */
+#define KICK_TICKS 128
+
+void mixer_tick(void)
+{
+    static u32 seen, since;
+    u32 n, now = timer_ticks();
+    u8 mirr, misr, sirr, sisr;
+    if (!mx.on || mx.out || !mx.card || !mx.card->kick || !mx.card->running()) {
+        since = now;
+        return;
+    }
+    n = mx.card->irqs();
+    if (n != seen || now - since < KICK_TICKS) {
+        if (n != seen)
+            seen = n, since = now;
+        return;
+    }
+    if (kicks++ < 4) {
+        outb(0x20, 0x0A); mirr = inb(0x20);
+        outb(0x20, 0x0B); misr = inb(0x20);
+        outb(0xA0, 0x0A); sirr = inb(0xA0);
+        outb(0xA0, 0x0B); sisr = inb(0xA0);
+        kprintf("GLOS-AUDIO kick card=%s irqs=%u pic irr=%02x%02x isr=%02x%02x imr=%02x%02x\n", mx.card->name, n,
+                sirr, mirr, sisr, misr, inb(0xA1), inb(0x21));
+    }
+    mx.card->kick();
+    since = now;
+}
+
 int mixer_wants(struct app *a, u32 *id)
 {
     u32 i;

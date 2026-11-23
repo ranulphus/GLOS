@@ -238,6 +238,8 @@ static void cmi_stop(void)
     kprintf("GLOS-CMI stop irqs=%u st=%x hld=%x f0=%x\n", cm.irqs, rd32(INT_STATUS), rd32(INT_HLDCLR), rd32(FUNCTRL0));
 }
 
+static void cmi_kick(void) { irq(0); }
+
 static int cmi_running(void) { return cm.running; }
 static u32 cmi_irqs(void) { return cm.irqs; }
 static u32 cmi_errors(void) { return 0; }
@@ -348,4 +350,4 @@ void cmi8738_leave(void)
 }
 
 const struct sound_card cmi8738_card = { "cmi8738", cmi_start, cmi_stop, cmi_running, cmi_irqs, cmi_errors, cmi_chan,
-                                         cmi_input, cmi_rec_start, cmi_rec_stop };
+                                         cmi_input, cmi_rec_start, cmi_rec_stop, cmi_kick };

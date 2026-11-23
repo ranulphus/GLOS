@@ -290,5 +290,7 @@ void ich97_leave(void)                  /* glos exit: both boxes stopped (bus ma
     kprintf("GLOS-ICH left\n");
 }
 
+static void ich_kick(void) { irq(0); }      /* (mixer_tick: a lost edge) */
+
 const struct sound_card ich97_card = { "ich97", ich_start, ich_stop, ich_running, ich_irqs, ich_errors, ich_chan, ich_input,
-                                       ich_rec_start, ich_rec_stop };
+                                       ich_rec_start, ich_rec_stop, ich_kick };

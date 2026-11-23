@@ -3385,14 +3385,17 @@ def sess_kill(profile, boot):
 # A run that stood long records a big one: gate 45's stuck panic (2026-11-22) stood 31 minutes while devserver
 # was stalled, its 353 MB recording took wavcheck past 4.5 GB in 25 s, on a machine production shares. So a
 # recording over WAV_MAX is checked by its last two minutes (a copy beside it), and the check may not take more
-# than WAV_MEM: a check that would is a failure, not a stall.
+# than WAV_MEM: a check that would is a failure, not a stall. The silence at its end is cut off first: 86Box's
+# ES1371 goes on recording silence after the last sound (2026-11-23: 87 MB, its tones all in the first 41), so
+# the last two minutes of the file were silent.
 WAV_MAX = 64 << 20
 WAV_MEM = 3 << 30
 
 
 def wav_for_check(wav):
-    """The recording wavcheck.py is given: wav itself, or its last two minutes (wav-tail.wav) if it is over
-    WAV_MAX. The RIFF chunks are read as wavcheck reads them; the copy has the same fmt chunk."""
+    """The recording wavcheck.py is given: wav itself, or (wav-tail.wav) if it is over WAV_MAX, the same without
+    its silent end, and only the last two minutes of that if it is still over. The RIFF chunks are read as
+    wavcheck reads them; the copy has the same fmt chunk."""
     import struct
     try:
         size = os.path.getsize(wav)
@@ -3416,8 +3419,20 @@ def wav_for_check(wav):
         if fmt is None or data_at is None or len(fmt) < 16:
             return wav
         rate, align = struct.unpack("<I", fmt[4:8])[0], struct.unpack("<H", fmt[12:14])[0] or 1
-        keep = min(data_len, rate * align * 120) // align * align
-        f.seek(data_at + data_len - keep)
+        end = data_len // align * align
+        if struct.unpack("<H", fmt[14:16])[0] == 16:       # (16-bit samples: a second at a time from the end, while
+            import array                                    # none is louder than 8)
+            sec = rate * align
+            while end > 0:
+                at = max(0, end - sec)
+                f.seek(data_at + at)
+                a = array.array("h")
+                a.frombytes(f.read((end - at) // 2 * 2))
+                if a and (max(a) > 8 or min(a) < -8):
+                    break
+                end = at
+        keep = end if end <= WAV_MAX else min(end, rate * align * 120) // align * align
+        f.seek(data_at + end - keep)
         tail = f.read(keep)
     out = wav[:-4] + "-tail.wav"
     with open(out, "wb") as g:
@@ -4979,11 +4994,10 @@ def gpu_case(profile, vcard, card):
 # (machine, video card, network card): GLOS's mixer (M8 step E); it is the desktop's, on any card
 AUDIO_CASES = [("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k"),
                ("bf6", "g200", "ne2kpci", "cs4236b"), ("bf6", "g200", "ne2kpci", "cs4232"),
-               ("bf6", "g200", "ne2kpci", "cs4235")]      # (docs/crystal-audio.md: GLOS sets the chip up; 86Box
-# (phase H's PCI cards, kernel/drv/cmi8738.c and es1371.c: run by LOOPA_AUDIO_SOUND=cmi8738,es1371 alone until their
-# playback no longer stops when recording starts: docs/v1/phase-h.md)
-AUDIO_CASES_H = [("bf6", "g200", "ne2kpci", "cmi8738"), ("bf6", "g200", "ne2kpci", "es1371")]
-#   offers these three Crystal cards, given MGA-Glide's sound/crystal ROMs)
+               ("bf6", "g200", "ne2kpci", "cs4235"),      # (docs/crystal-audio.md: GLOS sets the chip up; 86Box
+               ("bf6", "g200", "ne2kpci", "cmi8738"),     # offers these three Crystal cards, given MGA-Glide's
+               ("bf6", "g200", "ne2kpci", "es1371")]      # sound/crystal ROMs) (phase H's PCI cards: kernel/drv/
+#   cmi8738.c and es1371.c; their lost edges on IRQ 12 are the mixer's watchdog's: docs/v1/phase-h.md)
 
 
 def vsb_case(profile, vcard, card, sound="sb16", virtual=True):
@@ -5217,10 +5231,11 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
         keys("ctrl+r")
         time.sleep(4)
         keys("f6")
-        keys("ctrl+s")
-        checks["rec-dialog"] = bool(g.until(lambda d: g.window("Save As", d) is not None, 60))
-        agent.ssh("glos type C:\\\\OUT\\\\TAKE\\n")
-        checks["rec-saved"] = bool(g.until(lambda d: g.window("TAKE.WAV - Sound Recorder", d) is not None, 60))
+        if not es:                              # (86Box's ES1371 never runs its ADC: nothing recorded, nothing to save)
+            keys("ctrl+s")
+            checks["rec-dialog"] = bool(g.until(lambda d: g.window("Save As", d) is not None, 60))
+            agent.ssh("glos type C:\\\\OUT\\\\TAKE\\n")
+            checks["rec-saved"] = bool(g.until(lambda d: g.window("TAKE.WAV - Sound Recorder", d) is not None, 60))
         keys("alt+f4")
         rc_rec, o_rec = finish(rec, 60)
         m = re.search(r"RECORDER recorded (\d+) at 22050 Hz 2 channels peak (\d+)", o_rec)
@@ -5236,6 +5251,9 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
         checks["rec-file"] = (len(wav) == 44 + n_rec * 4 and wav[:4] == b"RIFF" and wav[8:16] == b"WAVEfmt "
                               and struct.unpack_from("<HHIIHH", wav, 20) == (1, 2, 22050, 88200, 4, 16)
                               and wav[36:40] == b"data" and struct.unpack_from("<I", wav, 40)[0] == n_rec * 4)
+        if es:                                  # (... the Recorder says so and ends; recording is a bench's to prove)
+            checks["rec-said"] = rc_rec == 0 and "RECORDER recorded 0 at 22050 Hz" in o_rec and "RECORDER end" in o_rec
+            checks["rec-file"] = True
         if not (checks["rec-said"] and checks["rec-file"]):
             print("    %s recorder: rc=%d %r file=%d bytes" % (tag, rc_rec, o_rec[-300:], len(wav)))
         info += " recorded=%d peak=%s" % (n_rec, m.group(2) if m else "?")
@@ -5263,12 +5281,14 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
             rc_p = -1
         heard.join(10)
         o_p = bytes(ply.said).decode("latin-1").replace("\r", "")
+        # (On the ES1371, no FM synthesiser and no MIDI port: the MIDI file is passed over, said, and the list goes
+        # on by itself.)
         checks["player-said"] = rc_p == 0 and all(l in o_p for l in (
             "PLAYER added PTONE.WAV WAV 0:05", "PLAYER added PSONG.MOD MOD 0:07", "PLAYER playing 1 PTONE.WAV",
             "PLAYER ended PTONE.WAV", "PLAYER playing 2 PSONG.MOD", "PLAYER ended PSONG.MOD", "PLAYER through", "PLAYER end",
             "PLAYER added PS3M.S3M S3M 0:03", "PLAYER added PXM.XM XM 0:03", "PLAYER playing 3 PS3M.S3M",
-            "PLAYER ended PS3M.S3M", "PLAYER playing 4 PXM.XM", "PLAYER ended PXM.XM",
-            "PLAYER added PTUNE.MID MID 0:03", "PLAYER playing 5 PTUNE.MID", "PLAYER ended PTUNE.MID")
+            "PLAYER ended PS3M.S3M", "PLAYER playing 4 PXM.XM", "PLAYER ended PXM.XM", "PLAYER added PTUNE.MID MID 0:03")
+            + (("PLAYER refused midi",) if es else ("PLAYER playing 5 PTUNE.MID", "PLAYER ended PTUNE.MID"))
             + (("PLAYER added PMP3.MP3 MP3 0:03", "PLAYER added POGG.OGG OGG 0:03", "PLAYER playing 6 PMP3.MP3",
                 "PLAYER ended PMP3.MP3", "PLAYER playing 7 POGG.OGG", "PLAYER ended POGG.OGG") if packed else ())) \
             and "PLAYER slow" not in o_p
@@ -5326,8 +5346,8 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
     checks["recorded"] = os.path.exists(wav) and wavcheck_run(
         [sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav_for_check(wav), "--tone", "440", "--tone", "1000",
          "--tone", "784", "--tone", "523", "--tone", "1175", "--tone", "259",       # (the last two: the Player's;
-         "--tone", "1319.8", "--tone", "1862.6", "--tone", "370",                   # its S3M's, its XM's, its MIDI file's)
-         "--tone", "293.7"]                                                         # (MIDI Studio's)
+         "--tone", "1319.8", "--tone", "1862.6"]                                    # its S3M's, its XM's, ...)
+        + ([] if es else ["--tone", "370", "--tone", "293.7"])                     # (... its MIDI file's; MIDI Studio's)
         + (["--tone", "1568", "--tone", "2093"] if profile == "bf6" else [])      # (... and its MP3's and its Ogg's)
         + (["--tone", "330", "--tone", "659"] if crystal or cmi else []),
         capture_output=True).returncode == 0
@@ -12373,8 +12393,7 @@ def main():
             cases = [c for c in cases if c[1] in os.environ["GLWIN_ONLY"].split(",")]
         return 0 if all(r[1] for r in matrix(glwin_case, cases, a.jobs)) else 1
     if a.suite == "audio":
-        cases = [c for c in AUDIO_CASES + (AUDIO_CASES_H if os.environ.get("LOOPA_AUDIO_SOUND") else [])
-                 if not a.profile or c[0] in a.profile]
+        cases = [c for c in AUDIO_CASES if not a.profile or c[0] in a.profile]
         if os.environ.get("LOOPA_AUDIO_SOUND"):    # e.g. LOOPA_AUDIO_SOUND=cs4236b,cs4232
             cases = [c for c in cases if (c[3] if len(c) > 3 else "sb16") in os.environ["LOOPA_AUDIO_SOUND"].split(",")]
         res = matrix(audio_case, cases, a.jobs)

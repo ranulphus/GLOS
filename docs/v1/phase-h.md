@@ -56,18 +56,34 @@ Each driver's head names its source and its SHA-256.
   - **ES1371:** plays in every stream.
   - **Its recording:** 86Box's model has the ES1371's ADC registers but never runs the channel or raises its
     interrupt, so recording is a bench's to prove.
-  - **Open:** in two runs out of five, a card's playback stopped for good about 18 seconds in (1,544 and 1,546
-    interrupts), at the step where the Mixer app opens an input and the mixer starts recording on the card. The
-    handlers now go round until their card says nothing is pending, and a start clears what was left; the ES1371
-    has not stopped since. Until neither stops, the two cases are out of the gate's audio suite
-    (`AUDIO_CASES_H`, run by `LOOPA_AUDIO_SOUND=cmi8738,es1371`).
+  - **The stops (afternoon):** in some runs a card's playback stopped for good, about 18 seconds in (1,544 to
+    1,548 interrupts), the step where the Mixer app opens an input. The first guesses were the handlers (they
+    now go round until their card says nothing is pending, and a start clears what was left) and 86Box's
+    CMI8738 restarting a channel's DMA at each write of its enable byte. Neither was the cause. Until a fix,
+    the two cases were taken out of the gate's audio suite (`AUDIO_CASES_H`, run by
+    `LOOPA_AUDIO_SOUND=cmi8738,es1371`).
   - **ES1371 codec:** its codec's vendor reads as FFFFFFFF in 86Box (its model's codec).
-  - **The CMI8738's stop, later the same day:** a third run stopped again at 1,548 interrupts, as recording
-    started. 86Box's model restarts a channel's DMA at every write of FUNCTRL0's channel byte with that
-    channel's enable bit set, even while it runs. Starting recording writes that byte three times with channel
-    0's enable kept, so playback is restarted three times. That alone should not stop its interrupts, and the
-    model's source gave no clearer cause. Bench B's real chip is the next judge; until then the case stays
-    out of the gate.
+  - **The stops found (evening):** the mixer now logs both PICs and the card when the card stops. The CMI8738
+    stopped after 79 interrupts, at start-up: its channel pending and its line high (`st=80000001`), and the
+    PIC holding no request for it. The edge was lost. 86Box's keyboard controller lowers IRQ 1 and IRQ 12 at
+    every byte it puts out (`kbc_at.c`, `kbc_do_irq`), and its BIOS gives IRQ 12 to PCI when there is no PS/2
+    mouse. So a PCI card on IRQ 12 loses its request at a keystroke or a reply to the mouse probe, and with an
+    edge-triggered PIC its line, already high, never makes another. That explains the stops at the same step,
+    where the script types, and that they came in some runs only.
+  - **The fix, for every card:** `mixer_tick()` (every kernel tick) runs a playing card's handler by hand
+    (`card->kick`, the four PCI drivers) after 125 ms with no interrupt from it. Its status is answered, the line
+    falls, and the next half's rise is an edge again. The first four kicks are logged with the PICs' registers,
+    and all are counted in `glos audio` (`kicks=`). A real PC's ELCR makes a PCI line level-triggered, so a bench
+    should rarely see one. The network thread already services its card at every turn, so a network card on
+    IRQ 12 costs a delay at most.
+  - **Results:** the CMI8738 passed the whole case twice running (two and three kicks, the first at about 1,550
+    interrupts each time, where it used to stop for good). The ES1371 passed (one kick at 1,576). Both cases
+    are back in the gate's audio suite (`AUDIO_CASES`).
+  - **ES1371 in Loop A:** 86Box's model records nothing, so its case checks that the Recorder says "recorded 0"
+    and ends. It goes on recording silence after the last sound, so a large recording now has its silent end
+    cut off before its tones are checked (`wav_for_check`). It has no FM chip, so the Player's MIDI file is refused. The Player now passes over a file it can't
+    play when the list goes on by itself (it used to stop the list with a message), so the MP3 and Ogg after it
+    play.
 - **Owed:**
   - each chip on its bench;
   - the CMI8738's FM on bench B's chip (an OPL3 on most);
