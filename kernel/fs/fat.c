@@ -638,11 +638,19 @@ int fat_seek(struct fat_file *f, unsigned long pos)
     return FAT_OK;
 }
 
+#define GET_RUN 64                      /* sectors in one read of a file's data, at most */
+
 long fat_read(struct fat_file *f, void *buf, unsigned long n)
 {
     struct fat_vol *v = f->v;
     unsigned long csize = v->spc * (unsigned long)FAT_SECTOR, done = 0;
+    /* Whole sectors go straight into the caller's buffer, and those of clusters that follow one another on the
+       disk in one read (GET_RUN sectors at most: a disk read through a BIOS pays for every call; the owner's
+       PCChips M925G took 12 ms for each from a USB stick): the run so far, its place in the buffer, and the file's
+       position at its start (where the file is left if the read fails). */
+    unsigned long run_lba = 0, run_secs = 0, run_done = 0, run_pos = 0;
     unsigned char *out = buf;
+    int r = FAT_OK;
 
     if (f->pos >= f->size)
         return 0;
@@ -651,28 +659,46 @@ long fat_read(struct fat_file *f, void *buf, unsigned long n)
     while (done < n) {
         unsigned long ord = f->pos / csize, in = f->pos % csize, sec = in / FAT_SECTOR, off = in % FAT_SECTOR;
         unsigned long lba, take;
-        int r = chain_at(v, f->first, ord, &f->cl, &f->cl_ord);
 
-        if (r)
-            return r > 0 ? FAT_ECORRUPT : r;
+        r = chain_at(v, f->first, ord, &f->cl, &f->cl_ord);
+        if (r) {
+            r = r > 0 ? FAT_ECORRUPT : r;
+            break;
+        }
         lba = v->data_start + (f->cl - 2) * v->spc + sec;
         if (!off && n - done >= FAT_SECTOR) {
-            /* Whole sectors straight into the caller's buffer, as many as this cluster has. */
             unsigned long secs = (n - done) / FAT_SECTOR, left = v->spc - sec;
 
             if (secs > left)
                 secs = left;
-            if (lba + secs > v->total)
-                return FAT_ECORRUPT;
-            if (v->read(v->ctx, lba, out + done, (unsigned)secs))
-                return FAT_EIO;
+            if (lba + secs > v->total) {
+                r = FAT_ECORRUPT;
+                break;
+            }
+            if (run_secs && run_lba + run_secs == lba && run_secs + secs <= GET_RUN) {
+                run_secs += secs;
+            } else {
+                if (run_secs && v->read(v->ctx, run_lba, out + run_done, (unsigned)run_secs)) {
+                    r = FAT_EIO;
+                    break;
+                }
+                run_lba = lba, run_secs = secs, run_done = done, run_pos = f->pos;
+            }
             take = secs * FAT_SECTOR;
         } else {
             int err = 0;
-            unsigned char *b = sector(v, lba, &err);
+            unsigned char *b;
 
-            if (!b)
-                return err;
+            if (run_secs && v->read(v->ctx, run_lba, out + run_done, (unsigned)run_secs)) {
+                r = FAT_EIO;
+                break;
+            }
+            run_secs = 0;
+            b = sector(v, lba, &err);
+            if (!b) {
+                r = err;
+                break;
+            }
             take = FAT_SECTOR - off;
             if (take > n - done)
                 take = n - done;
@@ -681,7 +707,15 @@ long fat_read(struct fat_file *f, void *buf, unsigned long n)
         done += take;
         f->pos += take;
     }
-    return (long)done;
+    if (run_secs && r != FAT_EIO) {             /* the run still to read */
+        if (v->read(v->ctx, run_lba, out + run_done, (unsigned)run_secs))
+            r = FAT_EIO;
+        else
+            run_secs = 0;
+    }
+    if (run_secs)                               /* a run that wasn't read: the file is left before it */
+        f->pos = run_pos;
+    return r ? r : (long)done;
 }
 
 /* ---- writing (N1b); left out of a build with FAT_READ_ONLY (GLOS's own loader, N3, reads only) */

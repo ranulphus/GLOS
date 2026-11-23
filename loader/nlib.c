@@ -61,15 +61,25 @@ static int sectors_in(unsigned long lba, unsigned n, void *buf)
     return -1;
 }
 
-/* fat.c's reads: count sectors of the volume, a few at a time (CHS calls stay inside a track). */
+/* fat.c's reads: count sectors of the volume, up to 32 in a call; a CHS call stays inside its track. Sector by
+   sector until 2026-11-23 without the LBA calls: the owner's PCChips M925G, which starts a USB stick as a drive of
+   the floppies' numbers, took 12 ms for each call and 55 seconds to load the kernel. A call of several sectors
+   that fails is made again a sector at a time (a real floppy's DMA across a 64 KB boundary). */
 static int vol_read(void *ctx, unsigned long lba, unsigned char *buf, unsigned count)
 {
     (void)ctx;
     while (count) {
-        unsigned n = ext ? (count > 16 ? 16 : count) : 1;
+        unsigned n = count > 32 ? 32 : count;
 
-        if (sectors_in(vol_lba + lba, n, buf) != 0)
-            return -1;
+        if (ext && n > 16)                      /* (the LBA calls: 16 at most, as before) */
+            n = 16;
+        if (!ext && n > spt - (unsigned)((vol_lba + lba) % spt))
+            n = spt - (unsigned)((vol_lba + lba) % spt);
+        if (sectors_in(vol_lba + lba, n, buf) != 0) {
+            if (n == 1 || sectors_in(vol_lba + lba, 1, buf) != 0)
+                return -1;
+            n = 1;
+        }
         lba += n, buf += n * 512u, count -= n;
     }
     return 0;

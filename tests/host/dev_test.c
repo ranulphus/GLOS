@@ -29,6 +29,9 @@ void *mm_dev_map(u32 phys, u32 bytes)
 }
 static char logbuf[4096];
 static int fails;
+static int heard = 1;                           /* the VM's interrupt controller has the lines open */
+
+int dev_line_heard(int irq) { (void)irq; return heard; }
 
 #define CHECK(c) do { if (!(c)) { fails++; printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #c); } } while (0)
 
@@ -152,6 +155,45 @@ int main(void)
     fake_ports[0xD004] = 0x000F;
     CHECK(dev_take_line(nic, with, sizeof with) == -1 && usb->keeper == DEV_DOS && fake_ports[0xD004] == 0x000F);
     CHECK(strstr(logbuf, "why=running") != NULL);
+    CHECK(strstr(logbuf, "GLOS-DEV shares 00:07.2 id=1106:3038 class=0c0300 irq=10 keeper=dos\n") != NULL);
+
+    /* The PCChips M925G: VIA's UHCI running for the BIOS (a USB keyboard, the stick GLOS started from) on the
+       Rhine's line. With the legacy support register's PIRQ and SMI on: PIRQ off, the BIOS's SMI goes on */
+    reset();
+    usb = add(16, 0, 0x1106, 0x3038, 0x0C, 0x03, 0x00, 1, 11, 0xE400);
+    nic = add(18, 0, 0x1106, 0x3065, 0x02, 0x00, 0x00, 1, 11, 0);
+    legsup[0] = 0x2010;
+    fake_ports[0xE400] = 1;
+    fake_ports[0xE404] = 0x000F;
+    CHECK(dev_take_line(nic, with, sizeof with) == 0 && usb->keeper == DEV_QUIET && legsup[0] == 0x0010);
+    CHECK(strstr(logbuf, "how=pirq") != NULL && fake_ports[0xE404] == 0x000F);
+    /* ... PIRQ on and SMI off: a driver's, if the VM's interrupt controller has the line open (kept) */
+    reset();
+    usb = add(16, 0, 0x1106, 0x3038, 0x0C, 0x03, 0x00, 1, 11, 0xE400);
+    nic = add(18, 0, 0x1106, 0x3065, 0x02, 0x00, 0x00, 1, 11, 0);
+    legsup[0] = 0x2000;
+    fake_ports[0xE400] = 1;
+    fake_ports[0xE404] = 0x000F;
+    CHECK(dev_take_line(nic, with, sizeof with) == -1 && usb->keeper == DEV_DOS && legsup[0] == 0x2000);
+    CHECK(strstr(logbuf, "why=driven") != NULL);
+    /* ... nobody's if the line is masked there (the BIOS polls it): PIRQ off */
+    reset();
+    usb = add(16, 0, 0x1106, 0x3038, 0x0C, 0x03, 0x00, 1, 11, 0xE400);
+    nic = add(18, 0, 0x1106, 0x3065, 0x02, 0x00, 0x00, 1, 11, 0);
+    legsup[0] = 0x2000;
+    fake_ports[0xE400] = 1;
+    fake_ports[0xE404] = 0x000F;
+    heard = 0;
+    CHECK(dev_take_line(nic, with, sizeof with) == 0 && usb->keeper == DEV_QUIET && legsup[0] == 0);
+    CHECK(strstr(logbuf, "legsup=2000 usbintr=000f line=masked") != NULL && strstr(logbuf, "how=pirq") != NULL);
+    heard = 1;
+    /* ... no such register (it reads 0), but the controller's own interrupt enables all off: quiet as it is */
+    reset();
+    usb = add(16, 0, 0x1106, 0x3038, 0x0C, 0x03, 0x00, 1, 11, 0xE400);
+    nic = add(18, 0, 0x1106, 0x3065, 0x02, 0x00, 0x00, 1, 11, 0);
+    fake_ports[0xE400] = 1;
+    CHECK(dev_take_line(nic, with, sizeof with) == 0 && usb->keeper == DEV_QUIET);
+    CHECK(strstr(logbuf, "how=no-intr") != NULL);
 
     /* The P3 bench: the ALi board's OHCI and the VIA Rhine on IRQ 9. Nobody drives the OHCI (reset, its
        interrupts neither routed to SMI nor enabled): every interrupt disabled, the master bit with them */
@@ -199,12 +241,12 @@ int main(void)
     CHECK(dev_take_line(nic, with, sizeof with) == -1 && usb->keeper == DEV_DOS && mapped == 0);
     CHECK(strstr(logbuf, "why=no-memory") != NULL);
 
-    /* No quiet driver for it (a PCI sound card): in the way, untouched, nothing logged by the device layer */
+    /* No quiet driver for it (a PCI sound card): in the way, untouched, and named in the log */
     reset();
     other = add(10, 0, 0x1274, 0x1371, 0x04, 0x01, 0x00, 1, 5, 0);
     nic = add(11, 0, 0x10EC, 0x8139, 0x02, 0x00, 0x00, 1, 5, 0);
     CHECK(dev_take_line(nic, with, sizeof with) == -1 && !strcmp(with, "00:0a.0") && other->keeper == DEV_DOS);
-    CHECK(logbuf[0] == 0);
+    CHECK(!strcmp(logbuf, "GLOS-DEV shares 00:0a.0 id=1274:1371 class=040100 irq=5 keeper=dos\n"));
 
     /* One of GLOS's own on the line: in the way until step D2 */
     reset();

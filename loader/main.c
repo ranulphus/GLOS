@@ -91,7 +91,7 @@ static void put(char c)
 #ifdef NATIVE
 /* GLOSLDR.SYS has no DOS to print through, and a PC it is first tried on has no serial cable as a rule: its lines
    go to the screen too, by the BIOS's teletype, so that a start that stops says where (the owner's PCChips M925G,
-   2026-11-24: a USB stick that didn't start, and nothing to tell how far it came). */
+   2026-11-23: a USB stick that didn't start, and nothing to tell how far it came). */
 static void screen(char c)
 {
     union REGS r;
@@ -1304,8 +1304,17 @@ static unsigned long native_if(void)
     union REGS r;
     struct SREGS sr;
 
-    if (native_disk < 0x80)
-        return BI_IF_OTHER;
+    if (native_disk < 0x80) {
+        /* A drive of the floppies' numbers: a real floppy drive (08h's type 1 to 6, two heads, a floppy's
+           sectors a track), or a USB stick a BIOS starts as one (the PCChips M925G's boot menu): not said. */
+        struct bi_disk *d = &bi.boot_disk;
+        segread(&sr);
+        memset(&r, 0, sizeof r);
+        sr.es = 0;
+        r.h.ah = 0x08, r.h.dl = native_disk;
+        int86x(0x13, &r, &r, &sr);
+        return !r.x.cflag && r.h.bl >= 1 && r.h.bl <= 6 && d->heads == 2 && d->spt <= 36 ? BI_IF_OTHER : BI_IF_UNKNOWN;
+    }
     memset(&r, 0, sizeof r);
     r.h.ah = 0x41, r.x.bx = 0x55AA, r.h.dl = native_disk;
     int86(0x13, &r, &r);
@@ -1326,6 +1335,53 @@ static unsigned long native_if(void)
     if (!memcmp(p + 0x28, "ATA", 3))
         return BI_IF_ATA;
     return BI_IF_OTHER;
+}
+
+/* The disk GLOS started from as the BIOS describes it, for the kernel (bootinfo's boot_disk): 08h's geometry;
+   a hard disk's extensions and size as disks_probe() asks them. */
+static void native_boot_disk(void)
+{
+    static unsigned char p48[30];
+    struct bi_disk *d = &bi.boot_disk;
+    union REGS r;
+    struct SREGS sr;
+
+    memset(d, 0, sizeof *d);
+    d->dl = native_disk;
+    d->bps = 512;
+    segread(&sr);
+    memset(&r, 0, sizeof r);
+    sr.es = 0;
+    r.h.ah = 0x08, r.h.dl = native_disk;
+    int86x(0x13, &r, &r, &sr);
+    if (!r.x.cflag && (r.h.cl & 63)) {
+        d->cyls = (unsigned long)(r.h.ch | ((r.h.cl & 0xC0) << 2)) + 1;
+        d->heads = (unsigned long)r.h.dh + 1;
+        d->spt = r.h.cl & 63;
+    }
+    d->sectors_lo = d->cyls * d->heads * d->spt;
+    if (native_disk >= 0x80) {
+        memset(&r, 0, sizeof r);
+        r.h.ah = 0x41, r.x.bx = 0x55AA, r.h.dl = native_disk;
+        int86(0x13, &r, &r);
+        if (!r.x.cflag && r.x.bx == 0xAA55 && (r.x.cx & 1)) {
+            d->flags |= BI_DISK_EDD;
+            memset(p48, 0, sizeof p48);
+            *(unsigned *)p48 = 0x1A;
+            segread(&sr);
+            memset(&r, 0, sizeof r);
+            r.h.ah = 0x48, r.h.dl = native_disk;
+            sr.ds = FP_SEG((void __far *)p48);
+            r.x.si = FP_OFF((void __far *)p48);
+            int86x(0x13, &r, &r, &sr);
+            if (!r.x.cflag && (*(unsigned long *)(p48 + 16) || *(unsigned long *)(p48 + 20))) {
+                d->flags |= BI_DISK_PARAMS | ((*(unsigned *)(p48 + 2) & 4) ? BI_DISK_REMOVE : 0);
+                d->sectors_lo = *(unsigned long *)(p48 + 16);
+                d->sectors_hi = *(unsigned long *)(p48 + 20);
+                d->bps = *(unsigned *)(p48 + 24);
+            }
+        }
+    }
 }
 
 /* GLOSLDR.SYS's (nstart.asm calls it): GLOS's files in \GLOS on the volume it started from, as if GLOS.EXE were
@@ -1351,8 +1407,10 @@ void __cdecl native_main(void)
     }
     bi.cache_mode = BI_CACHE_ON;
     bi.boot_dl = native_disk;
+    native_boot_disk();
     bi.boot_if = native_if();
-    say("GLOS-BOOT step=disk dl=%02x if=%lu", native_disk, bi.boot_if);
+    say("GLOS-BOOT step=disk dl=%02x if=%lu chs=%lu/%lu/%lu sectors=%lu flags=%lx", native_disk, bi.boot_if,
+        bi.boot_disk.cyls, bi.boot_disk.heads, bi.boot_disk.spt, bi.boot_disk.sectors_lo, bi.boot_disk.flags);
     /* Its command line (the prelude's CMDLINE): the folder GLOS's files are in (a word that begins with a
        backslash: \GLOS if none), where GLOS.EXE would be under DOS, and GLOS.EXE's flags. GLOS.CFG's [shell]
        section is read as when GLOS is DOS's shell: natively it is the shell. */

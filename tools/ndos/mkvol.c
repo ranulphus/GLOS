@@ -44,7 +44,7 @@ int main(int argc, char **argv)
     struct fat_made m;
 
     if (argc < 5) {
-        fprintf(stderr, "usage: mkvol IMAGE START SECTORS LABEL [HEADS]\n");
+        fprintf(stderr, "usage: mkvol IMAGE START SECTORS LABEL [HEADS [DRIVE]]\n");
         return 2;
     }
     if (!(img = fopen(argv[1], "r+b"))) {
@@ -55,7 +55,8 @@ int main(int argc, char **argv)
     memset(&g, 0, sizeof g);
     g.sectors = strtoul(argv[3], 0, 0);
     g.hidden = base;
-    g.heads = argc > 5 ? (unsigned)strtoul(argv[5], 0, 0) : 16, g.spt = 63, g.drive = 0x80;
+    g.heads = argc > 5 ? (unsigned)strtoul(argv[5], 0, 0) : 16, g.spt = 63;
+    g.drive = argc > 6 ? (unsigned)strtoul(argv[6], 0, 16) : 0x80;      /* (00: a floppy, of DOS's own shapes) */
     g.serial = 0x474C4F53UL;
     g.label = argv[4];
     if (fat_format(&g, put, 0, &m) != 0 || boot(0, m.fat) != 0 || (m.fat == 32 && boot(6, 32) != 0)) {

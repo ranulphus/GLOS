@@ -309,6 +309,8 @@ void vm_sync_mask(void)
     }
 }
 
+int dev_line_heard(int irq) { return !(vpic_imr(&vm.pic) >> irq & 1); }
+
 /* A line becomes the kernel's: the VM never sees it again (supervisor.md §10). */
 void vm_claim_irq(int irq, void (*fn)(struct trapframe *))
 {

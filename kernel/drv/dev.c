@@ -24,7 +24,11 @@ struct quiet {
 /* UHCI USB (class 0C 03 00). Intel's (PIIX3/4, ICH): the legacy support register's USBPIRQDEN (config C0h, bit
    13) off, so that the controller never drives its PCI line; the BIOS's USB keyboard emulation goes on, through
    SMI. Unless the controller runs with its SMI off: a driver other than the BIOS's has it. Other makers': USBINTR
-   off, while the controller isn't running. */
+   off, while the controller isn't running. One that is running (the owner's PCChips M925G, 2026-11-23: VIA's,
+   which the BIOS ran for a USB keyboard and the stick GLOS started from, on the network card's line): the same
+   register where it has it (the UHCI design guide's: the bit reads back off), unless the bits say a driver has
+   the line (PIRQ on, SMI off) and the VM's interrupt controller has the line open, so somebody listens there; or
+   nothing to do where the controller's own interrupt enables are all off. Else it stays as it is. */
 #define UHCI_LEGSUP      0xC0
 #define LEGSUP_SMIEN     0x0010         /* the USB interrupt raises SMI (the BIOS's legacy support) */
 #define LEGSUP_PIRQDEN   0x2000         /* the USB interrupt drives PIRQD: the PCI line */
@@ -51,6 +55,26 @@ static int uhci_quiet(struct pci_dev *d, const char **how)
         return -1;
     }
     if (running) {
+        u32 v = pci_read32(d->bus, d->dev, d->fn, UHCI_LEGSUP);
+        u16 intr = inw((u16)(io + 4));
+        int heard = dev_line_heard(d->irq);
+        kprintf("GLOS-DEV uhci %02x:%02x.%u running legsup=%04x usbintr=%04x line=%s\n", d->bus, d->dev, d->fn,
+                v & 0xFFFF, intr, heard ? "heard" : "masked");
+        if ((v & 0xFFFF) != 0xFFFF && (v & LEGSUP_PIRQDEN)) {
+            if (!(v & LEGSUP_SMIEN) && heard) {
+                *how = "driven";
+                return -1;
+            }
+            pci_write32(d->bus, d->dev, d->fn, UHCI_LEGSUP, v & ~(LEGSUP_PIRQDEN | LEGSUP_RWC));
+            if (!(pci_read32(d->bus, d->dev, d->fn, UHCI_LEGSUP) & LEGSUP_PIRQDEN)) {
+                *how = "pirq";
+                return 0;
+            }
+        }
+        if (!intr) {                            /* (it can't interrupt as it is) */
+            *how = "no-intr";
+            return 0;
+        }
         *how = "running";
         return -1;
     }
@@ -117,7 +141,7 @@ int dev_take_line(struct pci_dev *d, char *with, u32 room)
 {
     struct pci_dev *o;
     char a[12];
-    int i;
+    int i, r = 0;
     u32 k;
     if (room)
         with[0] = 0;
@@ -139,12 +163,16 @@ int dev_take_line(struct pci_dev *d, char *with, u32 room)
                     break;
                 }
         if (o->keeper != DEV_QUIET) {           /* (GLOS's own on the same line: step D2) */
-            if (room)
+            if (room && !r)
                 ksnprintf(with, room, "%s", addr(o, a, sizeof a));
-            return -1;
+            /* (every one of them said, the first named: a PC's log then tells all that stands in the way) */
+            kprintf("GLOS-DEV shares %s id=%04x:%04x class=%02x%02x%02x irq=%u keeper=%s\n", addr(o, a, sizeof a),
+                    o->vendor, o->device, o->class, o->subclass, o->progif, o->irq,
+                    o->keeper == DEV_GLOS ? "glos" : "dos");
+            r = -1;
         }
     }
-    return 0;
+    return r;
 }
 
 void dev_dos_wrote(u32 cf8)

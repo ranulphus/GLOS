@@ -702,6 +702,35 @@ missing came after the kernel's entry, where C: was GLOS's IDE driver's or nothi
   66h, which DISK asks), and a disk that has partitions only with `/ERASE`. At the PC: `DISK` (the disks; the
   stick says "GLOS or DOS runs from it"), `DISK 2 INSTALL /Y`, the stick out, `REBOOT`. The installed system is
   the stick's as it is: its GLOS.CFG (the name `glos-usb`, `/VERBOSE`) and its host key, to change afterwards.
+- **The first real PC** (the owner's PCChips M925G, 2026-11-23: VIA P4M266A/VT8235, an AMI BIOS, its log down a
+  serial cable to the build host). What it showed, and what changed for it:
+  - The BIOS's boot menu (F8) starts the stick as **a drive of the floppies' numbers** (00h), whose first sector
+    is the stick's partition's. The loader coped; the kernel looked for C: on 80h, the PC's own disk. Now the
+    loader gives the kernel the boot disk as the BIOS describes it (`bootinfo.boot_disk`, version 13: 08h's
+    geometry, a hard disk's extensions and size), C: is that disk by the BIOS's calls (cylinder, head and sector
+    where it has no LBA calls), and a first sector that is a FAT volume's own is the volume (no table looked for).
+    A drive of the floppies' numbers that isn't a real floppy drive (08h's type 1 to 6, two heads, a floppy's
+    sectors a track) may be a USB disk: USB is left to the BIOS.
+  - **GLOS's IDE driver reset the PC's disks** as it looked for the boot disk among them (`ATA_PROBE_OWN`), and
+    the BIOS, asked next, gave a first sector that was no table; 86Box's BIOS read 16 sectors of a longer call
+    right and the rest wrong, once the kernel's reads were longer than a cluster. A drive that is reset loses what
+    the BIOS set (its READ MULTIPLE's block, its timing). The BIOS is asked first now, and the driver looks without
+    a reset or settings of its own, as it does beside a DOS: the BIOS goes on reading these disks (the boot disk
+    GLOS has no driver for, any disk for DISK and for programs' INT 13h).
+  - **The network card was refused** (`shared-irq`): VIA's UHCI, which the BIOS ran for a USB keyboard and the
+    stick, is on the Rhine's line, and a UHCI of another maker than Intel was made quiet only when it wasn't
+    running. The legacy support register (config C0h) is the UHCI design guide's and every maker's: PIRQ is now
+    switched off there for a running controller too, unless the bits say a driver has the line (PIRQ on, SMI off)
+    and the VM's interrupt controller has the line open (the M925G's BIOS has IRQ 11 masked: nobody listens);
+    nothing is done where the controller's own interrupt enables are all off. Every function that stands in a
+    card's way is now named (`GLOS-DEV shares`). GLOS's own UHCI driver clears that register on every maker's
+    controller too (the BIOS's SMI was left on VIA's while GLOS drove it, and its devices' set-up failed).
+  - **55 seconds to load the kernel:** the loader read a sector a call without the LBA calls, and a call cost 12 ms
+    there. It reads up to a track's rest in a call (a sector at a time again if such a call fails), and `fat_read`
+    reads the clusters that follow one another in one call (64 sectors at most), for the kernel's reads too.
+  - The loader's lines go to the screen as well as to COM1, and the stick's folder has GLOS.EXE.
+  `loopa-nboot` starts GLOS from a 1.44 MB floppy with a blank hard disk beside it (bf6, 486): the loader's track
+  reads, C: by the BIOS's cylinder, head and sector calls, a file written and read there.
 - **Tested:** `loopa-nboot` has `DISK 2 INSTALL` onto a blank second disk (and again with `/ERASE`), the PC then
   started from that disk alone: the same files, a program run (bf6 with the first start by `/BIOSDISK`, 486). It
   also has the NB2-NB4 case a second time with `/BIOSDISK` (bf6, 486): every file, program

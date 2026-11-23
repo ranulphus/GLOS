@@ -7707,6 +7707,69 @@ def nboot_install_case(profile, card, bios=False):
         not bad
 
 
+def nboot_floppy_case(profile, card):
+    """A native start from a drive of the floppies' numbers (docs/v1/native-dos.md, the BIOS's disks): a 1.44 MB
+    floppy of GLOS's own formatter with GLOS's boot code naming GLOSLDR.SYS, the kernel and GLOS's COMMAND.COM on
+    it, a blank hard disk beside it. The BIOS starts the floppy (drive 00h); the loader reads it a track at a
+    time; the kernel has no driver for it, so C: is the floppy by the BIOS's calls (cylinder, head and sector),
+    though the PC has an IDE disk: the way the owner's PCChips M925G started a USB stick. A file is written and
+    read back there, a program run. A real floppy drive is no USB disk: GLOS takes the USB controller (bf6)."""
+    import time
+    tag = "nfloppy-" + profile
+    d = os.path.join(ROOT, "out", tag + "-img")
+    os.makedirs(d, exist_ok=True)
+    fimg, blank = os.path.join(d, "a.img"), os.path.join(d, "c.img")
+    cfg = batfile(tag + "/GLOS.CFG", ["; jobs.py nboot: a native start from a floppy"])
+    script = "\n".join([
+        "set -e", "t=$(mktemp -d)", "trap 'rm -rf $t' EXIT",
+        "gcc -m32 -O1 -Ikernel/include -Iinclude -o $t/mkvol tools/ndos/mkvol.c kernel/disk/fatfmt.c kernel/disk/mbr.c "
+        "kernel/disk/mbrboot.S kernel/disk/fdboot.S sdk/config/cp.c sdk/config/cp_tables.c",
+        "rm -f %s %s" % (fimg, blank), "truncate -s 1474560 %s" % fimg, "truncate -s %d %s" % (16 * 16 * 63 * 512, blank),
+        "$t/mkvol %s 0 2880 GLOSFLOPPY 2 0" % fimg, "export MTOOLS_SKIP_CHECK=1",
+        "mcopy -i %s build/ow/GLOSLDR.SYS ::GLOSLDR.SYS" % fimg, "mmd -i %s ::GLOS ::GLOS/KEYS" % fimg,
+        "mcopy -i %s build/kernel/GLOSK.BIN build/glos/COMMAND.COM %s ::GLOS/" % (fimg, cfg),
+        "mcopy -i %s tests/keys/hostkey ::GLOS/KEYS/HOSTKEY" % fimg,
+        "mcopy -i %s tests/keys/AUTHKEYS ::GLOS/KEYS/AUTHKEYS" % fimg])
+    mk = subprocess.run(["sh", "-c", script], cwd=ROOT, capture_output=True)
+    checks, info = {"image": mk.returncode == 0}, ""
+    if not checks["image"]:
+        return "  %-22s FAIL image=%r" % (tag, mk.stderr.decode("latin-1")[-300:]), False
+    agent = Agent(tag + "-" + card, profile, card, ["--hdd", blank, "--floppy", fimg], timeout=900, files=False)
+    try:
+        checks["listen"] = agent.listening()
+        if checks["listen"]:
+            ver = agent.ssh("ver")
+            ls = agent.ssh("dir C:\\GLOS")
+            wr = agent.ssh("echo written on the floppy > C:\\FLOPPY.TXT")
+            rd = agent.ssh("type C:\\FLOPPY.TXT")
+            job = agent.ssh("C:\\GLOS\\COMMAND.COM /C VER")
+            checks["ver"] = ver[0] == 0 and "GLOS" in ver[1]
+            checks["dir"] = ls[0] == 0 and "GLOSK" in ls[1] and "COMMAND" in ls[1]
+            checks["write-read"] = wr[0] == 0 and rd[0] == 0 and "written on the floppy" in rd[1]
+            checks["job"] = job[0] == 0 and "GLOS" in job[1]
+            info += " dir=%r rd=%r" % (ls[1][-120:], rd[1][:40])
+            agent.ssh("glos exit")
+            t0 = time.time()
+            while time.time() - t0 < 60 and "GLOS-EXIT code=" not in agent.log():
+                time.sleep(0.5)
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    agent.proc.kill()
+    agent.proc.wait()
+    text = agent.log()
+    m = re.search(r"GLOS-BOOT step=disk dl=00 if=(\d) chs=(\d+)/2/18 ", text)
+    checks["loader"] = m is not None and m.group(1) == "3"      # (a floppy drive: not a USB disk's)
+    checks["c"] = re.search(r"GLOS-NATIVE step=c dl=00 disk=bios .* base=0 mount=0", text) is not None
+    if profile == "bf6":
+        checks["usb"] = "GLOS-USB uhci" in text and "GLOS-USB left to the BIOS" not in text
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-REFUSE" not in text and "GLOS-WARN" not in text
+    bad = [k for k, v in checks.items() if not v]
+    if bad:
+        info += " log=%r" % [l for l in text.split("\n") if "step=disk" in l or "step=c" in l][:4]
+    return "  %-22s %s%s%s" % (tag, "PASS" if not bad else "FAIL", info, "" if not bad else " failed: " + " ".join(bad)), \
+        not bad
+
+
 def ndos_case(profile, card):
     """A native machine (docs/v1/native-dos.md, native-DOS sessions, NS1: kernel/vm/ndm.c): GLOS's second V86 machine,
     no DOS under it, its INT 21h GLOS's own. Through the agent, twice (the first machine's memory and thread
@@ -12836,6 +12899,8 @@ def main():
         res += matrix(nboot_dos_case, cases, a.jobs)
         cases = [c for c in [("bf6", "ne2kpci", True), ("486dx2", "ne2k", False)] if not a.profile or c[0] in a.profile]
         res += matrix(nboot_install_case, cases, a.jobs)        # (DISK n INSTALL, and a start from what it made)
+        cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
+        res += matrix(nboot_floppy_case, cases, a.jobs)         # (from a drive of the floppies' numbers)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "ndos":                       # (native machines: the bf6 with VME, the 486 without)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]

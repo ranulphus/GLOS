@@ -11,7 +11,7 @@ typedef unsigned int   bi_u32;
 #endif
 
 #define BOOTINFO_MAGIC   0x4F4F4247UL           /* "GBOO" */
-#define BOOTINFO_VERSION 12
+#define BOOTINFO_VERSION 13
 
 #define KERNEL_MAGIC     0x4B4F4C47UL           /* "GLOK", first word of GLOSK.BIN */
 #define KERNEL_LINK      0xC0100000UL           /* where the kernel is linked */
@@ -184,11 +184,14 @@ struct bootinfo {
     bi_u32 boot_dl;                             /* the BIOS's number of the disk GLOSLDR.SYS came from; 0: GLOS.EXE's */
     bi_u32 boot_if;                             /* how the BIOS reaches it, where it says (INT 13h 48h, EDD 3.0's
                                                    interface type): BI_IF_* */
+    /* version 13: ... and that disk as the BIOS describes it (spt 0 and no BI_DISK_PARAMS: not said). A BIOS may
+       start a USB stick as a drive of the floppies' numbers (00h: the owner's PCChips M925G), which `disks` hasn't */
+    struct bi_disk boot_disk;
 };
 #define BI_IF_UNKNOWN 0u
 #define BI_IF_ATA     1u                        /* "ATA", "ATAPI" */
 #define BI_IF_USB     2u
-#define BI_IF_OTHER   3u                        /* SCSI, 1394, a floppy drive, ... */
+#define BI_IF_OTHER   3u                        /* SCSI, 1394, a real floppy drive, ... */
 #define BI_CABLE_SERVER 1u
 #define BI_CABLE_CLIENT 2u
 #define BI_INT2F_PSP 0x5Cu                     /* PSP:5Ch, the FCB area, which GLOS's own PSP doesn't use */

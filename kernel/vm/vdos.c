@@ -176,28 +176,48 @@ static int is_fat(unsigned t)
     return t == 0x01 || t == 0x04 || t == 0x06 || t == 0x0B || t == 0x0C || t == 0x0E;
 }
 
-/* The disk GLOS started from (the BIOS's number of it from the loader; 80h for a floppy's start): the one IDE
-   disk GLOS drives whose first sector is that disk's as the BIOS reads it, and whose size is its size (the size
-   the BIOS's 48h gives, or up to a cylinder more, a BIOS's rounding; at least the size of 08h's geometry on a
-   BIOS without 48h), by GLOS's IDE driver; none, or two alike, and the disk is read by the BIOS's calls (so is
-   every disk with /BIOSDISK: the tests'). If the BIOS can't be asked: the ATA disk of its size, else the first.
-   Then the disk's active FAT partition, else the whole disk. */
+/* A FAT volume's first sector, by its figures (512 bytes a sector, sectors a cluster a power of two, one or two
+   FATs, a media byte), not a partition table's: a disk with no table, and a USB stick a BIOS starts as a floppy
+   (its "disk" is then the stick's partition). */
+static int fat_first(const unsigned char *s)
+{
+    return s[510] == 0x55 && s[511] == 0xAA && (s[0] == 0xEB || s[0] == 0xE9) && s[11] == 0 && s[12] == 2 && s[13]
+           && !(s[13] & (s[13] - 1)) && (s[16] == 1 || s[16] == 2) && s[21] >= 0xF0;
+}
+
+/* The disk GLOS started from (the BIOS's number of it and its geometry from the loader: bootinfo's boot_disk):
+   the one IDE disk GLOS drives whose first sector is that disk's as the BIOS reads it, and whose size is its size
+   (the size the BIOS's 48h gives, or up to a cylinder more, a BIOS's rounding; at least the size of 08h's geometry
+   on a BIOS without 48h), by GLOS's IDE driver; none, or two alike, and the disk is read by the BIOS's calls (so
+   is every disk with /BIOSDISK, the tests', and a disk of the floppies' numbers: a USB stick a BIOS starts as
+   one). If the BIOS can't be asked: the ATA disk of its size, else the first. Then the volume: the disk itself
+   if its first sector is a FAT volume's, else its active FAT partition. */
 static void mount_c(void)
 {
     static unsigned char s[512], s0[512];
-    u32 dl = vm.bi->boot_dl >= 0x80 ? vm.bi->boot_dl : 0x80;
+    struct bi_disk *bd = &vm.bi->boot_disk;
+    int said = bd->bps == 512 && (bd->spt || (bd->flags & BI_DISK_PARAMS));    /* (the loader's word on it) */
+    u32 dl = said ? bd->dl : 0x80;
     unsigned long want;
     struct ata_dev *d;
-    int i, r = -1, hits = 0, asked;
+    int i, r = -1, hits = 0, asked, differ = 0, failed = 0;
 
     mounted = 1;
-    for (i = 0; i < (int)vm.bi->n_disks; i++)
+    if (said)
+        bdsk = bd;
+    for (i = 0; !bdsk && i < (int)vm.bi->n_disks; i++)
         if (vm.bi->disks[i].dl == dl && vm.bi->disks[i].bps == 512)
             bdsk = &vm.bi->disks[i];
     want = bdsk ? bdsk->sectors_lo : 0;
-    ide_probe(ATA_PROBE_OWN);
+    /* The BIOS is asked first, and GLOS's IDE driver looks at the disks as it does beside a DOS: with no reset
+       and no settings of its own (ATA_PROBE_OWN's). The BIOS goes on reading these disks: the one GLOS started
+       from when it has no driver for it, any of them for DISK and for programs' INT 13h. After a reset a drive
+       has lost what the BIOS set (the sectors a block of its READ MULTIPLE, its timing): 86Box's BIOS then read
+       16 sectors of a longer call right and the rest wrong, and the owner's PCChips M925G gave a first sector
+       that was none (2026-11-23). */
     asked = bios_rw(0, 0, s0, 1) == 0;
-    for (i = 0; (d = ide_dev(i)) != 0; i++) {
+    ide_probe(0);
+    for (i = 0; dl >= 0x80 && (d = ide_dev(i)) != 0; i++) {
         if (!d->present || d->atapi)
             continue;
         if (asked) {
@@ -205,8 +225,14 @@ static void mount_c(void)
 
             if (size && (bdsk->flags & BI_DISK_PARAMS) && !bdsk->sectors_hi)
                 size = !d->sectors_hi && d->sectors_lo - want <= 255u * 63;
-            if (size && !(vm.bi->flags & BI_F_BIOSDISK) && ata_read(d, 0, 0, 1, s, 0) == 0 && !memcmp(s, s0, 512))
-                hits++, cdev = d;
+            if (size && !(vm.bi->flags & BI_F_BIOSDISK)) {
+                if (ata_read(d, 0, 0, 1, s, 0) != 0)
+                    failed++;
+                else if (memcmp(s, s0, 512))
+                    differ++;
+                else
+                    hits++, cdev = d;
+            }
             continue;
         }
         if (want && d->sectors_lo == want) {
@@ -218,6 +244,12 @@ static void mount_c(void)
     }
     if (asked && hits != 1)
         cdev = 0, cbios = 1;
+    /* (what was found, for a PC's log: the BIOS's sector's first bytes and its last two, the IDE disks that
+       had the same sector, another, or none to give) */
+    kprintf("GLOS-NATIVE step=c-disk dl=%02x chs=%u/%u/%u flags=%x asked=%d first=%02x%02x%02x sig=%02x%02x "
+            "same=%d differ=%d failed=%d\n", dl, bdsk ? (u32)bdsk->cyls : 0, bdsk ? (u32)bdsk->heads : 0,
+            bdsk ? (u32)bdsk->spt : 0, bdsk ? (u32)bdsk->flags : 0, asked, s0[0], s0[1], s0[2], s0[510], s0[511],
+            hits, differ, failed);
     if (!cbios && xseg) {                       /* (GLOS's own driver: the BIOS's calls' block back to DOS) */
         dos_mem_free(&vd.mcb, xseg);
         xseg = 0;
@@ -231,7 +263,7 @@ static void mount_c(void)
     if (r == 0) {
         r = -1;
         cbase = 0;
-        if (s[510] == 0x55 && s[511] == 0xAA)
+        if (!fat_first(s) && s[510] == 0x55 && s[511] == 0xAA)
             for (i = 0; i < 4; i++)
                 if ((s[446 + i * 16] & 0x80) && is_fat(s[446 + i * 16 + 4])) {
                     cbase = (unsigned long)s[446 + i * 16 + 8] | (unsigned long)s[446 + i * 16 + 9] << 8

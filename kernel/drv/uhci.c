@@ -924,7 +924,9 @@ static int take(struct pci_dev *pd)
     h->io = (pd->bar[4] & 1) ? (u16)(pd->bar[4] & 0xFFE0u) : 0;
     if (!h->io)
         return -1;
-    h->legsup = pd->vendor == 0x8086 ? pci_read32(pd->bus, pd->dev, pd->fn, UHCI_LEGSUP) & 0xFFFF : 0;
+    /* (the legacy support register is the UHCI design guide's, every maker's: VIA's on the owner's PCChips M925G
+       stayed with the BIOS's SMI while GLOS drove the controller until 2026-11-23, and its devices' set-up failed) */
+    h->legsup = pci_read32(pd->bus, pd->dev, pd->fn, UHCI_LEGSUP) & 0xFFFF;
     if (!(h->frames = dma_alloc(1, &h->frames_phys)) || !(h->pool = dma_alloc(1, &h->pool_phys)))
         return -2;
     h->qh_ctrl = (struct uhci_qh *)h->pool;     /* the page: the control QH at 0, the pipes' QHs at 16-143, the */
@@ -942,7 +944,7 @@ static int take(struct pci_dev *pd)
     }
     for (p = 0; p < 1024; p++)
         h->frames[p] = PHYS(h, &h->qh_int[0]) | UHCI_LP_Q;
-    if (pd->vendor == 0x8086)                   /* no SMI, no PCI interrupt, its status cleared */
+    if (h->legsup != 0xFFFF)                    /* no SMI, no PCI interrupt, its status cleared */
         pci_write32(pd->bus, pd->dev, pd->fn, UHCI_LEGSUP, LEGSUP_CLEAR);
     cmd = pci_read32(pd->bus, pd->dev, pd->fn, 0x04);
     pci_write32(pd->bus, pd->dev, pd->fn, 0x04, (cmd & 0xFFFF) | 0x0005);       /* I/O space, bus master */
@@ -1011,7 +1013,7 @@ void usb_leave(void)
         stop(h);
         reset(h);
         outw((u16)(h->io + USBINTR), 0);
-        if (h->pci->vendor == 0x8086)
+        if (h->legsup != 0xFFFF)
             pci_write32(h->pci->bus, h->pci->dev, h->pci->fn, UHCI_LEGSUP, h->legsup | LEGSUP_CLEAR);
     }
     ehci_leave();                               /* (the ports back to EHCI, as the BIOS had them) */
