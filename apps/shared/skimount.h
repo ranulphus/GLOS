@@ -19,7 +19,8 @@ enum {                                  /* what is on it */
     SKI_T_MOGUL,                        /* a bump: slows, or at speed a small jump */
     SKI_T_HUT,                          /* the summit hut */
     SKI_T_GATE_L, SKI_T_GATE_R,         /* a gate's two poles (nothing to hit: they give) */
-    SKI_T_FINISH_L, SKI_T_FINISH_R      /* the banner's posts at the valley station */
+    SKI_T_FINISH_L, SKI_T_FINISH_R,     /* the banner's posts at the valley station */
+    SKI_T_PYLON                         /* (phase F) a chair lift's pylon, in the powder at one side of the piste */
 };
 
 enum { SKI_SNOW_PISTE, SKI_SNOW_POWDER, SKI_SNOW_ICE, SKI_SNOW_DEEP };
@@ -47,6 +48,11 @@ int skimount_ice(const struct skimount *m, int index, int *cx, int *cy, int *rx,
 /* Piece `index` (y from index * SKI_CHUNK): its things, sorted by y; how many (room 48 holds any piece). */
 int skimount_chunk(const struct skimount *m, int index, struct ski_thing *out, int room);
 int skimount_gate(const struct skimount *m, int k, int *x, int *y);    /* gate k's middle: 1, or 0 if there is none */
+/* (phase F) The chair lift: it runs up beside the piste, in the middle of the powder at one side (the mountain's
+   own), a pylon every SKI_LIFT_PIECES pieces at SKI_LIFT_Y into the piece. Its x at y. */
+#define SKI_LIFT_PIECES 3
+#define SKI_LIFT_Y      64
+int skimount_lift(const struct skimount *m, int y);
 unsigned skimount_day(int year, int month, int day);    /* the number of that day's mountain */
 
 #endif

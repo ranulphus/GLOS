@@ -1682,3 +1682,37 @@ twice the field's size, its pool at its middle, laid over at the skier) and draw
   suite's), held at step 90 in a gust blowing leftwards: the streaks (a picture), and x=444 where the calm run
   is at 448.
 - **Not yet:** the wind's sound; weathers together (snow in the wind).
+
+## Fall Line: the chair lift and the hares (2026-11-23)
+
+- **The chair lift** (`skimount_lift`): it runs up beside the piste, in the middle of the powder at one side (the
+  mountain's own, from dice of its own), a pylon every three pieces (384 pixels) from the first to the last
+  before the finish. The pylons are things of the mountain (`SKI_T_PYLON`, reach 5): skied into, or flown
+  into, they are a fall like a tree. They are put after everything else from no dice of the piece's, so every
+  mountain's other things stay where they were: the careful skier's golden runs in `ski_test` keep their steps
+  and scores, and it still gets down every mountain without a fall (1200, and 24,000 in `ski_test more`). Two
+  cables between the pylons' crossbars, chairs every 64 pixels going up the left and coming down the right (a
+  pixel every other step), their shadows on the snow beside.
+- **The hares:** a mountain hare, white for the winter, in one piece of six now and then, running across the
+  piste and back in hops (two pixels a step), in nobody's way (a picture, not a thing of the mountain).
+- Both move by rule from the run's steps: a held picture is the same every time.
+- **Tests:** `ski.txt`'s run with no keys held now falls at two pylons too (10 falls, 3749 steps, where it was 8
+  and 3566), and stops a pixel higher; the other skiing scripts are unchanged.
+- **Not yet:** other skiers and the groomer (things that move, which the careful skier would have to see
+  coming).
+
+## Fall Line: the demonstration by itself (2026-11-23)
+
+After thirty seconds at a mountain's summit with nobody playing (no key, click or pointer moved by a hand, and
+only while the window has the keyboard), the careful skier skis it (said `demonstration by itself`); five
+seconds after it is at rest in the valley it goes on to the next mountain (from the last by rule, so the same on
+every PC: `demonstration next seed=N`) and skis that. Any key or click, or a command, gives the game back on the
+mountain it is at (`demonstration stopped`); the key does nothing more (Enter does not start a run as well).
+Its runs are watching runs: no tables, no ghost. `-attract MS` sets the wait (0 never); the suite's runs have
+none unless they give it.
+
+- **Tests:** `ski-attract` (host and the emulated desktops): two seconds' wait; started, Enter gives it back on
+  mountain 7; started again, the careful skier's whole run (2730 steps, every gate) and on to mountain 160163;
+  Esc gives it back there (a picture).
+- With this, of the plan's "Not yet" for Fall Line only the other skiers and the groomer are left, and the
+  window doubled and full screen; the 486's frame rate is still to be measured.

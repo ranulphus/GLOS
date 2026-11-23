@@ -202,6 +202,37 @@ static void things(void)
     a = &art_thing[ART_SHADOW];         /* the skier's shadow on the snow */
     begin(a, 16, 8, 8, 4);
     colour(a, SHADOW), ellipse(a, 8, 4, 7, 3);
+
+    a = &art_thing[ART_PYLON];          /* a chair lift's pylon: a steel mast, its crossbar and the wheels at its
+                                           ends that carry the cable, up (left) and down (right), 8 pixels out */
+    begin(a, 20, 36, 10, 34);
+    colour(a, SHADOW), rect(a, 9, 34, 9, 2);
+    colour(a, 0x6E7780u), rect(a, 9, 3, 3, 32), rect(a, 1, 2, 19, 2);
+    colour(a, 0x30353Bu), rect(a, 1, 4, 3, 2), rect(a, 17, 4, 3, 2);
+    colour(a, SNOW), rect(a, 9, 1, 3, 1), rect(a, 1, 1, 19, 1);
+
+    a = &art_thing[ART_CHAIR];          /* a chair hanging from the cable (its place: the cable's) */
+    begin(a, 12, 12, 6, 0);
+    colour(a, 0x30353Bu), rect(a, 5, 0, 2, 7), rect(a, 1, 7, 10, 2);
+    colour(a, 0x2E5FA8u), rect(a, 1, 9, 10, 3);
+
+    a = &art_thing[ART_CHAIR_SHADOW];   /* ... and its shadow on the snow */
+    begin(a, 12, 4, 6, 2);
+    colour(a, SHADOW), rect(a, 1, 0, 10, 4);
+
+    {                                   /* the mountain hare, white for the winter, black at the ears' tips */
+        int k;
+        for (k = 0; k < 2; k++) {       /* (k 0 rightwards; 1 the same, mirrored) */
+#define HX(x, w) (k ? 18 - (x) - (w) : (x))
+            a = &art_thing[k ? ART_HARE_L : ART_HARE_R];
+            begin(a, 18, 14, 9, 13);
+            colour(a, SHADOW), rect(a, HX(3, 11), 12, 11, 2);
+            colour(a, 0x8A8070u), rect(a, HX(2, 11), 5, 11, 7), rect(a, HX(11, 6), 2, 6, 6), rect(a, HX(12, 3), 0, 3, 3);
+            colour(a, 0xF2EEE8u), rect(a, HX(3, 9), 6, 9, 5), rect(a, HX(12, 4), 3, 4, 4);
+            colour(a, 0x222222u), rect(a, HX(12, 3), 0, 3, 1), rect(a, HX(14, 1), 4, 1, 1);
+#undef HX
+        }
+    }
 }
 
 /* The figures seen from above, heading along o (32nds of a turn clockwise from straight down). Places are said

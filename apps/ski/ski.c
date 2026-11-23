@@ -74,6 +74,11 @@ static struct gui_window *win;
 static struct gui_widget *canvas;
 static struct skirun run;
 static int phase = P_READY, watching;   /* watching: the careful skier has the skis */
+/* (phase F) The demonstration by itself: after attract_ms on the summit with nobody playing (no key, click or
+   pointer moved, while the window has the keyboard), the careful skier skis; at the valley it goes on to the next
+   mountain; any key or click gives the game back, on the mountain it is at. */
+static unsigned attract_ms = 30000, idle_ms, stopped_ms;
+static int attract, attract_given;
 static unsigned seed = 1;
 static int grade = SKI_BLUE, mode = SKI_SLALOM, of_day, jacket, figure, weather, arg_weather = -1;
 static unsigned last_ms, acc;           /* the frame's clock: milliseconds times sixty not yet made steps of */
@@ -237,6 +242,26 @@ static void start(int watch)
     say("started%s", watch ? " watching" : "");
 }
 
+static void someone(void)               /* somebody is here: the demonstration waits again */
+{
+    idle_ms = glos_ticks();
+}
+
+static int attract_end(void)            /* a key, click or command in the demonstration by itself: the game back */
+{
+    if (!attract)
+        return 0;
+    attract = 0;
+    say("demonstration stopped");
+    ready();
+    return 1;
+}
+
+static unsigned next_mountain(unsigned n)       /* (the demonstration's next: another, and the same on every PC) */
+{
+    return (unsigned)(((unsigned long long)n * 7919u + 104729u) % 999999u) + 1;
+}
+
 static void pause_toggle(void)
 {
     if (phase == P_RUN) {
@@ -299,6 +324,11 @@ static int field_event(struct gui_widget *w, struct gui_ev *e)
     int x = e->x - w->r.x, y = e->y - w->r.y;
     if (e->type != GUI_EV_MOVE && e->type != GUI_EV_PRESS && e->type != GUI_EV_RELEASE)
         return 0;
+    if (e->type == GUI_EV_PRESS || (e->type == GUI_EV_MOVE && abs(x - mouse_x) + abs(y - mouse_y) >= 4)) {
+        someone();                              /* (a click, or the pointer moved by a hand) */
+        if (e->type == GUI_EV_PRESS && attract_end())
+            return 1;
+    }
     if (x < 0 || x >= FW || y < 0 || y >= FH) {         /* (off the slope: the tables' side is not steered from) */
         mouse_buttons = e->type == GUI_EV_RELEASE ? e->buttons : mouse_buttons;
         return 0;
@@ -451,7 +481,21 @@ static void frame(void *arg)            /* the game's clock: the steps that are 
         pause_toggle();                 /* (another window has the keyboard) */
     if (phase == P_DONE && !gliding && !stopped) {     /* at rest past the finish (the suite's pictures wait for it) */
         stopped = 1;
+        stopped_ms = now;
         say("stopped x=%d y=%d", run.x >> 8, run.y >> 8);
+    }
+    if (attract && phase == P_DONE && stopped && now - stopped_ms >= 5000) {     /* on to the next mountain */
+        seed = next_mountain(seed), of_day = 0;
+        say("demonstration next seed=%u", seed);
+        ready();
+        start(1);
+        return;
+    }
+    if (attract_ms && !attract && phase == P_READY && win->active && now - idle_ms >= attract_ms) {
+        attract = 1;
+        say("demonstration by itself");
+        start(1);
+        return;
     }
     if (phase != P_RUN && !gliding) {
         last_ms = now;
@@ -592,6 +636,54 @@ static void draw_weather(struct gfx_surface *s, int ox, int oy, int sx, int sy)
         gfx_mono(s, ox + sx - FW, oy + sy - FH, night_bits, 2 * FW, 2 * FH, 2 * FW / 8, 0x000033u, GFX_NONE);
 }
 
+/* ---- (phase F) the chair lift's cables and chairs, and the hares: pictures over the slope, in nobody's way.
+   Both move by rule from the run's steps (a held picture is the same every time). */
+
+#define LIFT_GAP (SKI_LIFT_PIECES * SKI_CHUNK)  /* from a pylon to the next */
+#define CHAIR_GAP 64                            /* from a chair to the next along a cable */
+
+static void draw_lift(struct gfx_surface *s, int ox, int oy, int cam_x, int cam_y)
+{
+    int k, side, y;
+    for (k = (cam_y - 40) / LIFT_GAP; k <= (cam_y + FH + 40) / LIFT_GAP; k++) {
+        int y0 = k * LIFT_GAP + SKI_LIFT_Y, y1 = y0 + LIFT_GAP, x0, x1;
+        if (k < 1 || y1 >= run.m.length - 60)   /* (the spans between two pylons: from the first, to the last) */
+            continue;
+        x0 = skimount_lift(&run.m, y0), x1 = skimount_lift(&run.m, y1);
+        for (side = -1; side <= 1; side += 2) { /* the cable going up (left) and the one coming down (right) */
+            int cx0 = x0 + side * 9 - cam_x, cx1 = x1 + side * 9 - cam_x, top = 31;
+            gfx_line(s, ox + cx0, oy + y0 - top - cam_y, ox + cx1, oy + y1 - top - cam_y, 0x30353Bu);
+            /* the chairs: up the left cable, down the right, a pixel a step every other step */
+            for (y = 0; y < LIFT_GAP; y += CHAIR_GAP) {
+                int along = (y + (side < 0 ? LIFT_GAP * 8 - (int)(run.steps / 2) % LIFT_GAP : (int)(run.steps / 2))) % LIFT_GAP;
+                int wy = y0 + along, wx = cx0 + (cx1 - cx0) * along / LIFT_GAP;
+                if (wy - cam_y < -20 || wy - cam_y > FH + 40)
+                    continue;
+                art_draw(s, &art_thing[ART_CHAIR_SHADOW], ox + wx + 10, oy + wy - cam_y + 2);
+                art_draw(s, &art_thing[ART_CHAIR], ox + wx, oy + wy - top - cam_y);
+            }
+        }
+    }
+}
+
+static void draw_hares(struct gfx_surface *s, int ox, int oy, int cam_x, int cam_y)
+{
+    static const int hop[8] = { 0, 2, 4, 5, 5, 4, 2, 0 };
+    int c;
+    for (c = (cam_y < 0 ? 0 : cam_y) / SKI_CHUNK - 1; c <= (cam_y + FH + 16) / SKI_CHUNK; c++) {
+        unsigned h = ((unsigned)c * 2654435761u) ^ (run.m.seed * 0x85EBCA6Bu);
+        int y, half, left, width, t, x;
+        h ^= h >> 15, h *= 0x2C1B3C6Du, h ^= h >> 12;
+        if (c < 2 || h % 6 != 0 || (y = c * SKI_CHUNK + 40 + (int)(h >> 8) % 48) >= run.m.length - 80)
+            continue;                   /* (a hare in one piece of six, now and then) */
+        half = skimount_half(&run.m, y);
+        left = skimount_centre(&run.m, y) - half - 70, width = 2 * half + 140;
+        t = (int)(run.steps + (h >> 4)) % (2 * width);  /* across, and back: two pixels a step, hopping */
+        x = left + (t < width ? t : 2 * width - t);
+        art_draw(s, &art_thing[t < width ? ART_HARE_R : ART_HARE_L], ox + x - cam_x, oy + y - cam_y - hop[(run.steps / 3) % 8]);
+    }
+}
+
 static void draw_field(struct gfx_surface *s, int ox, int oy)
 {
     int px = run.x >> 8, py = run.y >> 8, cam_x = px - FW / 2, cam_y = py - SKIER_ROW, y, c, i, n, drawn = 0;
@@ -686,9 +778,12 @@ static void draw_field(struct gfx_surface *s, int ox, int oy)
             case SKI_T_GATE_L: art_draw(s, &art_thing[ART_GATE_L], ox + tx, oy + ty); break;
             case SKI_T_GATE_R: art_draw(s, &art_thing[ART_GATE_R], ox + tx, oy + ty); break;
             case SKI_T_FINISH_L: case SKI_T_FINISH_R: art_draw(s, &art_thing[ART_FINISH], ox + tx, oy + ty); break;
+            case SKI_T_PYLON: art_draw(s, &art_thing[ART_PYLON], ox + tx, oy + ty); break;
             }
         }
     }
+    draw_lift(s, ox, oy, cam_x, cam_y);
+    draw_hares(s, ox, oy, cam_x, cam_y);
     draw_weather(s, ox, oy, px - cam_x, py - cam_y);
     /* what is said over it */
     if (phase == P_READY) {
@@ -868,6 +963,9 @@ static unsigned new_seed(void)
 static void command(struct gui_window *w, int id)
 {
     (void)w;
+    someone();
+    if (attract && id != C_EXIT && id != C_SOUND)       /* (the game back, then what was asked) */
+        attract_end();
     if (id >= C_WEATHER && id < C_WEATHER + W_COUNT) {
         weather = id - C_WEATHER;
         tables_keep();
@@ -967,8 +1065,13 @@ static void update(struct gui_window *w)
 static int key(struct gui_window *w, struct gui_ev *e)
 {
     (void)w;
-    if (e->type != GUI_EV_KEY || e->mods)
+    if (e->type != GUI_EV_KEY)
         return 0;
+    someone();
+    if (e->mods)
+        return 0;
+    if (attract_end())                  /* (the key gives the game back, and does nothing more) */
+        return 1;
     switch (e->key) {
     case GUI_K_ENTER: case GUI_K_SPACE:
         if (phase == P_READY)
@@ -1083,9 +1186,13 @@ int main(int argc, char **argv)
             speed = atoi(argv[++i]) >= 1 && atoi(argv[i]) <= 16 ? atoi(argv[i]) : 1;
         else if (!strcmp(argv[i], "-day") && i + 1 < argc)
             today = atoi(argv[++i]);    /* (the suite's: a day that does not change) */
+        else if (!strcmp(argv[i], "-attract") && i + 1 < argc)
+            attract_ms = (unsigned)atol(argv[++i]), attract_given = 1;  /* (milliseconds; 0 never) */
         else if (!strcmp(argv[i], "-weather") && i + 1 < argc)
             arg_weather = atoi(argv[++i]);      /* (the suite's: a weather from the first step) */
     }
+    if (suite && !attract_given)        /* (the suite's runs: none by itself unless asked for) */
+        attract_ms = 0;
     tables_load();
     ghost_load();
     grade = tables.grade_last, mode = tables.mode_last, jacket = tables.jacket < 5 ? tables.jacket : 0;
@@ -1108,7 +1215,7 @@ int main(int argc, char **argv)
     gui_idle(frame, NULL, 33);          /* thirty pictures a second (the motion is sixty steps, whatever the pictures) */
     if (demo && until >= 0)
         start(1);
-    started_ms = glos_ticks();
+    started_ms = idle_ms = glos_ticks();
     gui_run();
     sound_stop();
     if (suite) {                                /* (the suite's, and the benches': the frames a second drawn) */

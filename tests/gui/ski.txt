@@ -40,14 +40,14 @@ key enter
 said SKI started
 pause 16000
 within 300
-said SKI finished steps=3566 ms=139433 score=0 passed=5 missed=16 falls=8 place=0
-said SKI ghost kept steps=3566 ms=139433
+said SKI finished steps=3749 ms=142483 score=0 passed=5 missed=16 falls=10 place=0
+said SKI ghost kept steps=3749 ms=142483
 wait "A Place in the Table"
 type Ada\n
 gone "A Place in the Table"
 said SKI table 1 Ada
 pause 1500
-said SKI stopped x=476 y=9040
+said SKI stopped x=476 y=9039
 shot mine "Fall Line"
 key ctrl+b
 wait "Best Runs"
@@ -56,7 +56,7 @@ shot tables "Best Runs"
 key esc
 gone "Best Runs"
 key f2
-said SKI ghost steps=3566 ms=139433
+said SKI ghost steps=3749 ms=142483
 key ctrl+g
 wait "A Mountain's Number"
 key ctrl+a

@@ -14,7 +14,7 @@
 
 typedef unsigned u32;                   /* (32 bits on every machine GLOS and its tests are built for) */
 
-enum { S_CENTRE = 1, S_HALF, S_LINE, S_CHUNK, S_ICE, S_LEN, S_SIDE };
+enum { S_CENTRE = 1, S_HALF, S_LINE, S_CHUNK, S_ICE, S_LEN, S_SIDE, S_LIFT };
 
 static const struct {
     short wander;                       /* how far the piste's middle strays from the slope's */
@@ -251,6 +251,10 @@ int skimount_chunk(const struct skimount *m, int index, struct ski_thing *out, i
             }
         }
     }
+    if (index > 0 && index % SKI_LIFT_PIECES == 0 && y0 + SKI_LIFT_Y < m->length - 60) {      /* a lift's pylon */
+        int y = y0 + SKI_LIFT_Y;
+        put(out, &n, room, SKI_T_PYLON, 5, skimount_lift(m, y), y);
+    }
     k = y0 <= m->gate_first ? 0 : (y0 - m->gate_first + m->gate_gap - 1) / m->gate_gap;
     for (; k < m->ngates; k++) {        /* the gates that stand in this piece */
         int x, y;
@@ -261,6 +265,13 @@ int skimount_chunk(const struct skimount *m, int index, struct ski_thing *out, i
     }
 #undef NEXT
     return n;
+}
+
+int skimount_lift(const struct skimount *m, int y)
+{
+    /* (from dice of its own, so that a mountain's other things are where they were before the lifts) */
+    int side = mix(m->seed, S_LIFT * 0x10001u) & 1 ? 1 : -1;
+    return skimount_centre(m, y) + side * (skimount_half(m, y) + POWDER / 2);
 }
 
 unsigned skimount_day(int year, int month, int day)

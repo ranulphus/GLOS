@@ -19,7 +19,9 @@ struct art {
 };
 
 enum { ART_FIR, ART_PINE, ART_ROCK, ART_POST, ART_NET, ART_RAMP, ART_MOGUL, ART_HUT, ART_GATE_L, ART_GATE_R, ART_FINISH,
-       ART_SHADOW, ART_FALLEN, ART_COUNT };
+       ART_SHADOW, ART_FALLEN, ART_PYLON, ART_CHAIR, ART_CHAIR_SHADOW, ART_HARE_R, ART_HARE_L, ART_COUNT };
+/* (phase F: the chair lift's pylon and a chair, at the cable's height, and its shadow on the snow; the mountain
+   hare, running rightwards and leftwards) */
 enum { POSE_SKI, POSE_TUCK, POSE_PLOUGH, POSE_COUNT };
 
 extern struct art art_thing[ART_COUNT];

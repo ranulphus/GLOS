@@ -138,7 +138,8 @@ static void meet(struct skirun *r, int speed)
                 } else if (r->grace) {
                     /* (just up from a fall: let by) */
                 } else if (r->state == SKI_S_SKIING
-                           || (r->state == SKI_S_AIR && (t[i].kind == SKI_T_FIR || t[i].kind == SKI_T_PINE || t[i].kind == SKI_T_HUT))) {
+                           || (r->state == SKI_S_AIR && (t[i].kind == SKI_T_FIR || t[i].kind == SKI_T_PINE || t[i].kind == SKI_T_HUT
+                                                         || t[i].kind == SKI_T_PYLON))) {
                     fall(r, skimount_snow(&r->m, px, py) != SKI_SNOW_PISTE);    /* (in the air only what stands tall) */
                     return;
                 }

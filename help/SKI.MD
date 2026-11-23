@@ -23,7 +23,7 @@ mouse again.
 - The nearer the skis point to straight down, the faster you go. Skis across the slope stop you.
 - **The snow:** the piste in the middle is fast; the powder at its sides is slow; in the forest it is slower
   still. Pale blue patches are **ice**: fast, and the skis hardly hold, so turn before it.
-- **A tree, a rock, a fence or the hut** is a fall. You are up again in a second or two, and nothing can
+- **A tree, a rock, a fence, a pylon of the chair lift or the hut** is a fall. You are up again in a second or two, and nothing can
   knock you down in the first moment after.
 - **A ramp** taken fast throws you into the air. Turn while you are up there: land a half turn or a whole one
   for points, but land part way round, or with the skis across the slope, and you fall. Moguls, the small
@@ -56,6 +56,9 @@ ranked by its time, a free run by its points.
 
 **Game, Watch the Careful Skier** (F9) shows the mountain skied without a fall: a way down that always
 exists. It is not the fastest way.
+
+Leave the game at the top of a mountain for half a minute and the careful skier starts by itself, going on
+from mountain to mountain; any key or click gives the game back where it is.
 
 The **Skier** menu chooses who goes down the mountain (a skier, a racer, a snowboarder or a sit-skier)
 and the colour of their jacket. The **Weather** menu brings snowfall, fog (less is seen ahead), night (only
