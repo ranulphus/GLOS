@@ -145,6 +145,8 @@ static void late(void)
         mx.card = &crystal_card;
     else if (cmi8738_init() == 0)               /* (phase H: a PCI CMI8738, cmi8738.c) */
         mx.card = &cmi8738_card;
+    else if (es1371_init() == 0)                /* (... an ES1371, ES1373 or CT5880, es1371.c) */
+        mx.card = &es1371_card;
     else
         return;
     if (mx.bi->sound_flags & BI_SOUND_OFF)

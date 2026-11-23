@@ -4971,7 +4971,8 @@ def gpu_case(profile, vcard, card):
 AUDIO_CASES = [("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k"),
                ("bf6", "g200", "ne2kpci", "cs4236b"), ("bf6", "g200", "ne2kpci", "cs4232"),
                ("bf6", "g200", "ne2kpci", "cs4235"),      # (docs/crystal-audio.md: GLOS sets the chip up; 86Box
-               ("bf6", "g200", "ne2kpci", "cmi8738")]     # (phase H: the PCI CMI8738, kernel/drv/cmi8738.c)
+               ("bf6", "g200", "ne2kpci", "cmi8738"),     # (phase H: the PCI CMI8738, kernel/drv/cmi8738.c)
+               ("bf6", "g200", "ne2kpci", "es1371")]      # (... an ES1371 and its AC'97 codec, es1371.c, ac97.c)
 #   offers these three Crystal cards, given MGA-Glide's sound/crystal ROMs)
 
 
@@ -5051,6 +5052,7 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
     import time
     crystal = sound.startswith("cs42")
     cmi = sound == "cmi8738"                    # (phase H: a PCI card GLOS finds by itself; no BLASTER of its own)
+    es = sound in ("es1371", "es1373", "ct5880")     # (... another, with an AC'97 codec and no FM synthesiser)
     tag = "%s-%s" % (profile, vcard) + ("-" + sound if sound != "sb16" else "")
     # (Then phase F's Mixer, Sound Recorder and Player, the real programs: below.)
     # With the virtual Sound Blaster (the rule since 2026-11-19; docs/v1/vsb.md) the mixer plays from GLOS's
@@ -5132,8 +5134,8 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
         if crystal:                             # (GLOS set it up: the data sheet's resources, BLASTER for sessions)
             checks["setup"] = "GLOS-SOUND crystal wss=534 sb=220 fm=388 irq=5 dma=1 " in agent.log()
             checks["blaster"] = "BLASTER=" + blaster in agent.ssh("SET")[1]
-        if cmi:                                 # (found on the PCI bus, its I/O and its line)
-            checks["setup"] = re.search(r"GLOS-CMI found io=[0-9a-f]+ irq=\d+", agent.log()) is not None
+        if cmi or es:                           # (found on the PCI bus, its I/O and its line)
+            checks["setup"] = re.search(r"GLOS-(CMI|ES) found io=[0-9a-f]+ irq=\d+", agent.log()) is not None
         checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0
         t0 = time.time()
         while time.time() - t0 < 60 and not agent.ssh("glos audio")[1].startswith("audio on "):
@@ -5301,7 +5303,7 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
             checks["fm"] = rc1 == 0 and rc2 == 0 and "found=1 notes=1" in o1 and "found=1 notes=1" in o2
         log = agent.log()
         on, off = ("GLOS-SOUND start", "GLOS-SOUND stop") if crystal else ("GLOS-CMI start", "GLOS-CMI stop") if cmi \
-            else ("GLOS-SB start", "GLOS-SB stop")
+            else ("GLOS-ES start", "GLOS-ES stop") if es else ("GLOS-SB start", "GLOS-SB stop")
         checks["handed-over"] = (log.count(on) >= 2 and off in log) if not virtual else off not in log
         info += " periods=%d" % n
         checks["exit"] = agent.ssh("glos exit")[0] == 0
@@ -5317,8 +5319,8 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
         + (["--tone", "1568", "--tone", "2093"] if profile == "bf6" else [])      # (... and its MP3's and its Ogg's)
         + (["--tone", "330", "--tone", "659"] if crystal or cmi else []),
         capture_output=True).returncode == 0
-    checks["sb-stopped"] = re.search(r"HX-SBCHK dma=\d+ stopped", text) is not None if not cmi \
-        else "GLOS-CMI left" in text          # (a PCI bus master: its channels stopped at glos exit)
+    checks["sb-stopped"] = re.search(r"HX-SBCHK dma=\d+ stopped", text) is not None if not (cmi or es) \
+        else ("GLOS-CMI left" if cmi else "GLOS-ES left") in text     # (a PCI bus master stopped at glos exit)
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
     checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
     bad = [k for k, v in checks.items() if not v]
