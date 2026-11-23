@@ -147,6 +147,8 @@ static void late(void)
         mx.card = &cmi8738_card;
     else if (es1371_init() == 0)                /* (... an ES1371, ES1373 or CT5880, es1371.c) */
         mx.card = &es1371_card;
+    else if (ich97_init() == 0)                 /* (... Intel's ICH AC'97, ich97.c) */
+        mx.card = &ich97_card;
     else
         return;
     if (mx.bi->sound_flags & BI_SOUND_OFF)
