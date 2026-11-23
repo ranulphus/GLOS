@@ -142,22 +142,25 @@ wvol() {
     want=$(mdir -i "$img" :: 2>/dev/null | sed -n 's/ bytes free.*//p' | tr -d ' ')
     got=$(sed -n 's/^FREE //p' "$dir/$name.check")
     [ "$want" = "$got" ] || { echo "FAIL $name: free $got, mtools $want"; fails=$((fails + 1)); }
-    # The power cuts.
+    # The power cuts: CUTS of them spread over the writes, and one at each write a rename made (a rename's steps
+    # are where a cut could leave two names on one chain: RENAMED's lines).
     bad=0 step=$(( writes / cuts + 1 )) c=1
-    while [ "$c" -le "$writes" ]; do
+    at=$( { seq 1 "$step" "$writes"; sed -n 's/^RENAMED //p' "$dir/$name.out" | while read -r a b; do
+            [ "$a" -le "$b" ] && seq "$a" "$b"; done; } | sort -n | uniq)
+    for c in $at; do
         cp "$base" "$img"
         rc=0
         timeout 60 "$bin" write "$img" "$mir.none" "$c" > /dev/null 2>&1 || rc=$?
         if [ $rc -ge 124 ]; then
-            echo "FAIL $name: cut at write $c: fat_test hung or crashed ($rc)"; bad=$((bad + 1)); c=$((c + step)); continue
+            echo "FAIL $name: cut at write $c: fat_test hung or crashed ($rc)"; bad=$((bad + 1)); continue
         fi
         fsck.fat -n "$img" > "$dir/$name.cut" 2>&1 || true
         if grep -v "$repairable" "$dir/$name.cut" > "$dir/$name.left"; then
             [ $bad = 0 ] && { echo "FAIL $name: cut at write $c of $writes, fsck.fat says:"; head -12 "$dir/$name.left"; }
             bad=$((bad + 1))
         fi
-        c=$((c + step))
     done
+    cuts=$(echo "$at" | wc -w)
     [ $bad = 0 ] || { echo "FAIL $name: $bad cuts left more than fsck.fat repairs"; fails=$((fails + 1)); }
     echo "$name: written ($(sed -n 's/^VOLUME //p' "$dir/$name.out" | cut -d' ' -f1-3), $writes sector writes before the fill), $cuts cuts repairable"
     rm -f "$base" "$img"

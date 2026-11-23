@@ -241,7 +241,11 @@ right error is part of the answer); **internal** after the core.
     `fsck.fat -n` clean, the reader's own check of every file by both names, mtools' free space; and the same
     script cut short at sampled writes (a power cut: what follows is dropped), where `fsck.fat` may find only
     lost clusters, chains longer than their files, the FAT copies apart, or long-name entries left alone,
-    never a file longer than its chain or a cluster in two chains. The short names Windows 9x gives are checked
+    never a file longer than its chain or a cluster in two chains. (2026-11-23: a rename to a name of another length had
+    a one-write window with both names on one chain, which the sampled cuts never hit; the native-dos session
+    found it. `fat_rename` now puts the new name as an empty file, takes the old away, mends a moved folder's
+    `..` while its chain is lost, and only then gives the new name the chain. The test now also cuts at every
+    write each rename makes, and all of those are repairable.) The short names Windows 9x gives are checked
     by name (`LONGFI~1.TXT` to `~6`, `X_Y_Z~1.TXT`, `HIDDEN~1`, `CAFÉ.TXT` in code page 850). Left for later:
     the creation time's 10 ms (the clock callback gives DOS's 2 seconds), the volume label written (DOS's create
     with attribute 08h, N2), FSInfo's free count worked out when it says "unknown" (N1c, at mount, by the

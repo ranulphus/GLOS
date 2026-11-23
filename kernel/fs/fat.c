@@ -1929,16 +1929,47 @@ int fat_rename(struct fat_vol *v, const char *from, const char *to)
         r = del_entry(v, &e);                   /* its old entries go first, so its short name is free again */
         return r ? r : add_entry(v, dir, name, ent, &index);
     }
-    r = add_entry(v, dir, name, ent, &index);   /* the new entry first, then the old goes */
-    if (!r)
-        r = del_entry(v, &e);
-    if (!r && (e.attr & FAT_A_DIR) && dir != e.dir) {
+    /* In steps, so that a cut between any two (a power cut) leaves no cluster in two chains and no folder whose
+       ".." is wrong: the new name first as an empty file (a cut: the old as it was, and an empty file); the old
+       entry gone (a cut: its chain lost, which a check finds and keeps); a folder moved, its ".." the new parent
+       while its chain is lost; then the new entry given the chain, the size and the attributes. (Until
+       2026-11-23 the name was put with its chain first, then the old went, then the ".." was mended: a cut
+       between the first two left both names on one chain, the native-dos session's find, and one before the
+       last a ".." fsck.fat calls invalid.) */
+    {
+        unsigned char empty[32];
+        memcpy(empty, ent, 32);
+        empty[11] &= (unsigned char)~(FAT_A_DIR | FAT_A_LABEL);
+        wr16(empty + 20, 0);
+        wr16(empty + 26, 0);
+        memset(empty + 28, 0, 4);
+        r = add_entry(v, dir, name, empty, &index);
+    }
+    if (r)
+        return r;
+    if ((r = del_entry(v, &e)) != 0) {
+        struct fat_ent n;                       /* (the old can't go: the new name taken away again) */
+        if (fat_lookup(v, to, &n) == FAT_OK)
+            (void)del_entry(v, &n);
+        return r;
+    }
+    if ((e.attr & FAT_A_DIR) && dir != e.dir) {
         r = get_slot(v, e.cluster, 1, dd);      /* its "..": the new parent */
         if (!r) {
             wr16(dd + 20, v->fat == 32 ? dir >> 16 : 0);
             wr16(dd + 26, dir & 0xFFFF);
             r = put_slot(v, e.cluster, 1, dd);
         }
+    }
+    {                                           /* (on: a ".." not mended still leaves the folder found) */
+        unsigned char now[32];
+        int r2 = get_slot(v, dir, index, now);  /* (its short name and checksum add_entry's: kept) */
+        if (!r2) {
+            memcpy(now + 11, ent + 11, 21);
+            r2 = put_slot(v, dir, index, now);
+        }
+        if (!r)
+            r = r2;
     }
     return r;
 }

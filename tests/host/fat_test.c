@@ -436,8 +436,11 @@ static void do_unlink(struct fat_vol *v, const char *path)
 static void do_rename(struct fat_vol *v, const char *from, const char *to)
 {
     char a[2048], b[2048];
+    unsigned long at = writes;
 
     expect("rename", from, fat_rename(v, from, to), 0);
+    if (!cut)                                   /* (the writes it made: fat_test.sh cuts at each of them too) */
+        printf("RENAMED %lu %lu\n", at + 1, writes);
     host_path(a, sizeof a, from);
     host_path(b, sizeof b, to);
     if (!cut)
