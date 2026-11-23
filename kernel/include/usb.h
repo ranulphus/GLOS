@@ -75,6 +75,10 @@ struct usb_dev {
 void usb_kbd_leds(u8 ps2);              /* the LEDs a program set (EDh's byte: 1 Scroll, 2 Num, 4 Caps Lock) */
 void usb_late(void);                    /* after GLOS.CFG: [usb] enabled, every UHCI taken */
 void usb_leave(void);                   /* glos exit: each controller stopped, reset and its registers given back */
+/* (phase H, 2026-11-23; kernel/drv/ehci.c) Each EHCI taken from the BIOS and its ports given to its UHCI
+   companions (before UHCI takes them); at exit given back as the BIOS had it. */
+void ehci_take_all(void);
+void ehci_leave(void);
 int usb_stat(char *b, u32 room);        /* glos usb */
 int usb_off(void);                      /* [usb] enabled = off */
 u32 usb_hc_detail(const struct pci_dev *pd, char *b, u32 room);  /* the Devices list's: a controller of GLOS's */

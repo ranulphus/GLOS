@@ -983,6 +983,7 @@ void usb_late(void)
         kprintf("GLOS-USB off\n");
         return;
     }
+    ehci_take_all();                            /* (phase H: USB 2.0's ports to their UHCI companions first) */
     for (i = 0; (pd = pci_at(i)) != 0 && nhc < MAX_HC; i++)
         if (pd->class == 0x0C && pd->subclass == 0x03 && pd->progif == 0x00 && !dev_pci_off(pd, "uhci")) {
             char w[8];
@@ -1005,6 +1006,7 @@ void usb_leave(void)
         if (h->pci->vendor == 0x8086)
             pci_write32(h->pci->bus, h->pci->dev, h->pci->fn, UHCI_LEGSUP, h->legsup | LEGSUP_CLEAR);
     }
+    ehci_leave();                               /* (the ports back to EHCI, as the BIOS had them) */
 }
 
 int usb_off(void) { char v[8]; v[0] = 0; kcfg_get("usb", "enabled", v, sizeof v); return !strcmp(v, "off"); }
