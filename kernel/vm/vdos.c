@@ -435,11 +435,19 @@ static void ctrl_c_end(struct trapframe *tf, struct dos_regs86 *r)
 void vdos_int(struct trapframe *tf, u8 n, u32 ret, u32 at, int via_arpl)
 {
     struct dos_regs86 r;
+    u32 vif0 = vm.thread->vif;
     int res;
 
     if (!mounted)
         mount_c();
     to_regs(tf, &r, ret);
+    /* DOS turns interrupts on as a call begins, whatever the caller had: a call that came through the vector (a
+       DPMI program's, reflected: interrupts off, as an INT leaves them) and takes its time in the kernel here (a
+       file read) is no stretch of the program's with its interrupts off. Left off, the watch on such stretches
+       (vdev.c: vif-stuck) put the VM's thread before every other for 50 ms of each long call and then warned:
+       95 of the 163 jobs on the owner's bench G (2026-11-23), none on the hosted benches. The caller's own flag
+       comes back at the call's end. */
+    vm.thread->vif = 1;
     /* The call, its disk's waits giving the processor to other threads (ide_patient): an app's own threads, the
        mixer and the network go on while a program is in DOS, as they do while a DOS under GLOS is in the BIOS. */
     ide_patient(1);
@@ -448,6 +456,7 @@ void vdos_int(struct trapframe *tf, u8 n, u32 ret, u32 at, int via_arpl)
     res = n == 0x20 ? dos20(&vd, &r) : dos21(&vd, &r);
     vm_wr8(vm.indos, (u8)(vm_rd8(vm.indos) - 1));
     ide_patient(0);
+    vm.thread->vif = vif0;
     if (res == DOS21_GONE) {                    /* a key waited for: back to the INT, the VM idling meanwhile */
         if (via_arpl) {
             push16(tf, tf->eflags & 0xFFFF);
