@@ -59,6 +59,21 @@ Each driver's head names its source and its SHA-256.
   - the ES1371's codec writes on silicon: FreeBSD waits for a window of the converter's before each write,
     which is not done here yet.
 
+## Tier 2: AMD PCnet-PCI (2026-11-23)
+
+`kernel/drv/pcnet.c` drives the Am79C970A (1022:2000), from AMD's data sheet (Rev D):
+
+- 16-bit I/O and SWSTYLE 2 (32-bit structures);
+- rings of 16 receive and 8 transmit descriptors, and the initialisation block, in one page;
+- the station's address from its PROM; every multicast taken;
+- short frames padded in software; received frames handed on without their CRC.
+
+It is probed after the Rhine and before the NE2000.
+
+- **Tests:** builds. Loop A's NET_CASES gain bf6 and 486dx2 with `pcnetpci`. Loop A's run.py takes the card
+  only with RetroGPU branch `glos-pcnet` (one line in `tools/loopa/hostio.py`'s NICS), whose merge waits for
+  the owner's OK; until then the cases run with `RETROGPU=~/wt-rgpu-pcnet`.
+
 ## Still to come in tier 1
 
 - **Bench checks:** the RTL8139 on bench F, the ALS100 with sb16.c on bench C (once fitted), PLIP between two
