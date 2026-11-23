@@ -14,6 +14,9 @@
 #define SKI_K_RIGHT  2
 #define SKI_K_TUCK   4                  /* crouched: faster, and slower to turn */
 #define SKI_K_PLOUGH 8                  /* the skis' tips together: brakes */
+#define SKI_K_WIND   16                 /* (phase F) not a key: the wind blows at this step. Gusts come by rule from
+                                           the mountain's number and the step, so that a windy run is still its
+                                           mountain and its keys (a recording keeps when the wind blew) */
 
 enum { SKI_S_SKIING, SKI_S_AIR, SKI_S_FALLEN, SKI_S_DONE };
 
@@ -27,6 +30,7 @@ enum { SKI_S_SKIING, SKI_S_AIR, SKI_S_FALLEN, SKI_S_DONE };
 #define SKI_EV_FINISH 64
 
 #define SKI_MISS_STEPS (5 * SKI_STEPS)  /* a gate missed costs five seconds */
+#define SKI_GUST_STEPS (5 * SKI_STEPS)  /* the wind (phase F): a spell of five seconds, a gust in its first half or calm */
 
 #define SKI_PIECES 8
 struct ski_piece {                      /* a piece of the mountain as made (skimount_chunk), kept while the skier is near */
@@ -54,6 +58,7 @@ struct skirun {
     int run_acc, streak;                /* distance towards the next points; hundreds of pixels without a fall */
     int near[4], near_at;               /* the things last passed close by (not counted twice) */
     unsigned ev;                        /* SKI_EV_ of the last step */
+    int wind;                           /* the last step's SKI_K_WIND: gusts pushed across the slope */
     struct ski_piece piece[SKI_PIECES]; /* (skirun_piece's) */
 };
 
@@ -66,6 +71,8 @@ const struct ski_thing *skirun_piece(struct skirun *r, int index, int *n);
    demonstration's skier, and the tests'. */
 unsigned skirun_auto(const struct skirun *r);
 int skirun_speed(const struct skirun *r);       /* pixels a second */
+/* The wind's push across the slope at this step: 1/256 pixel a step, rightwards (0: calm, or no wind). */
+int skirun_gust(const struct skirun *r);
 int skirun_height(const struct skirun *r);      /* in the air: pixels off the ground */
 /* The run's time, with its missed gates' seconds: milliseconds (once done; before: so far). */
 unsigned long skirun_ms(const struct skirun *r);

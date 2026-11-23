@@ -1,0 +1,14 @@
+# Fall Line's wind (apps/ski; phase F, docs/v1/apps/skiing.md): the demonstration on mountain 7 (red) in the
+# wind from its first step (-weather 4), held at step 90 in the first spell's gust (blowing leftwards, by rule
+# from the mountain's number and the step): the streaks blown across (a picture), and the careful skier pushed
+# off the calm run's place (ski.txt's x at the same step is another).
+run SKI.EXE -demo 7 -grade 2 -until 90 -speed 4 -table C:\\OUT\\SKIWIND.DAT -weather 4 -day 20261121
+wait "Fall Line"
+said SKI ready seed=7 grade=2 mode=0 day=0
+said SKI started watching
+pause 1500
+said SKI at 90 x=444 y=298 speed=212 score=0 gates=0/0 falls=0
+shot gust "Fall Line"
+key alt+f4
+gone "Fall Line"
+expect SKI end

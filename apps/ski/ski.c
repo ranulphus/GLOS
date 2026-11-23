@@ -53,7 +53,7 @@
 enum { C_AGAIN = 1, C_NEW, C_DAY, C_NUMBER, C_WATCH, C_TABLES, C_PAUSE, C_EXIT, C_SLALOM, C_FREE, C_GREEN, C_BLUE, C_RED, C_BLACK,
        C_SOUND, C_JACKET, C_FIGURE = C_JACKET + 8, C_WEATHER = C_FIGURE + 8 };     /* (C_JACKET + n: the jackets;
                                                    C_FIGURE + n: the figures; C_WEATHER + n: the weathers) */
-enum { W_CLEAR, W_SNOW, W_FOG, W_NIGHT, W_COUNT };
+enum { W_CLEAR, W_SNOW, W_FOG, W_NIGHT, W_WIND, W_COUNT };
 enum { P_READY, P_RUN, P_PAUSED, P_DONE };
 
 #define FW 480                          /* the field */
@@ -75,7 +75,7 @@ static struct gui_widget *canvas;
 static struct skirun run;
 static int phase = P_READY, watching;   /* watching: the careful skier has the skis */
 static unsigned seed = 1;
-static int grade = SKI_BLUE, mode = SKI_SLALOM, of_day, jacket, figure, weather;
+static int grade = SKI_BLUE, mode = SKI_SLALOM, of_day, jacket, figure, weather, arg_weather = -1;
 static unsigned last_ms, acc;           /* the frame's clock: milliseconds times sixty not yet made steps of */
 static long until = -1;                 /* the suite's: the picture held at this step ... */
 static long untils[8];                  /* ... and at these after it, each when the one before is let go */
@@ -403,7 +403,8 @@ static unsigned keys_now;               /* (the keys of the step drawn: the skie
 static void step(void)
 {
     char text[64];
-    keys_now = watching ? skirun_auto(&run) : keys_held();
+    keys_now = (watching ? skirun_auto(&run) : keys_held()) | (weather == W_WIND ? SKI_K_WIND : 0);
+                                                /* (the wind blows from the step it is chosen: kept with the keys) */
     if (run.state != SKI_S_DONE && run.steps < GHOST_STEPS)
         rec[run.steps] = (unsigned char)keys_now;
     skirun_step(&run, keys_now);
@@ -563,6 +564,15 @@ static void masks_make(void)
 
 static void draw_weather(struct gfx_surface *s, int ox, int oy, int sx, int sy)
 {
+    int g = skirun_gust(&run);
+    if (g) {                                    /* a gust: streaks blown across, longer and faster the stronger */
+        unsigned i, len = 6 + (unsigned)(g < 0 ? -g : g) / 6, drift = run.steps * (unsigned)(g < 0 ? -g : g) / 12;
+        for (i = 0; i < 36; i++) {
+            unsigned h = i * 2654435761u, fx = ((h >> 8) + (unsigned)(run.x >> 8)) % FW, fy = (h >> 16) % FH;
+            fx = g > 0 ? (fx + drift) % FW : (fx + FW * 64 - drift % (FW * 64)) % FW;
+            gfx_fill(s, ox + (int)fx - (int)len / 2, oy + (int)fy, (int)len, 1, 0x8899AAu);
+        }
+    }
     if (weather == W_SNOW) {
         unsigned i, t = run.steps;
         for (i = 0; i < 140; i++) {             /* (each flake's place by rule from its number and the steps) */
@@ -1009,7 +1019,8 @@ static void build(void)
     for (i = 0; i < FIGURE_COUNT; i++)
         gui_command(win, C_FIGURE + i, GUI_T(figures[i]), NULL, NULL, NULL);
     for (i = 0; i < W_COUNT; i++) {
-        static const char *const weathers[W_COUNT] = { GUI_N("&Clear"), GUI_N("&Snowfall"), GUI_N("&Fog"), GUI_N("&Night") };
+        static const char *const weathers[W_COUNT] = { GUI_N("&Clear"), GUI_N("&Snowfall"), GUI_N("&Fog"), GUI_N("&Night"),
+                                                             GUI_N("&Wind") };
         gui_command(win, C_WEATHER + i, GUI_T(weathers[i]), NULL, NULL, NULL);
     }
     bar = gui_menubar(win);
@@ -1072,12 +1083,16 @@ int main(int argc, char **argv)
             speed = atoi(argv[++i]) >= 1 && atoi(argv[i]) <= 16 ? atoi(argv[i]) : 1;
         else if (!strcmp(argv[i], "-day") && i + 1 < argc)
             today = atoi(argv[++i]);    /* (the suite's: a day that does not change) */
+        else if (!strcmp(argv[i], "-weather") && i + 1 < argc)
+            arg_weather = atoi(argv[++i]);      /* (the suite's: a weather from the first step) */
     }
     tables_load();
     ghost_load();
     grade = tables.grade_last, mode = tables.mode_last, jacket = tables.jacket < 5 ? tables.jacket : 0;
     figure = tables.figure < FIGURE_COUNT ? tables.figure : 0;
     weather = tables.weather < W_COUNT ? tables.weather : 0;
+    if (arg_weather >= 0 && arg_weather < W_COUNT)
+        weather = arg_weather;
     if (!demo)
         seed = new_seed();
     if (demo_grade >= 0)

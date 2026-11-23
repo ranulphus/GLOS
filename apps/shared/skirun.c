@@ -48,6 +48,25 @@ const struct ski_thing *skirun_piece(struct skirun *r, int index, int *n)
     return p->t;
 }
 
+int skirun_gust(const struct skirun *r)
+{
+    /* the strongest push of a gust by grade: on a black run some 37 pixels a second at the gust's height */
+    static const short PEAK[4] = { 64, 96, 128, 160 };
+    unsigned g, t, h;
+    int peak;
+    if (!r->wind)
+        return 0;
+    g = r->steps / SKI_GUST_STEPS, t = r->steps % SKI_GUST_STEPS;
+    h = (r->m.seed ^ (g + 1) * 0x9E3779B1u) * 0x85EBCA6Bu;     /* (the spell's dice) */
+    h ^= h >> 13, h *= 0xC2B2AE35u, h ^= h >> 16;
+    if ((h & 3) == 0 || t >= SKI_GUST_STEPS / 2)                /* a calm spell, or the calm half of one */
+        return 0;
+    peak = PEAK[r->m.grade & 3] * (2 + (int)((h >> 2) & 3)) / 5;        /* (two fifths to all of it) */
+    t = t < SKI_GUST_STEPS / 4 ? t : SKI_GUST_STEPS / 2 - t;            /* (up and down again) */
+    peak = peak * (int)t / (SKI_GUST_STEPS / 4);
+    return h & 0x10 ? peak : -peak;
+}
+
 int skirun_speed(const struct skirun *r)
 {
     /* (the longer side and three eighths of the shorter: within a few per cent, and whole numbers) */
@@ -142,6 +161,7 @@ void skirun_step(struct skirun *r, unsigned keys)
 {
     int h, ux, uy, along, sx, sy, snow, drag, grip, speed, px, py, turn;
     r->ev = 0;
+    r->wind = (keys & SKI_K_WIND) != 0;
     if (r->state == SKI_S_DONE) {       /* past the finish: gliding to a stop */
         r->vx -= r->vx / 16, r->vy -= r->vy / 16;
         r->x += r->vx, r->y += r->vy;
@@ -212,6 +232,7 @@ void skirun_step(struct skirun *r, unsigned keys)
         r->vy = sy + along * uy / 1024;
         r->x += r->vx, r->y += r->vy;
     }
+    r->x += skirun_gust(r);             /* (the wind: a push across, on the ground and in the air) */
     if (r->x < 8 * 256)                 /* (the slope's sides) */
         r->x = 8 * 256, r->vx = 0;
     if (r->x > (SKI_WORLD_W - 8) * 256)

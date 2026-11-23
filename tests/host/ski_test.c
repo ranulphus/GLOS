@@ -84,6 +84,13 @@ static int way_down(const struct skimount *m)
     return found;
 }
 
+static void run_auto_wind(struct skirun *r, unsigned seed, int grade, int mode, unsigned limit, int wind)
+{
+    skirun_start(r, seed, grade, mode);
+    while (r->state != SKI_S_DONE && r->steps < limit)
+        skirun_step(r, skirun_auto(r) | (wind ? SKI_K_WIND : 0));
+}
+
 static void run_auto(struct skirun *r, unsigned seed, int grade, int mode, unsigned limit)
 {
     skirun_start(r, seed, grade, mode);
@@ -203,6 +210,43 @@ int main(int argc, char **argv)
     CHECK(unfinished == 0 && falls == 0 && missed == 0, "the careful skier in %d runs: %ld unfinished, %ld falls, %ld gates missed",
           more ? 24000 : 1200, unfinished, falls, missed);
     printf("  the careful skier's runs: %ld seconds each on average\n", steps_sum / (more ? 24000 : 1200) / SKI_STEPS);
+
+    /* (phase F) in the wind: the gusts blow by rule (a run skied twice is the same run), they push (the run is
+       not the calm one's), they blow both ways and calm between, and the careful skier still gets down */
+    {
+        struct skirun w2;
+        long wfalls = 0, wmissed = 0, wunfinished = 0, differ = 0, same = 0, left = 0, right = 0, calm = 0;
+        for (seed = 1; seed <= (unsigned)(more ? 3000 : 150); seed++)
+            for (grade = 0; grade < 4; grade++)
+                for (mode = 0; mode < 2; mode++) {
+                    run_auto_wind(&r, seed * 97u + 5, grade, mode, 5 * 60 * SKI_STEPS, 1);
+                    wunfinished += r.state != SKI_S_DONE;
+                    wfalls += r.falls;
+                    wmissed += r.gates_missed;
+                    if (r.falls || r.gates_missed || r.state != SKI_S_DONE)
+                        printf("  wind: seed %u grade %d mode %d: falls %d missed %d state %d at y=%d\n", seed * 97u + 5, grade,
+                               mode, r.falls, r.gates_missed, r.state, r.y >> 8);
+                    if (seed <= 20) {
+                        run_auto_wind(&w2, seed * 97u + 5, grade, mode, 5 * 60 * SKI_STEPS, 1);
+                        same += w2.steps == r.steps && w2.x == r.x && w2.score == r.score;
+                        run_auto_wind(&w2, seed * 97u + 5, grade, mode, 5 * 60 * SKI_STEPS, 0);
+                        differ += w2.steps != r.steps || w2.x != r.x;
+                    }
+                }
+        for (i = 0; i < 6000; i++) {            /* (the gusts of one windy run's first hundred seconds) */
+            int g;
+            skirun_start(&r, 12345, SKI_RED, SKI_FREE);
+            r.wind = 1, r.steps = (unsigned)i;
+            g = skirun_gust(&r);
+            left += g < 0, right += g > 0, calm += g == 0;
+            if (g > 128 || g < -128)
+                CHECK(0, "a red run's gust of %d at step %d", g, i);
+        }
+        CHECK(wunfinished == 0 && wfalls == 0 && wmissed == 0, "the careful skier in the wind: %ld unfinished, %ld falls, %ld gates missed",
+              wunfinished, wfalls, wmissed);
+        CHECK(same == 160 && differ >= 150, "windy runs: %ld of 160 the same twice, %ld of 160 not the calm run", same, differ);
+        CHECK(left > 600 && right > 600 && calm > 2400, "the gusts: %ld left, %ld right, %ld calm steps of 6000", left, right, calm);
+    }
 
     /* the motion */
     {

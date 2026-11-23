@@ -1669,5 +1669,16 @@ twice the field's size, its pool at its middle, laid over at the skier) and draw
 
 - **Tests:** `ski-weather` (host and the emulated desktops): the demonstration held at step 240, each weather
   there (pictures); `ski_test`'s round trip keeps it.
-- **Not yet:** the wind (gusts that push across the slope: the run, the ghost and the tables would change with
-  it); the wind's sound.
+- **The wind** (later the same morning): **Wind**, the menu's fifth. Gusts push the skier across the slope, on
+  the ground and in the air: spells of five seconds, each by rule from the mountain's number and the spell's
+  number either calm (one in four) or a gust in its first half, rising and falling, leftwards or rightwards,
+  from two fifths to all of the grade's strongest push (green 64 to black 160 256ths of a pixel a step: some
+  15 to 37 pixels a second). The wind is an input of the step like the keys (`SKI_K_WIND`), so a windy run is
+  still its mountain and its keys: a best run skied in the wind comes back as a ghost in the wind, and a
+  weather chosen in mid-run blows from that step. A gust is drawn as streaks blown across, longer and faster
+  the stronger. `ski_test`: the careful skier gets down all 1200 mountains in the wind without a fall or a
+  missed gate; a windy run skied twice is the same; the windy runs are not the calm ones; the gusts blow both
+  ways and calm between. `ski-wind`: the demonstration in the wind from its first step (`-weather 4`, the
+  suite's), held at step 90 in a gust blowing leftwards: the streaks (a picture), and x=444 where the calm run
+  is at 448.
+- **Not yet:** the wind's sound; weathers together (snow in the wind).
