@@ -7554,6 +7554,9 @@ def nboot_dos_case(profile, card, bios=False):
             # NB4: programs. NDOSTEST (Open Watcom's C library, spawning itself) and DOSDIFF (MS-DOS 7.1's answers)
             # as jobs; DOSCALLS (DJGPP: through the DPMI host's reflection) as a program and as a GLOS app (its calls
             # by app.c's serve, the SDA's PSP switched for it).
+            t0 = time.time()                    # (NDOSTEST checks the date: the clock set first. Once in five
+            while time.time() - t0 < 120 and "GLOS-TIME set by=sntp" not in agent.log():   # runs on a busy host the
+                time.sleep(0.5)                 # answer came after it, 2026-11-23)
             agent.ssh("cd \\GLOS")
             nt = agent.ssh("NDOSTEST.EXE x two")
             agent.ssh("cd \\")
@@ -7677,6 +7680,10 @@ def nboot_install_case(profile, card, bios=False):
                 if not checks["files"]:
                     info += " before=%r after=%r" % (before, after)
                 job = agent.ssh("C:\\GLOS\\KEYS\\PKG\\DEEP.COM /C VER")
+                import time
+                t0 = time.time()                # (the clock set first: NDOSTEST checks the date)
+                while time.time() - t0 < 120 and "GLOS-TIME set by=sntp" not in agent.log():
+                    time.sleep(0.5)
                 agent.ssh("cd \\GLOS")
                 nt = agent.ssh("NDOSTEST.EXE x two")
                 checks["runs"] = job[0] == 0 and "GLOS" in job[1] and nt[0] == 0 and "NDOSTEST: 0 failures" in nt[1]
