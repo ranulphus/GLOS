@@ -8588,6 +8588,13 @@ class GuiDriver:
                     self.agent.ssh("glos key " + gui_key_list([spec]))
                     if re.match(r"^alt\+[a-z0-9]$", spec):
                         self.until(lambda d: any(w["shown"] and w["kind"] == "popup" for w in d["win"]), 5)
+            elif cmd == "chord":                # keys down one after another, held, then all up (a chord)
+                codes = [GUI_KEYS.get(k) or (GUI_ROW.index(k) if len(k) == 1 and k in GUI_ROW else 0) for k in args]
+                if not all(codes):
+                    raise ValueError("chord " + " ".join(args))
+                spec = ["%.2f:0x%x:down" % (0.06 * i, c) for i, c in enumerate(codes)]
+                spec += ["%.2f:0x%x:up" % (0.06 * len(codes) + 0.3 + 0.03 * i, c) for i, c in enumerate(codes)]
+                self.agent.ssh("glos key " + ",".join(spec))
             elif cmd == "type":
                 text = line.split(None, 1)[1].rstrip("\n") if len(line.split(None, 1)) > 1 else ""
                 self.agent.ssh("glos type " + text)

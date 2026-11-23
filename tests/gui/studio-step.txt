@@ -1,7 +1,8 @@
 # MIDI Studio's step entry (apps/studio; phase F): Edit, Step Entry (F8), then the PC's keys as a piano: C at the
 # cursor, a step of an eighth (240 ticks) as it starts; D after it; Space, a rest; Ctrl+1, the step a sixteenth;
-# E; Backspace takes the E away and the cursor back; Shift+V an F with an accent (velocity 127) in its place; F8
-# off. Each note is one step of the history: Ctrl+Z takes the F away again.
+# E; Backspace takes the E away and the cursor back; Shift+V an F with an accent (velocity 127) in its place;
+# a chord (C, E and G held together: Z, C and B) at one step; D after it, alone; F8 off. Each note is one step of
+# the history: Ctrl+Z takes the D away again.
 run STUDIO.EXE -demo
 wait "MIDI Studio"
 key f8
@@ -21,10 +22,17 @@ key backspace
 said STUDIO step back at=720 removed=1
 key shift+v
 said STUDIO step note 65 at=720 accent
+chord z c b
+said STUDIO step note 60 at=840
+said STUDIO step note 64 at=840 chord
+said STUDIO step note 67 at=840 chord
+key x
+said STUDIO step note 62 at=960
+shot chord "MIDI Studio"
 key f8
-said STUDIO step off notes=3
+said STUDIO step off notes=7
 key ctrl+z
-said STUDIO undone 2
+said STUDIO undone 6
 key alt+f4
 wait "MIDI Studio"
 key alt+n

@@ -38,3 +38,6 @@ song, if it has notes, starts after it).
 MIDI keyboard) puts its note at the blue cursor, as long as the step, and moves the cursor on. **Space** leaves
 a rest, **Backspace** goes back a step and takes away what begins there, **Ctrl+1** to **Ctrl+4** make the step a
 sixteenth, an eighth, a quarter or a half, and a click on the roll moves the cursor.
+
+Press keys together for a chord: a key pressed while another you just put in is still held goes at the
+same step, and the cursor moves on once.

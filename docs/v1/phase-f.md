@@ -1662,7 +1662,14 @@ so is a step back. Recording stops step entry and step entry stops recording.
 - **Tests:** `studio-step` (host and the emulated desktops): C, D, a rest and E put; E taken back; undone.
 - **An accent from the PC's keys** (later the same day): Shift with a piano key, recording or in step entry,
   plays the note at velocity 127 (100 without); `studio-step` puts an F with an accent (said `accent`).
-- **Not yet:** velocities between the two; a chord at one step (keys held together).
+- **A chord at one step** (later the same morning): a note whose key goes down while a key that put a note at the
+  step before is still held goes at that step too ("chord" said), and the cursor stays past it; a key let go of
+  leaves the chord (the next note is a step of its own). The PC's keys are seen held by glos_keys, a MIDI
+  keyboard's by its note-ons and offs; a rest, Backspace, a click in the roll or F8 ends the chord. The script
+  players gain `chord KEY KEY ...` (down one after another, held, then all up: on the host the keys are held
+  until each one's up reaches the program; on Loop A by `glos key`'s downs and ups). `studio-step`: C, E and G
+  at step 840, D at 960 alone, a picture.
+- **Not yet:** velocities between the two.
 
 ## Fall Line: the weather (2026-11-23)
 

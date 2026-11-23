@@ -209,11 +209,15 @@ int glos_fs_drives(unsigned drive, struct glos_fs_drive *out, unsigned room, uns
     return 0;
 }
 
-/* (The keyboard as it is now: no key is ever held on the host: a script's keys go down and up at once.) */
+/* (The keyboard as it is now: on the host a script's keys go down and up at once, held by nobody; but a script's
+   `chord` holds its keys from the command until each one's going up reaches the program.) */
+static unsigned char chord_down[64];
+
 int glos_keys(struct glos_keys *k)
 {
     memset(k, 0, sizeof *k);
     k->size = sizeof *k;
+    memcpy(k->down, chord_down, sizeof k->down);
     return 0;
 }
 
@@ -1930,6 +1934,19 @@ static int step(void)
             while (word(&p, a, sizeof a))
                 key_spec(a);
             return 1;
+        } else if (!strcmp(cmd, "chord")) {     /* chord KEY KEY ...: down one after another, held, then all up */
+            unsigned codes[16], n = 0, i;
+            while (n < 16 && word(&p, a, sizeof a)) {
+                if (!(codes[n] = shim_key_code(a)) || codes[n] >= 512)
+                    fail("chord: no key %s", a);
+                chord_down[codes[n] >> 3] |= (unsigned char)(1 << (codes[n] & 7));
+                n++;
+            }
+            for (i = 0; i < n; i++)
+                key_event(codes[i], 1, 0);
+            for (i = 0; i < n; i++)
+                key_event(codes[i], 0, 0);
+            return 1;
         } else if (!strcmp(cmd, "type")) {
             while (*p == ' ')                   /* (as Loop A's driver and glos type take it: no leading spaces) */
                 p++;
@@ -2447,6 +2464,8 @@ int glos_event(void *buf, unsigned room, unsigned wait_ms, unsigned areas)
         struct hev e = H.q[H.qh++ % 256];
         if (e.type == HEV_MOUSE)
             given_buttons = e.buttons;
+        if (e.type == HEV_KEY && !e.down && e.key < 512)       /* (a chord's key is let go of as its up arrives) */
+            chord_down[e.key >> 3] &= (unsigned char)~(1 << (e.key & 7));
         if (e.type == HEV_KEY) {                /* (a key goes to the window with the focus when it arrives, as the
                                                    window manager sends it: a menu opened by the key before) */
             if (!H.focus)

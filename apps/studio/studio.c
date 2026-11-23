@@ -324,6 +324,9 @@ static int step_end(struct step *st, const char *name)
     return 1;
 }
 
+static void chord_reset(void);           /* (step entry's chords: below) */
+static unsigned char midi_held[128];     /* (step entry: a MIDI keyboard's keys held, for chords) */
+
 static int roll_event(struct gui_widget *w, struct gui_ev *e, int x, int y)
 {
     struct song_track *t = &song->track[cur];
@@ -336,6 +339,7 @@ static int roll_event(struct gui_widget *w, struct gui_ev *e, int x, int y)
             return 1;
         if (stepping && e->button == 1) {       /* (step entry: the cursor there, on a sixteenth) */
             step_at = (unsigned long)x / GRID * GRID;
+            chord_reset();
             say("step at=%lu", step_at);
             gui_damage(w);
             return 1;
@@ -684,8 +688,12 @@ static void rec_event(const struct glos_ev *ev)         /* a message of the MIDI
 {
     const struct glos_ev_midi *m = (const struct glos_ev_midi *)ev;
     if (ev->kind == GLOS_EV_MIDI && stepping && !recording) {  /* (step entry: a key down is a note at the cursor) */
-        if ((m->status & 0xF0) == 0x90 && m->data2)
+        if ((m->status & 0xF0) == 0x90 && m->data2) {
             step_note(m->data1 & 0x7F, m->data2);
+            midi_held[m->data1 & 0x7F] = 1;
+        } else if ((m->status & 0xF0) == 0x80 || (m->status & 0xF0) == 0x90) {
+            midi_held[m->data1 & 0x7F] = 0;
+        }
         return;
     }
     if (ev->kind != GLOS_EV_MIDI || !recording)
@@ -768,27 +776,68 @@ static void step_sound(unsigned key, unsigned force)
     give();
 }
 
+/* (2026-11-23) A chord: a note whose key goes down while a key that put a note at the step before is still held
+   goes at that step too, and the cursor stays past it. The PC's piano keys are seen held by glos_keys, a MIDI
+   keyboard's by its note-ons and offs. */
+static unsigned long chord_at = (unsigned long)-1;
+static unsigned char chord_keys[128];   /* the notes put at chord_at (their keys may still be held) */
+
+static void chord_reset(void)
+{
+    chord_at = (unsigned long)-1;
+    memset(chord_keys, 0, sizeof chord_keys);
+}
+
+static int key_held(unsigned key, const struct glos_keys *k)
+{
+    if (midi_held[key])
+        return 1;
+    return key >= PC_BASE && key < PC_BASE + 24 && GLOS_KEY_DOWN(k, pc_keys[key - PC_BASE]);
+}
+
 static void step_note(unsigned key, unsigned force)
 {
     struct step *st;
-    unsigned long len = step_ticks();
+    struct glos_keys k;
+    unsigned long len = step_ticks(), at;
+    unsigned i;
+    int chord = 0;
     if (!stepping || key > 127)
         return;
+    memset(&k, 0, sizeof k);
+    k.size = sizeof k;
+    if (glos_keys(&k) != 0)
+        memset(k.down, 0, sizeof k.down);
+    for (i = 0; i < 128; i++)                   /* (the chord's keys let go of are its no longer) */
+        if (chord_keys[i] && i != key) {
+            if (key_held(i, &k))
+                chord = 1;
+            else
+                chord_keys[i] = 0;
+        }
+    chord = chord && chord_at != (unsigned long)-1;
+    at = chord ? chord_at : step_at;
     st = step_begin();
-    if (song_note_add(&song->track[cur], step_at, len, key, force ? force : 100) < 0) {
+    if (song_note_add(&song->track[cur], at, len, key, force ? force : 100) < 0) {
         step_end(st, "");
         return;
     }
     step_end(st, GUI_T("Step Note"));
     step_sound(key, force ? force : 100);
-    say("step note %u at=%lu%s", key, step_at, force > 100 ? " accent" : "");
-    step_at += len;
+    say("step note %u at=%lu%s%s", key, at, force > 100 ? " accent" : "", chord ? " chord" : "");
+    if (!chord) {
+        chord_reset();
+        chord_at = step_at;
+        step_at += len;
+    }
+    chord_keys[key] = 1;
     size_roll();
     gui_damage(roll);
 }
 
 static void step_rest(void)
 {
+    chord_reset();
     step_at += step_ticks();
     say("step rest at=%lu", step_at);
     gui_damage(roll);
@@ -800,6 +849,7 @@ static void step_back(void)
     struct step *st;
     unsigned long len = step_ticks(), i, gone = 0;
     step_at = step_at >= len ? step_at - len : 0;
+    chord_reset();
     st = step_begin();
     for (i = t->nnotes; i-- > 0;)
         if (t->notes[i].at == step_at)
@@ -812,6 +862,7 @@ static void step_back(void)
 static void step_toggle(void)
 {
     stepping = !stepping;
+    chord_reset();
     if (stepping) {
         rec_stop();
         stop_playing();
