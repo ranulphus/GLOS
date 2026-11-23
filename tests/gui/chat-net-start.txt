@@ -1,0 +1,21 @@
+#host-only (a Chat started for another network would stay on the emulated desktop)
+# Chat, Another Network... (apps/chat; phase F, 2026-11-23): a name, and a Chat window started for it (CHAT
+# -network Third); a name that is not one word refused.
+run CHAT.EXE -demo
+wait "Chat"
+pause 300
+said CHAT on glos
+key alt+c
+key n
+wait "Another Network"
+type two words\n
+wait "Chat"
+key enter
+key alt+c
+key n
+wait "Another Network"
+type Third\n
+said CHAT network opened Third started
+key alt+f4
+gone "Chat"
+expect CHAT end

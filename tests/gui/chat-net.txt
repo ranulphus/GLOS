@@ -1,0 +1,38 @@
+# Chat's networks (apps/chat; phase F, 2026-11-23): a Chat window for a network of its own, CHAT -network Second:
+# its name in the title; new to CHAT.CFG, its settings are asked for first; kept in a [Second] section of the file
+# (the first network's lines, before any section, are not touched). Chat, Another Network... asks a name (left
+# here: chat-net-start, host-only, starts one). Then CHAT -network Third: its section after Second's, Second's as
+# it was.
+run CHAT.EXE -network Second
+wait "Chat - Second"
+said CHAT network new Second
+wait "Chat Settings"
+key ctrl+a
+type irc.example.net
+key alt+n
+type second
+key enter
+gone "Chat Settings"
+said CHAT settings irc.example.net 6697 tls nick=second join= again=1 logs=0 quiet=0 plain=0 tell=1
+file C:\\GLOS\\CHAT.CFG [Second]\r\nserver irc.example.net\r\nport 6697\r\ntls 1\r\nnick second\r\nalt \r\nreal \r\naccount \r\njoin \r\nstart 0\r\nagain 1\r\nlogs 0\r\nquiet 0\r\nplain 0\r\ntell 1\r\n
+key alt+c
+key n
+wait "Another Network"
+key esc
+gone "Another Network"
+key alt+f4
+gone "Chat - Second"
+expect CHAT end
+run CHAT.EXE -network Third
+wait "Chat - Third"
+said CHAT network new Third
+wait "Chat Settings"
+key ctrl+a
+type irc.example.org
+key alt+n
+type third
+key enter
+gone "Chat Settings"
+file C:\\GLOS\\CHAT.CFG [Second]\r\nserver irc.example.net\r\nport 6697\r\ntls 1\r\nnick second\r\nalt \r\nreal \r\naccount \r\njoin \r\nstart 0\r\nagain 1\r\nlogs 0\r\nquiet 0\r\nplain 0\r\ntell 1\r\n[Third]\r\nserver irc.example.org\r\nport 6697\r\ntls 1\r\nnick third\r\nalt \r\nreal \r\naccount \r\njoin \r\nstart 0\r\nagain 1\r\nlogs 0\r\nquiet 0\r\nplain 0\r\ntell 1\r\n
+key alt+f4
+gone "Chat - Third"

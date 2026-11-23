@@ -36,7 +36,7 @@
 #include "../shared/irc.h"
 #include "../shared/ircnet.h"
 
-enum { C_CONNECT = 1, C_DISCONNECT, C_SETTINGS, C_EXIT, C_JOIN, C_CLOSE, C_NEXT, C_PREV, C_SEARCH };
+enum { C_CONNECT = 1, C_DISCONNECT, C_SETTINGS, C_EXIT, C_JOIN, C_CLOSE, C_NEXT, C_PREV, C_SEARCH, C_NETWORK };
 
 static struct gui_window *win;
 static struct gui_widget *tree, *view, *users, *input, *topic, *status;
@@ -48,6 +48,10 @@ static struct irc_buffer *shown;
 static unsigned long next_id = 1;       /* the tabs' own numbers (a buffer's `user`) */
 static int tree_stale, users_stale, topic_stale, view_stale, status_stale;
 static char cfg_path[300];
+/* (2026-11-23) Several networks at once: a Chat window each. CHAT.CFG's lines before any [NAME] are the first
+   network's; a [NAME] section another's (CHAT -network NAME); Chat, Another Network... starts one. */
+static char net_name[32], exe_path[300];
+static int section_found;               /* (the network's section was in the file: its settings were set once) */
 static struct {
     char server[80], nick[32], alt[32], real[64], account[40], join[160];
     unsigned port;
@@ -879,15 +883,32 @@ static void tick(void *arg)             /* ten times a second: what came is read
 
 /* ---- the settings */
 
+static int same_name(const char *a, const char *b)     /* (a section's name, in any case of letters) */
+{
+    for (; *a && *b; a++, b++)
+        if ((*a | 0x20) != (*b | 0x20))
+            return 0;
+    return !*a && !*b;
+}
+
 static void settings_read(void)
 {
     char line[300], *v;
     FILE *f = cfg_path[0] ? gui_fopen(cfg_path, "r") : NULL;
+    int ours = !net_name[0];                    /* (the lines before any section: the first network's) */
     if (!f)
         return;
     while (fgets(line, sizeof line, f)) {
         line[strcspn(line, "\r\n")] = 0;
-        if (!(v = strchr(line, ' ')))
+        if (line[0] == '[') {                   /* a network's section */
+            char *e = strchr(line, ']');
+            if (e)
+                *e = 0;
+            ours = net_name[0] && same_name(line + 1, net_name);
+            section_found |= ours;
+            continue;
+        }
+        if (!ours || !(v = strchr(line, ' ')))
             continue;
         *v++ = 0;
         if (!strcmp(line, "server"))
@@ -922,15 +943,68 @@ static void settings_read(void)
     fclose(f);
 }
 
+static void settings_put(FILE *f)
+{
+    fprintf(f, "server %s\r\nport %u\r\ntls %d\r\nnick %s\r\nalt %s\r\nreal %s\r\naccount %s\r\njoin %s\r\nstart %d\r\n", cfg.server,
+            cfg.port, cfg.tls, cfg.nick, cfg.alt, cfg.real, cfg.account, cfg.join, cfg.at_start);
+    fprintf(f, "again %d\r\nlogs %d\r\nquiet %d\r\nplain %d\r\ntell %d\r\n", cfg.again, cfg.logs, cfg.quiet, cfg.plain, cfg.tell);
+}
+
+/* This network's settings written; the file's other networks' as they were (read first, and written round it). */
 static void settings_keep(void)
 {
-    FILE *f = cfg_path[0] ? gui_fopen(cfg_path, "w") : NULL;
-    if (!f)
+    char *old = NULL, line[300];
+    size_t n = 0, room = 0;
+    FILE *f;
+    int ours, put = 0;
+    if (!cfg_path[0])
         return;
-    fprintf(f, "server %s\nport %u\ntls %d\nnick %s\nalt %s\nreal %s\naccount %s\njoin %s\nstart %d\n", cfg.server, cfg.port, cfg.tls, cfg.nick,
-            cfg.alt, cfg.real, cfg.account, cfg.join, cfg.at_start);
-    fprintf(f, "again %d\nlogs %d\nquiet %d\nplain %d\ntell %d\n", cfg.again, cfg.logs, cfg.quiet, cfg.plain, cfg.tell);
+    if ((f = gui_fopen(cfg_path, "rb")) != NULL) {
+        while (fgets(line, sizeof line, f)) {
+            size_t k = strlen(line);
+            if (n + k + 1 > room) {
+                char *m = realloc(old, room = (n + k + 1) * 2);
+                if (!m)
+                    break;
+                old = m;
+            }
+            memcpy(old + n, line, k + 1);
+            n += k;
+        }
+        fclose(f);
+    }
+    if (!(f = gui_fopen(cfg_path, "wb"))) {
+        free(old);
+        return;
+    }
+    ours = !net_name[0];
+    if (ours)                                   /* (the first network's: before any section) */
+        settings_put(f), put = 1;
+    {
+        char *p = old, *e;
+        while (p && *p) {
+            size_t k = strcspn(p, "\n");
+            e = p + k + (p[k] == '\n');
+            if (p[0] == '[') {
+                char name[40];
+                size_t m = strcspn(p + 1, "]\r\n");
+                snprintf(name, sizeof name, "%.*s", (int)(m < sizeof name ? m : sizeof name - 1), p + 1);
+                ours = net_name[0] && same_name(name, net_name);
+                fwrite(p, 1, (size_t)(e - p), f);
+                if (ours)
+                    settings_put(f), put = 1;
+            } else if (!ours) {                 /* (another network's line: as it was) */
+                fwrite(p, 1, (size_t)(e - p), f);
+            }
+            p = e;
+        }
+    }
+    if (!put) {                                 /* (a new network: its section at the end) */
+        fprintf(f, "[%s]\r\n", net_name);
+        settings_put(f);
+    }
     fclose(f);
+    free(old);
 }
 
 static void make_irc(void)              /* IRC's state made anew from the settings (not while connected) */
@@ -1138,6 +1212,20 @@ static void command(struct gui_window *w, int id)
     case C_SEARCH:
         logs_search();
         break;
+    case C_NETWORK: {                           /* (2026-11-23) another network: a Chat window of its own */
+        char name[32] = "", cmd[400];
+        if (!gui_ask(win, GUI_T("Another Network"), GUI_T("The network's name (a word: Libera, OFTC, ...):"), name, sizeof name)
+            || !name[0])
+            break;
+        if (strpbrk(name, " []\t")) {
+            gui_message(win, GUI_T("Chat"), GUI_T("A network's name is one word, without [ or ]."), GUI_MB_OK);
+            break;
+        }
+        snprintf(cmd, sizeof cmd, "%s -network %s", exe_path, name);
+        glos_job_run(cmd, NULL, 0, GLOS_RUN_HIDDEN, GLOS_RUNF_DETACH, 0);
+        say("network opened %s %s", name, glos_error() == 0 ? "started" : "refused");
+        break;
+    }
     case C_EXIT:
         gui_quit(0);
         break;
@@ -1205,6 +1293,7 @@ static void build(void)
     gui_command(win, C_DISCONNECT, GUI_T("&Disconnect"), NULL, NULL, NULL);
     gui_command(win, C_SETTINGS, GUI_T("&Settings..."), NULL, NULL, NULL);
     gui_command(win, C_SEARCH, GUI_T("Search the &Logs..."), "Ctrl+F", NULL, GUI_T("Every line kept in the logs that has the words"));
+    gui_command(win, C_NETWORK, GUI_T("Another &Network..."), NULL, NULL, GUI_T("A Chat window for another network"));
     gui_command(win, C_EXIT, GUI_T("E&xit"), "Alt+F4", NULL, NULL);
     gui_command(win, C_JOIN, GUI_T("&Join..."), "Ctrl+J", NULL, NULL);
     gui_command(win, C_CLOSE, GUI_T("&Leave and Close"), "Ctrl+W", NULL, NULL);
@@ -1214,7 +1303,7 @@ static void build(void)
     m = gui_menu(bar, GUI_T("&Chat"));
     gui_menu_command(m, C_CONNECT), gui_menu_command(m, C_DISCONNECT);
     gui_menu_sep(m);
-    gui_menu_command(m, C_SETTINGS), gui_menu_command(m, C_SEARCH);
+    gui_menu_command(m, C_SETTINGS), gui_menu_command(m, C_SEARCH), gui_menu_command(m, C_NETWORK);
     gui_menu_sep(m);
     gui_menu_command(m, C_EXIT);
     m = gui_menu(bar, GUI_T("C&hannel"));
@@ -1250,6 +1339,9 @@ int main(int argc, char **argv)
             demo = 1;
         else if (!strcmp(argv[i], "-silence") && i + 1 < argc)
             silence_s = atoi(argv[i + 1]) > 0 ? (unsigned)atoi(argv[i + 1]) : 120, i++;
+        else if (!strcmp(argv[i], "-network") && i + 1 < argc)        /* (another network: CHAT.CFG's [NAME]) */
+            snprintf(net_name, sizeof net_name, "%.31s", argv[++i]);
+    snprintf(exe_path, sizeof exe_path, "%s", argv[0]);
     home = glos_home();
     if (home && home[0] && !demo)
         gui_path_join(cfg_path, sizeof cfg_path, home, "CHAT.CFG");
@@ -1261,11 +1353,20 @@ int main(int argc, char **argv)
         cfg.account[0] = 0;
     }
     build();
+    if (net_name[0]) {                          /* (its name in the title: which window is which network's) */
+        char t[80];
+        snprintf(t, sizeof t, "%s - %s", GUI_T("Chat"), net_name);
+        gui_title(win, t);
+    }
     make_irc();
     gui_show(win, 1);
     gui_focus(input);
     refresh();
     gui_idle(tick, NULL, 100);
+    if (net_name[0] && !section_found && !demo) {      /* (a network new to the file: its settings asked for first) */
+        say("network new %s", net_name);
+        settings();
+    }
     if (demo || cfg.at_start)
         connect_now();
     gui_run();

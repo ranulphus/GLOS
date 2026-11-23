@@ -1806,8 +1806,16 @@ none unless they give it.
   (the network's folder and the tab's name) and the line; Open the Log (or Enter) opens that file with its
   program (`glos_open`: Notepad for .LOG); none found says so, or that no logs are kept. The host's GLOS stand-in
   gains a `glos_open` taken as started. `chat-again`: "welcome", 8 lines (a picture).
-- **Not yet:** more than one network at a time; IRCv3's chat history, account-notify and message tags beyond the
-  time.
+- **Several networks at once** (later the same afternoon): a Chat window each. CHAT.CFG's lines before any
+  `[NAME]` are the first network's (as the file always was); a `[NAME]` section another's, used by `CHAT -network
+  NAME` (the name in the window's title). A network new to the file has its settings asked for first; its
+  settings are kept in its section, the file's other lines as they were (read first and written round it), CR LF
+  in binary as the logs. **Chat, Another Network...** asks a one-word name and starts a Chat for it (detached,
+  as Files starts programs). `chat-net` (host and the emulated desktops: Second's settings asked for and kept,
+  the file byte for byte; Third's after it, on the emulated desktops, the host's player running one program a
+  script) and `chat-net-start` (host-only: two words refused, Third started); by hand on the host, a file with a
+  first network and Second keeps both when Third is added.
+- **Not yet:** IRCv3's chat history, account-notify and message tags beyond the time; the networks in one window.
 
 ## Disk Tools: the older backups thinned out (2026-11-23)
 

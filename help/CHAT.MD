@@ -1,6 +1,8 @@
 # Chat
 
-Chat is for IRC: channels of people talking, and private conversations, on one server at a time.
+Chat is for IRC: channels of people talking, and private conversations. Each Chat window is on one network;
+**Chat, Another Network** opens a window for another (give it a one-word name, then its settings), and its name
+shows in that window's title.
 
 ## Connecting
 
