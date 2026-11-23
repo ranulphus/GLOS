@@ -36,11 +36,18 @@ mcopy -i "$i" "$tmp/GLOSLDR.SYS" ::GLOSLDR.SYS
 mattrib -i "$i" +s +h +r ::GLOSLDR.SYS
 mmd -i "$i" ::GLOS
 mcopy -i "$i" "$here/build/kernel/GLOSK.BIN" ::GLOS/GLOSK.BIN
+made=
 for a in "$@"; do
     src=${a%%=*}
     dst=$(printf '%s' "${a#*=}" | tr '\\' '/')
     dir=$(dirname "$dst")
-    [ "$dir" = "/" ] || [ "$dir" = "." ] || mmd -i "$i" "::$dir" 2> /dev/null || true
+    case " $made " in                           # (its folders, the outer ones first, each made once)
+        *" $dir "*) ;;
+        *)  d=$dir up=
+            while [ "$d" != "/" ] && [ "$d" != "." ]; do up="$d $up"; d=$(dirname "$d"); done
+            for d in $up; do mmd -i "$i" "::$d" 2> /dev/null || true; done
+            made="$made $dir" ;;
+    esac
     mcopy -o -i "$i" "$src" "::$dst"
 done
 echo "$out: native GLOS, volume at $start ($sectors sectors)"

@@ -181,11 +181,162 @@ class Background(subprocess.Popen):
         super().kill()
 
 
+# ---- the native variant (docs/v1/native-dos.md, stage 1 of the route to a GLOS with no DOS: jobs.py SUITE --native,
+# or LOOPA_NATIVE=1): a case's PC starts GLOS from a disk with no DOS on it, where the hosted run starts FreeDOS
+# from Loop A's floppy and GLOS.EXE from RUN.BAT. What a case gives run.py is made that disk (native_args), GLOS's
+# own files where the case has them (C:\TEST: the loader's command line says so); a case that can't be made one
+# (GLOS.EXE /RUN, /ROUNDTRIP, HIMEM's XMS mode, the DOS's COMMAND.COM under GLOS, a game's own disk, no GLOS at
+# all) is hosted only, and skipped.
+NATIVE = bool(os.environ.get("LOOPA_NATIVE"))
+NATIVE_FLAGS = ("/DIRECT", "/NOVME", "/VERBOSE", "/DPMITRACE", "/SELFTEST", "/GDB", "/AGENT", "/CACHE=", "/STUBPAGE=")
+HX_TOOLS = ("UTEXIT.COM", "SERSAY.COM", "WAITSEC.COM", "REBOOT.COM", "VMODE.COM", "KEYWAIT.COM", "VECCHK.COM", "SBCHK.COM")
+_native_lock = threading.Lock()
+WATCOM = os.environ.get("WATCOM", os.path.expanduser("~/.local/opt/watcom-20260901"))    # (as run.py finds them)
+CWSDPMI = os.path.join(os.environ.get("DJGPP_PREFIX", os.path.expanduser("~/.local/opt/djgpp-gcc1220")), "dos", "CWSDPMI.EXE")
+
+
+def hx_done(text):
+    """The run's end as its PC said it: RUN.BAT's last line, after GLOS.EXE. A native run has nothing after GLOS:
+    its end is GLOS's own leave."""
+    return "HX-DONE 0" in text or (NATIVE and "GLOS-EXIT code=" in text)
+
+
+def hx_vecchk(text):
+    """DOS's vectors as they were before GLOS (VECCHK check, after GLOS.EXE): natively there is no DOS to give them
+    back to, and nothing runs after GLOS."""
+    return NATIVE or "HX-VECCHK ok" in text
+
+
+class HostedOnly(Exception):
+    """A case the native variant can't run: why."""
+
+
+def in_dev(cmd):
+    """A command that needs the dev container's tools (mtools, a 32-bit gcc): as it is there, else through it."""
+    return cmd if IN_CONTAINER else [os.path.join(MGA, "tools/dev")] + cmd
+
+
+def freedos_bin():
+    """FreeDOS's programs (MEM, XCOPY, FC ...: the cases' tools, on A: in a hosted run), out of Loop A's golden boot
+    floppy, once: their folder."""
+    d = os.path.join(ROOT, "out", "native-img", "FREEDOS-BIN")
+    with _native_lock:
+        if not os.path.isdir(d) or not os.listdir(d):
+            os.makedirs(d, exist_ok=True)
+            gold = subprocess.run(in_dev([os.path.join(MGA, "tools/loopa/mkgolden.sh")]), capture_output=True,
+                                  cwd=MGA).stdout.decode().strip().splitlines()[-1]
+            subprocess.run(in_dev(["sh", "-c", "MTOOLS_SKIP_CHECK=1 mcopy -n -i '%s/boot.img' '::FREEDOS/BIN/*' '%s/'"
+                                   % (gold, d)]), capture_output=True)
+    return d
+
+
+def native_args(name, args):
+    """run.py's arguments for the case's native run: its files, RUN.BAT's lines and GLOS.EXE's flags made a disk
+    GLOS starts from (tools/ndos/native-image.sh), given as --hdd. AUTOEXEC.BAT, which GLOS's shell runs at the
+    start, sets PATH and calls C:\\RUN.BAT as Loop A's own does: the lines the hosted RUN.BAT has before GLOS.EXE
+    (those after it have no DOS to run in: the run ends at GLOS's own end, native_watch), or all of them when the
+    hosted PC starts GLOS as DOS's shell (--boot-cfg glosshell)."""
+    files, cmds, pre, rest, boot, i = [], [], [], [], "default", 0
+    while i < len(args):
+        a = args[i]
+        if a in ("--file", "--cmd", "--pre", "--boot-cfg"):
+            {"--file": files, "--cmd": cmds, "--pre": pre}.get(a, []).append(args[i + 1])
+            boot = args[i + 1] if a == "--boot-cfg" else boot
+            i += 2
+        elif a in ("--exe", "--game", "--ovl", "--args", "--net-dos", "--wrap", "--floppy", "--hdd", "--games-file"):
+            raise HostedOnly(a[2:])
+        else:
+            rest.append(a)
+            i += 1
+    dst = {f.split("=", 1)[1].upper() for f in files if "=" in f}
+    flags = []
+    if boot == "glosshell":
+        if "/TEST/COMMAND.COM" not in dst:
+            raise HostedOnly("the DOS's COMMAND.COM under GLOS")
+        lines = pre + cmds + ["VMODE", "SERSAY HX-EXIT program returned without ending the run", "UTEXIT 124"]
+    elif boot == "default":
+        at = [k for k, c in enumerate(cmds) if re.match(r"(?i)^\s*(C:\\TEST\\)?GLOS(\.EXE)?(\s|$)", c)]
+        if len(at) != 1:
+            raise HostedOnly("no GLOS in it" if not at else "GLOS started more than once")
+        flags = cmds[at[0]].split()[1:]
+        if any(not f.upper().startswith(NATIVE_FLAGS) for f in flags) or "/ROUNDTRIP" in [f.upper() for f in flags]:
+            raise HostedOnly("GLOS.EXE " + " ".join(flags))
+        if "GLOS" in " ".join(pre).upper() and "SET GLOS=" in " ".join(pre).upper():
+            flags += [w for l in pre if l.upper().startswith("SET GLOS=") for w in l[9:].split()]
+            pre = [l for l in pre if not l.upper().startswith("SET GLOS=")]
+        lines = pre + cmds[:at[0]]
+    else:
+        raise HostedOnly("--boot-cfg " + boot)
+    work = os.path.join(ROOT, "out", "native-img", name)
+    os.makedirs(work, exist_ok=True)
+    with open(os.path.join(work, "AUTOEXEC.BAT"), "w", newline="") as f:
+        f.write("@ECHO OFF\r\nSET PATH=C:\\HX;C:\\FREEDOS\\BIN\r\nIF EXIST C:\\RUN.BAT CALL C:\\RUN.BAT\r\n"
+                + ("IF EXIST C:\\RUN.BAT C:\\HX\\UTEXIT 125\r\n" if boot == "glosshell" else ""))
+    with open(os.path.join(work, "RUN.BAT"), "w", newline="") as f:
+        f.write("\r\n".join(["C:", "CD \\TEST", "SERSAY HX-BOOT loop=A test=%s" % name] + lines) + "\r\n")
+    put = [os.path.join(work, "AUTOEXEC.BAT") + "=\\AUTOEXEC.BAT", os.path.join(work, "RUN.BAT") + "=\\RUN.BAT"]
+    put += [os.path.join(MGA, "build/ow/dos", t) + "=\\HX\\" + t for t in HX_TOOLS]
+    put += [os.path.join(WATCOM, "binw/dos4gw.exe") + "=\\HX\\DOS4GW.EXE"]
+    if os.path.exists(CWSDPMI):
+        put += [CWSDPMI + "=\\HX\\CWSDPMI.EXE"]
+    fd = freedos_bin()
+    put += [os.path.join(fd, n) + "=\\FREEDOS\\BIN\\" + n.upper() for n in sorted(os.listdir(fd))]
+    has_dir = False
+    for f in files:
+        src, to = f.split("=", 1) if "=" in f else (f, "/TEST/" + os.path.basename(f).upper())
+        if to.upper() == "/TEST/GLOS.EXE":
+            continue                            # (GLOSLDR.SYS is the loader here)
+        has_dir = True
+        put.append((src if os.path.isabs(src) else os.path.join(ROOT, src)) + "=" + to.replace("/", "\\"))
+    if not has_dir:                             # (C:\TEST, RUN.BAT's folder, even with nothing of the case's in it)
+        open(os.path.join(work, "EMPTY"), "w").close()
+        put.append(os.path.join(work, "EMPTY") + "=\\TEST\\EMPTY")
+    img = os.path.join(work, "c.img")
+    mk = subprocess.run(in_dev(["env", "GLOS_CMDLINE=" + " ".join(["\\TEST"] + flags), "sh", "tools/ndos/native-image.sh",
+                                img] + put), cwd=ROOT, capture_output=True)
+    if mk.returncode != 0:
+        raise RuntimeError("native-image.sh for %s: %s" % (name, mk.stderr.decode("latin-1")[-300:]))
+    return rest + ["--hdd", img]
+
+
+def native_watch(name, proc):
+    """A native run's end: nothing is under GLOS to say HX-DONE after it, so when GLOS says it has left
+    (GLOS-EXIT code=N: glos exit) the PC is switched off; a code of 0 is the run's PASS."""
+    out = os.path.join(ROOT, "out", name)
+
+    def watch():
+        code = None
+        while proc.poll() is None:
+            try:
+                m = re.search(rb"GLOS-EXIT code=(\d+)", open(os.path.join(out, "serial.log"), "rb").read())
+            except OSError:
+                m = None
+            if m:
+                code = int(m.group(1))
+                time.sleep(1)
+                power_off(name)
+                break
+            time.sleep(0.5)
+        if code is not None:
+            try:
+                proc.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                pass
+            with open(os.path.join(out, "status"), "w") as f:
+                f.write("PASS" if code == 0 else "FAIL")
+    t = threading.Thread(target=watch, daemon=True)
+    t.start()
+    return t
+
+
 def run(name, args, background=False):
     if os.environ.get("GLOS_SET"):              # GLOS.EXE's flags for the whole run (GLOS_SET=/DIRECT: forced direct mode;
         args = ["--pre", "SET GLOS=" + os.environ["GLOS_SET"]] + args      # not as the shell, started before RUN.BAT)
     name += os.environ.get("LOOPA_SUFFIX", "")  # (tools/soak.sh: the same case several times at once, each run
     out = os.path.join(ROOT, "out", name)       # under a name and in a folder of its own)
+    native = NATIVE and "--hdd" not in args
+    if native:
+        args = native_args(name, args)
     os.makedirs(out, exist_ok=True)
     for stale in ("serial.log", "status", "result.json"):   # a background run's caller polls these
         if os.path.exists(os.path.join(out, stale)):
@@ -193,11 +344,16 @@ def run(name, args, background=False):
     env = dict(os.environ, MGA_DOCKER_NETWORK="host") if not IN_CONTAINER else None
     cmd = runpy_cmd() + ["--name", name, "--out", out, "--idle", "60", "--boot-grace", "60", "--timeout", "300"] + args
     memory_room()
-    if background:
+    if background or native:
         proc = Background(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=ROOT, env=env)
         proc.run_name = name
-        return proc
-    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=ROOT, env=env)
+        watcher = native_watch(name, proc) if native else None
+        if background:
+            return proc
+        proc.wait()
+        watcher.join(timeout=90)
+    else:
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=ROOT, env=env)
     status = open(os.path.join(out, "status")).read().strip() if os.path.exists(os.path.join(out, "status")) else "?"
     serial = open(os.path.join(out, "serial.log"), "rb").read().decode("latin-1").replace("\r", "") \
         if os.path.exists(os.path.join(out, "serial.log")) else ""
@@ -218,7 +374,7 @@ def m1(profile, boot):
     checks = {
         "ticks": abs(ticks - EXPECT) <= EXPECT * TOL,
         "exit0": "GLOS-EXIT code=0" in serial,
-        "vecchk": "HX-VECCHK ok" in serial,
+        "vecchk": hx_vecchk(serial),
         "keyboard": "HX-KEY scan=1c" in serial,
         "textmode": "HX-VMODE bios=03" in serial,
         "mode": bool(mode) and mode.group(1) == ("xms" if boot == "himemx" else "raw"),
@@ -241,7 +397,7 @@ def refuse():
         "--file", HX + "/HDPMI32.EXE=/HX/HDPMI32.EXE",
         "--cmd", "SERSAY HX-START refuse", "--cmd", "HDPMI32 -r", "--cmd", "VECCHK save",
         "--cmd", "C:\\TEST\\GLOS.EXE /ROUNDTRIP", "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"])
-    ok = status == "PASS" and "GLOS-REFUSE reason=dpmi" in serial and "HX-VECCHK ok" in serial \
+    ok = status == "PASS" and "GLOS-REFUSE reason=dpmi" in serial and hx_vecchk(serial) \
         and "GLOS-RING0" not in serial
     print("  %-22s %s" % ("m1-refuse-dpmi", "PASS" if ok else "FAIL"), flush=True)
     return ok
@@ -317,7 +473,7 @@ def m2(profile, boot, selftest=False):
         "exit0": "GLOS-EXIT code=0" in glos,
         "vm": "GLOS-RING0 step=vm" in glos and "GLOS-VM leave code=0" in glos,
         "clean": "GLOS-PANIC" not in glos and "GLOS-WARN" not in glos,
-        "vecchk": "HX-VECCHK ok" in glos,
+        "vecchk": hx_vecchk(glos),
         "keyboard": glos.count("HX-KEY scan=1c") == 2,
         "textmode": "HX-VMODE bios=03" in glos.split("GLOS-EXIT")[-1],
     }
@@ -378,7 +534,7 @@ def hostile(profile, boot):
         "tick-alive": bool(leave and kills and int(leave.group(1)) > kills[-1] + 800),
         "exit0": "GLOS-EXIT code=0" in serial,
         "no-panic": "GLOS-PANIC" not in serial,
-        "vecchk": "HX-VECCHK ok" in serial,
+        "vecchk": hx_vecchk(serial),
         "bios-tick": "HX-HOS waited" in serial,
         "time": bool(re.search(r"HX-TIME rtc=\S+ dos=\S+ diff=[012] ", serial)),     # the session's end (M4e)
         "keyboard": serial.count("HX-KEY scan=1c") == len(HOSTILE) + 1,
@@ -614,7 +770,7 @@ def mempage(profile, boot):
     # pieces, and no block is GLOS's)
     after, before = out_file("mempage-ag-" + tag, "AFTER.TXT"), out_file("mempage-ag-" + tag, "BASE.TXT")
     checks["ag-after"] = free(before) > 0 and free(before) - free(after) == own(after, "STUBTSR") and own(after) < 0
-    checks["ag-clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "HX-DONE 0" in text
+    checks["ag-clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and hx_done(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s page=%s glos=%d/%d agent glos=%d%s" % (
         "mempage-" + tag, "PASS" if not bad else "FAIL", res[0][1] if res else "?", own(f("OFF.TXT")),
@@ -735,7 +891,7 @@ def cache(profile, boot):
     checks["tort-cache"] = [e[0] for e in ends] == ["on", "verify"] and all(int(e[1]) > 0 and int(e[2]) > 0
                                                                             and e[3] == "0" for e in ends)
     checks["tort-clean"] = serial.count("GLOS-EXIT code=0") == 3 and "GLOS-PANIC" not in serial \
-        and "GLOS-WARN" not in serial and "HX-VECCHK ok" in serial
+        and "GLOS-WARN" not in serial and hx_vecchk(serial)
 
     # A 1 MB cache: blocks evicted all the time, nothing wrong; then the cache filled, and given back.
     cfg = batfile("cache-mem-%s/GLOS.CFG" % tag, ["; jobs.py cache", "[cache]", "size = 1"])
@@ -940,7 +1096,7 @@ def net(profile, card):
         "echo": line in echo,
         "mdns": "GLOS-NET mdns name=%s.local\n" % name in serial
                 and "GLOS-NET mdns answer=ok name=%s.local\n" % name in serial,
-        "clean": "GLOS-WARN" not in serial and "GLOS-PANIC" not in serial and "HX-VECCHK ok" in serial,
+        "clean": "GLOS-WARN" not in serial and "GLOS-PANIC" not in serial and hx_vecchk(serial),
     }
     if card == "ne2k":                          # the Crynwr driver owns the ISA card: GLOS refuses it
         st2, s2 = run("netpd-" + tag, ["--machine", profile, "--net", card, "--net-dos"] + GLOS_FILES + [
@@ -993,7 +1149,7 @@ def dpmiconf(profile, boot):
     unimpl = re.findall(r"GLOS-DPMI-UNIMPL \S+ ax=(\w+)", gl)
     checks["unimpl-none"] = not unimpl
     checks["clean"] = "GLOS-PANIC" not in gl and "GLOS-WARN" not in gl and "GLOS-CRASH" not in gl
-    checks["vecchk"] = "HX-VECCHK ok" in gl
+    checks["vecchk"] = hx_vecchk(gl)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("dpmiconf-" + tag, "PASS" if not bad else "FAIL",
                                "" if not bad else " failed: " + " ".join(bad), info), not bad
@@ -1032,7 +1188,7 @@ def dpmiconf16(profile, boot):
     checks["unimpl-none"] = not re.findall(r"GLOS-DPMI-UNIMPL \S+ ax=(\w+)", gl)
     checks["clean"] = "GLOS-PANIC" not in gl and "GLOS-WARN" not in gl
     checks["one-crash"] = gl.count("GLOS-CRASH why=") == 1            # the child that faults on purpose
-    checks["vecchk"] = "HX-VECCHK ok" in gl
+    checks["vecchk"] = hx_vecchk(gl)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("dpmi16-" + tag, "PASS" if not bad else "FAIL",
                                "" if not bad else " failed: " + " ".join(bad), info), not bad
@@ -1077,7 +1233,7 @@ def tpx(profile, boot):
     gl = text["glos"]
     checks["glos-16bit"] = "GLOS-DPMI start bits=16" in gl and "GLOS-DPMI resident" in gl     # RTM's TSR
     checks["clean"] = "GLOS-PANIC" not in gl and "GLOS-WARN" not in gl and "GLOS-CRASH" not in gl and "DPMI-UNIMPL" not in gl
-    checks["vecchk"] = "HX-VECCHK ok" in gl
+    checks["vecchk"] = hx_vecchk(gl)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s" % ("tpx-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad)), \
         not bad
@@ -1251,7 +1407,7 @@ def dpmi(profile, boot):
             "vendor" + bits: "HX-DPMI vendor glos=0 dos4g=1" in gl,
             "espfix" + bits: bits == "32" or "HX-DPMI espfix hi=1234" in gl,
             "clean" + bits: "GLOS-PANIC" not in gl and "GLOS-WARN" not in gl and "DPMI-UNIMPL" not in gl,
-            "vecchk" + bits: "HX-VECCHK ok" in gl,
+            "vecchk" + bits: hx_vecchk(gl),
         })
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s" % ("dpmi-" + tag, "PASS" if not bad else "FAIL",
@@ -1442,7 +1598,7 @@ def djtst(profile, boot):
                           os.path.join(ROOT, "build/dj/CRASHME.EXE")], capture_output=True, text=True).stdout
     checks["symcrash"] = re.search(r"^eip\s+\w+\s+_crash_here", sym, re.M) is not None and \
         re.search(r"^eip\s+\w+\s+_crash_gp", sym, re.M) is not None
-    checks["vecchk"] = "HX-VECCHK ok" in gl
+    checks["vecchk"] = hx_vecchk(gl)
     checks["clean"] = "GLOS-PANIC" not in gl and "GLOS-WARN" not in gl and "DPMI-UNIMPL" not in gl
     # MULTISPN3's children ran as levels of its context (M4c).
     ms = gl[gl.find("HX-RUN-START MULTISPN3"):gl.find("HX-RUN MULTISPN3")]
@@ -1645,7 +1801,7 @@ def ecm(profile, boot):
     runs = {h: dj_runs(t).get("ECM") for h, t in text.items()}
     g, hd = runs["glos"], runs["hdpmi"]
     ok = bool(g and hd and g[1] == hd[1] and hr_norm(g[0]) == hr_norm(hd[0]))
-    ok = ok and "HX-VECCHK ok" in text["glos"] and "GLOS-PANIC" not in text["glos"]
+    ok = ok and hx_vecchk(text)["glos"] and "GLOS-PANIC" not in text["glos"]
     info = ""
     if g and hd and not ok:
         a, b = hr_norm(g[0]), hr_norm(hd[0])
@@ -1845,7 +2001,7 @@ def reboot_case(profile, card):
     text = agent.wait()
     checks["line"] = "GLOS-REBOOT\n" in text and text.count("HX-START reboot") == 2
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad)), \
         not bad
@@ -1998,7 +2154,7 @@ def idle_case(profile, card):
     text = agent.wait()
     checks["line"] = "GLOS-REBOOT source=cad\n" in text and text.count("HX-START idle") == 2
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL",
                              "" if not bad else " failed: " + " ".join(bad) + info), not bad
@@ -2216,7 +2372,7 @@ def shell_case(profile, card):
     text = agent.wait()
     checks["ends"] = text.count("GLOS-SHELL begin") == 3 and text.count("GLOS-SHELL end") == 3
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad)), \
         not bad
@@ -2358,7 +2514,7 @@ def plip_case(profile, card):
         checks["timeout"] = False
     text = agent.wait()
     checks["clean"] = not re.search(r"GLOS-PANIC|GLOS-WARN|GLOS-CRASH", text)
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-VECCHK ok" in text and "HX-DONE 0" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_vecchk(text) and hx_done(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL",
                              info + ("" if not bad else " failed: " + " ".join(bad))), not bad
@@ -2516,7 +2672,7 @@ def batch_case(profile, card):
         checks["timeout"] = False
     text = agent.wait()
     checks["clean"] = not re.search(r"GLOS-PANIC|GLOS-WARN|GLOS-CRASH", text)
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad),
                              info if bad else ""), not bad
@@ -2766,7 +2922,7 @@ def member_case(profile, card, par=False):
     far.kill()
     far.wait()
     checks["clean"] = not re.search(r"GLOS-PANIC|GLOS-WARN|GLOS-CRASH", text + flog())
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL",
                              "" if not bad else " failed: " + " ".join(bad) + info), not bad
@@ -2849,7 +3005,7 @@ def cable_case(profile, card):
         checks["timeout"] = False
     text = agent.wait()
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad)), \
         not bad
@@ -2963,8 +3119,8 @@ def restart_case(profile, card):
     text = agent.wait()
     checks["codes"] = text.count("GLOS-EXIT code=200") == 1 and text.count("GLOS-EXIT code=0") == 1
     checks["no-reset"] = text.count("HX-START restart") == 1
-    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "HX-VECCHK ok" in text
-    checks["done"] = "HX-DONE 0" in text
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and hx_vecchk(text)
+    checks["done"] = hx_done(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad)), \
         not bad
@@ -3196,7 +3352,7 @@ def ssh_case(profile, card):
     text = agent.wait()
     checks["strict-kex"] = "GLOS-SSH kex done strict=1" in text
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-EXIT code=0" in text
-    checks["done"] = "HX-DONE 0" in text and "HX-VECCHK ok" in text
+    checks["done"] = hx_done(text) and hx_vecchk(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL", info,
                                "" if not bad else " failed: " + " ".join(bad)), not bad
@@ -3218,7 +3374,7 @@ def sess_left(text):
     after = re.search(r"HX-TIME rtc=\S+ dos=\S+ diff=(\d+) vec60=(\w+) kbd=(\w+)", text[a:] if a >= 0 else "")
     if not before or not after:
         return None
-    return {"pic": "HX-VECCHK ok" in text[a:], "mode": "HX-VMODE bios=03" in text[a:],
+    return {"pic": hx_vecchk(text)[a:], "mode": "HX-VMODE bios=03" in text[a:],
             "clock": int(after.group(1)) <= 2, "int60": after.group(2) == before.group(2),
             "locks": after.group(3) == before.group(3)}
 
@@ -3543,7 +3699,7 @@ def sess_agent(profile, card):
     checks["run-sessions"] = bool(re.search(r"GLOS-SESSION begin n=\d+ prog=ENABLE.EXE \S+ mode=03 direct=1", text)) \
         and bool(re.search(r"GLOS-SESSION begin n=\d+ prog=NOPROF.EXE \S+ mode=03 profile=PROFCHK.EXE\n", text)) \
         and "HX-PROF var=yes path=C:\\PROF" in text and text.count("GLOS-SESSION direct-end") == 1
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and text.count("HX-VECCHK ok") == 2
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text) and text.count("HX-VECCHK ok") == 2
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s" % ("sess-" + tag, "PASS" if not bad else "FAIL",
                              "" if not bad else " failed: " + " ".join(bad)), not bad
@@ -3730,7 +3886,7 @@ def shot_case(profile, vcard, card, prog):
     text = agent.wait()
     checks["kinds"] = {"text", "pal16", "pal256"} <= taken and any(k.startswith("rgb") for k in taken)
     checks["clean"] = not re.search(r"GLOS-PANIC|GLOS-CRASH|GLOS-WARN (?!vif-stuck)|DPMI-UNIMPL", text)   # (vga13c)
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text) and hx_vecchk(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-26s %s modes=%d skipped=%s%s%s" % (
         "shot-" + tag, "PASS" if not bad else "FAIL", len(SHOT_MODES) - len(skipped), ",".join(skipped) or "none",
@@ -3831,7 +3987,7 @@ def input_case(profile, card, mouse_too):
     checks["hotkey-reason"] = bool(re.search(r"GLOS-KILL psp=\w+ at=\S+ ticks=\d+ reason=hotkey", log))
     checks["direct"] = "HX-DIRECT keys=1c9c" in log
     checks["clean"] = not re.search(r"GLOS-PANIC|GLOS-CRASH|GLOS-WARN|DPMI-UNIMPL", log)
-    checks["done"] = "GLOS-EXIT code=0" in log and "HX-DONE 0" in log and "HX-VECCHK ok" in log
+    checks["done"] = "GLOS-EXIT code=0" in log and hx_done(log) and hx_vecchk(log)
     if not (checks["key"] and checks["ext"] and checks.get("mouse", True) and checks.get("mouse-exact", True)):
         info = " keys=%r mouse=%r tests=%r" % (keys, mouse, tests)
     bad = [k for k, v in checks.items() if not v]
@@ -3920,7 +4076,7 @@ def gdb_case(profile, card):
     log = agent.wait()
     checks["said"] = "HX-GDBME counter=2001" in log and log.count("HX-GDBME counter=85") == 2
     checks["clean"] = not re.search(r"GLOS-PANIC|GLOS-CRASH|GLOS-WARN|DPMI-UNIMPL", log)
-    checks["done"] = "GLOS-EXIT code=0" in log and "HX-DONE 0" in log and "HX-VECCHK ok" in log
+    checks["done"] = "GLOS-EXIT code=0" in log and hx_done(log) and hx_vecchk(log)
     bad = [k for k, v in checks.items() if not v]
     return "  %-26s %s%s%s" % ("gdb-" + tag, "PASS" if not bad else "FAIL",
                                "" if not bad else " failed: " + " ".join(bad), info), not bad
@@ -4072,7 +4228,7 @@ def display_case(profile, vcard, card, cfg_mode, accel="on"):
     text = agent.wait()
     checks["text-at-exit"] = "HX-VMODE bios=03" in text
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text) and hx_vecchk(text)
     if vcard.startswith("g4"):                  # a G400: GLOS looked at its clocks once its settings were read, and
         # left them (86Box's BIOS has not the table of the card this was tried with; the bench shows the rest)
         checks["clocks"] = len(re.findall(r"GLOS-DISPLAY clocks=bios why=\S+\n", text)) == 1 \
@@ -4187,7 +4343,7 @@ def desk_case(profile, vcard, card):
     text = agent.wait()
     checks["text-at-exit"] = "HX-VMODE bios=03" in text
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text) and hx_vecchk(text)
     if vcard in MATROX_CARDS:                   # (M7 step C: the engine up on each mode, drawing nothing yet)
         checks["accel"] = text.count("GLOS-MGA up ") >= 4 and "GLOS-MGA down" in text and "GLOS-MGA error" not in text
     bad = [k for k, v in checks.items() if not v]
@@ -4706,7 +4862,7 @@ def win_case(profile, vcard, card, bits, bits2):
     text = agent.wait()
     checks["text-at-exit"] = "HX-VMODE bios=03" in text
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text) and hx_vecchk(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("win-" + tag, "PASS" if not bad else "FAIL", info,
                                "" if not bad else " failed: " + " ".join(bad)), not bad
@@ -4985,7 +5141,7 @@ def gpu_case(profile, vcard, card):
     text = agent.wait()
     checks["text-at-exit"] = "HX-VMODE bios=03" in text
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text) and hx_vecchk(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("gpu-" + tag, "PASS" if not bad else "FAIL", info,
                                "" if not bad else " failed: " + " ".join(bad)), not bad
@@ -5354,7 +5510,7 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
     checks["sb-stopped"] = re.search(r"HX-SBCHK dma=\d+ stopped", text) is not None if not (cmi or es) \
         else ("GLOS-CMI left" if cmi else "GLOS-ES left") in text     # (a PCI bus master stopped at glos exit)
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text) and hx_vecchk(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("audio-" + tag, "PASS" if not bad else "FAIL", info,
                                "" if not bad else " failed: " + " ".join(bad)), not bad
@@ -5478,7 +5634,7 @@ def joy_case(profile, vcard, card):
         checks["timeout"] = False
     text = agent.wait()
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text) and hx_vecchk(text)
     bad = [k for k, v in checks.items() if not v]
     print("    joy-%s: %s" % (tag, "; ".join(info)))
     return "  %-22s %s%s" % ("joy-" + tag, "PASS" if not bad else "FAIL",
@@ -5511,7 +5667,7 @@ def crystal_off_case(profile, vcard, card):
         checks["timeout"] = False
     text = agent.wait()
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text) and hx_vecchk(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s" % ("audio-" + tag, "PASS" if not bad else "FAIL",
                              "" if not bad else " failed: " + " ".join(bad)), not bad
@@ -5609,7 +5765,7 @@ def glwin_case(profile, vcard, card, desk):
     if differ:
         print("    %s frames that differ: %s" % (tag, " ".join(differ)))
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-VECCHK ok" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_vecchk(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("glwin-" + tag, "PASS" if not bad else "FAIL", info,
                                "" if not bad else " failed: " + " ".join(bad)), not bad
@@ -5815,7 +5971,7 @@ def sdlwin_case(profile, vcard, card, desk):
         capture_output=True).returncode == 0
     checks["sb-stopped"] = re.search(r"HX-SBCHK dma=\d+ stopped", text) is not None
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-VECCHK ok" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_vecchk(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("sdlwin-" + tag, "PASS" if not bad else "FAIL", info,
                                "" if not bad else " failed: " + " ".join(bad)), not bad
@@ -5928,7 +6084,7 @@ def games_case(profile, vcard, card, desk):
     text = agent.wait()
     checks["sb-stopped"] = re.search(r"HX-SBCHK dma=\d+ stopped", text) is not None
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-VECCHK ok" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_vecchk(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("games-" + tag, "PASS" if not bad else "FAIL", info,
                                "" if not bad else " failed: " + " ".join(bad)), not bad
@@ -5982,7 +6138,7 @@ def win_phys_case(profile, vcard, card, unload):
     text = agent.wait()
     checks["started"] = "GLOS-APP start id=1" in text
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text) and hx_vecchk(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("winphys-" + tag, "PASS" if not bad else "FAIL", info,
                                "" if not bad else " failed: " + " ".join(bad)), not bad
@@ -6002,7 +6158,7 @@ def apps_run(profile, boot):
     st, serial = run("apps-run-" + tag, args)
     checks = {"status": st == "PASS", "app": "GLOS-APP start id=1 prog=APPTEST.EXE" in serial,
               "end": bool(re.search(r"GLOS-APP end id=1 prog=APPTEST.EXE code=57 how=0", serial)),
-              "exit": "GLOS-EXIT code=57" in serial, "vectors": "HX-VECCHK ok" in serial,
+              "exit": "GLOS-EXIT code=57" in serial, "vectors": hx_vecchk(serial),
               "no-panic": "GLOS-PANIC" not in serial}
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s" % ("apps-run-" + tag, "PASS" if not bad else "FAIL",
@@ -6027,7 +6183,7 @@ def api_case(profile, boot):
     checks = {"status": st == "PASS", "done": bool(done) and done.group(2) == "0", "cases": len(cases) >= 148,
               "app": bool(re.search(r"GLOS-APP start id=1 prog=APITEST.EXE", serial)),
               "end": bool(re.search(r"GLOS-APP end id=1 prog=APITEST.EXE code=0 ", serial)),
-              "exit": "GLOS-EXIT code=0" in serial, "vectors": "HX-VECCHK ok" in serial,
+              "exit": "GLOS-EXIT code=0" in serial, "vectors": hx_vecchk(serial),
               "no-panic": "GLOS-PANIC" not in serial and "GLOS-CRASH" not in serial}
     bad = [k for k, v in checks.items() if not v]
     info = " cases=%d" % len(cases) + (" failed-cases=" + ",".join(bad_cases) if bad_cases else "")
@@ -6057,7 +6213,7 @@ def api_lfn_case(profile, boot):
     bad_cases = [c + w.rstrip() for c, k, w in cases if k != "1"]
     checks = {"status": st == "PASS", "done": bool(done) and done.group(2) == "0", "cases": len(cases) == 5,
               "end": bool(re.search(r"GLOS-APP end id=1 prog=APITEST.EXE code=0 ", serial)),
-              "exit": "GLOS-EXIT code=0" in serial, "vectors": "HX-VECCHK ok" in serial,
+              "exit": "GLOS-EXIT code=0" in serial, "vectors": hx_vecchk(serial),
               "no-panic": "GLOS-PANIC" not in serial and "GLOS-CRASH" not in serial}
     bad = [k for k, v in checks.items() if not v]
     info = " cases=%d" % len(cases) + (" failed-cases=" + ";".join(bad_cases) if bad_cases else "")
@@ -7616,7 +7772,7 @@ def thr_case(profile, card):
         and bool(re.search(r"GLOS-CRASH file=C:\\TEST\\CRASH\\CRASH\d+\.TXT", text))    # (beside GLOS.EXE: not C:\GLOS by name)
     checks["one-crash"] = len(re.findall(r"GLOS-CRASH why=", text)) == 1
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-APP error" not in text and "GLOS-APP warn" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text) and hx_vecchk(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("thr-" + tag, "PASS" if not bad else "FAIL", info,
                                "" if not bad else " failed: " + " ".join(bad)), not bad
@@ -7909,7 +8065,7 @@ def apps_case(profile, card):
     checks["crash-report"] = bool(re.search(r"GLOS-CRASH why=exception vec=0e .*prog=C:\\TEST\\APPTEST.EXE", text)) \
         and bool(re.search(r"GLOS-CRASH file=C:\\TEST\\CRASH\\CRASH\d+\.TXT", text))    # (beside GLOS.EXE: not C:\GLOS by name)
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-APP error" not in text and "GLOS-APP warn" not in text
-    checks["done"] = text.count("GLOS-EXIT code=0") == 2 and "HX-DONE 0" in text and "HX-VECCHK ok" in text
+    checks["done"] = text.count("GLOS-EXIT code=0") == 2 and hx_done(text) and hx_vecchk(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("apps-" + tag, "PASS" if not bad else "FAIL", info,
                                "" if not bad else " failed: " + " ".join(bad)), not bad
@@ -8155,7 +8311,7 @@ def hover_pair_case(profile, card):
     far.kill()
     far.wait()
     checks["clean"] = not re.search(r"GLOS-PANIC|GLOS-WARN|GLOS-CRASH", text + flog())
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % (tag, "PASS" if not bad else "FAIL", info if bad else info.split(" near=")[0],
                                "" if not bad else " failed: " + " ".join(bad)), not bad
@@ -8344,7 +8500,7 @@ def saver_case(profile, vcard, card):
         checks["timeout"] = False
     text = agent.wait()
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s" % ("saver-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
 
@@ -8961,7 +9117,7 @@ def time_case(profile, card):
     text = agent.wait()
     ntp.close()
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text)
     for n in notes:
         print("    time-%s %s" % (tag, n))
     bad = [k for k, v in checks.items() if not v]
@@ -9150,7 +9306,7 @@ def bdisk_case(profile, card):
     checks["untouched"] = untouched
     checks["size"] = bool(second) and 0 <= size // 512 - int(second.group(1)) <= 2 * 16 * 63
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-DISKTEST error" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s" % ("floppy-" + tag, "PASS" if not bad else "FAIL",
                              info + ("" if not bad else " failed: " + " ".join(bad))), not bad
@@ -9291,7 +9447,7 @@ def disk_case(profile, card, mb):
     checks["dd-image"] = dd_start is not None and head == dd_start and copied == head[:2000 * 512]
     checks["logged"] = all(w in text for w in ("GLOS-DISK new disk=81", "GLOS-DISK format disk=81", "GLOS-DISK boot disk=81"))
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text)
     for n in notes:
         print("DISK %s: %s" % (tag, n), flush=True)
     bad = [k for k, v in checks.items() if not v]
@@ -9627,7 +9783,7 @@ def netapp_case(profile, card):
     text = agent.wait()
     echo.close()
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text)
     for n in notes:
         print("    netapp-%s %s" % (tag, n))
     bad = [k for k, v in checks.items() if not v]
@@ -10024,7 +10180,7 @@ def https_case(profile, card):
     for srv in servers.values():
         srv.close()
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text)
     for n in notes:
         print("    https-%s %s" % (tag, n))
     bad = [k for k, v in checks.items() if not v]
@@ -10275,7 +10431,7 @@ def filesnet_case(profile, vcard, card, bits):
     text = agent.wait()
     srv.close()
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text
-    checks["done"] = "HX-DONE 0" in text
+    checks["done"] = hx_done(text)
     bad = [k for k, v in checks.items() if not v]
     if bad:
         for n in notes:
@@ -10475,7 +10631,7 @@ def sshprog_case(profile, card):
     text = agent.wait()
     srv.close()
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s" % ("sshc-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad)), \
         not bad
@@ -10757,7 +10913,7 @@ def backup_case(profile, vcard, card, bits):
     text = agent.wait()
     srv.close()
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text
-    checks["done"] = "HX-DONE 0" in text
+    checks["done"] = hx_done(text)
     bad = [k for k, v in checks.items() if not v]
     if bad:
         for n in notes:
@@ -10850,7 +11006,7 @@ def telnet_case(profile, card):
     board.close()
     plain.close()
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s" % ("sshc-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad)), \
         not bad
@@ -10985,7 +11141,7 @@ def serial_case(profile, card):
     if line:
         line.close()
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s" % ("sshc-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad)), \
         not bad
@@ -11785,7 +11941,7 @@ def config_case(profile, vcard, card):
         checks["timeout"] = False
     text = agent.wait()
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
-    checks["done"] = text.count("GLOS-EXIT code=0") == 2 and "HX-DONE 0" in text
+    checks["done"] = text.count("GLOS-EXIT code=0") == 2 and hx_done(text)
     for n in notes:
         print("    config-%s %s" % (tag, n))
     bad = [k for k, v in checks.items() if not v]
@@ -11944,7 +12100,7 @@ def console_case(profile, vcard, card, bits):
         checks["timeout"] = False
     text = agent.wait()
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text)
     for n in notes:
         print("    console-%s %s" % (tag, n))
     bad = [k for k, v in checks.items() if not v]
@@ -12149,7 +12305,7 @@ def control_case(profile, vcard, card):
         checks["timeout"] = False
     text = agent.wait()
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text)
     for n in notes:
         print("    control-%s %s" % (tag, n))
     bad = [k for k, v in checks.items() if not v]
@@ -12238,7 +12394,7 @@ def gui_case(profile, vcard, card, bits, scripts=None, files=None, tag_prefix="g
         checks["timeout"] = False
     text = agent.wait()
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text)
     for n in notes:
         print("    %s-%s %s" % (tag_prefix, tag, n))
     bad = [k for k, v in checks.items() if not v]
@@ -12247,8 +12403,13 @@ def gui_case(profile, vcard, card, bits, scripts=None, files=None, tag_prefix="g
 
 
 def matrix(fn, combos, jobs):
+    def one(pb):
+        try:
+            return fn(*pb)
+        except HostedOnly as why:               # (the native variant: a case that needs a DOS under GLOS)
+            return "  %-22s SKIP hosted only (%s)" % ("%s %s" % (fn.__name__, "-".join(str(x) for x in pb)), why), True
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:
-        results = list(ex.map(lambda pb: fn(*pb), combos))
+        results = list(ex.map(one, combos))
     for r in results:
         print(r[0], flush=True)
     return results
@@ -12265,7 +12426,12 @@ def main():
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
+    ap.add_argument("--native", action="store_true", help="the native variant: every case's PC starts GLOS from a "
+                    "disk with no DOS on it (docs/v1/native-dos.md); cases that need a DOS under GLOS are skipped")
     a = ap.parse_args()
+    if a.native:
+        global NATIVE
+        NATIVE = True
     if a.suite == "refuse":
         return 0 if refuse() else 1
     combos = [(p, b) for p in a.profile or PROFILES for b in a.boot or BOOTS]
