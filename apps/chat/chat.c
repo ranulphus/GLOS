@@ -152,6 +152,8 @@ static void demo_hears(char *line)
     } else if (!strcmp(line, "USER")) {
         demo_user = 1;
     } else if (!strcmp(line, "PING")) {
+        if (!demo_mute)
+            say("demo pong");                   /* (the suite's: a ping heard and answered) */
         demo_line("PONG %s", rest);
         if (!demo_mute)
             demo_clock -= 7;            /* (a PONG takes none of the made-up time: pings come by the wall clock) */
