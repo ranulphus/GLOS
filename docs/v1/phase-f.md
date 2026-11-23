@@ -1777,8 +1777,13 @@ none unless they give it.
   it fits); connected by hand; a second channel; "!drop": again in 5, on, `rejoining #glos,#more`; "!mute":
   pinged, no answer, again in 5, on and rejoined; the second channel's log, byte for byte. `chat` unchanged.
   The notification is not driven by a script (the window would have to lose the focus as a line comes).
-- **Not yet:** more than one network at a time; a search over the logs; IRCv3's chat history, account-notify
-  and message tags beyond the time.
+- **Search the Logs** (later the same morning; Chat, Ctrl+F): the words asked for (any case, as Find has
+  them) looked for in every line of every log (`CHAT\LOGS\*\*.LOG`), the first 300 listed with where each is
+  (the network's folder and the tab's name) and the line; Open the Log (or Enter) opens that file with its
+  program (`glos_open`: Notepad for .LOG); none found says so, or that no logs are kept. The host's GLOS stand-in
+  gains a `glos_open` taken as started. `chat-again`: "welcome", 8 lines (a picture).
+- **Not yet:** more than one network at a time; IRCv3's chat history, account-notify and message tags beyond the
+  time.
 
 ## Disk Tools: the older backups thinned out (2026-11-23)
 

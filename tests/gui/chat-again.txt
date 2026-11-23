@@ -3,7 +3,7 @@
 # again; the settings keep logs and hide comings and goings; connected again by hand, a second channel joined; the
 # connection lost ("!drop": as a network loses it) is made again by itself five seconds on, both channels joined
 # again; the server made silent ("!mute") is pinged, given up on, and the connection made again. The second
-# channel's log, the same every run (the made-up server's own clock).
+# channel's log, the same every run (the made-up server's own clock); the logs searched for "welcome" (Ctrl+F).
 run CHAT.EXE -demo -silence 3
 wait "Chat"
 pause 300
@@ -52,6 +52,15 @@ pause 6000
 said CHAT connecting again
 said CHAT on glos
 said CHAT rejoining #glos,#more
+pause 300
+key ctrl+f
+wait "Search the Logs"
+type welcome\n
+said CHAT logs searched welcome found 8
+wait "Found in the Logs"
+shot found "Found in the Logs"
+key esc
+gone "Found in the Logs"
 key alt+f4
 gone "Chat"
 expect CHAT end

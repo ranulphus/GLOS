@@ -36,7 +36,7 @@
 #include "../shared/irc.h"
 #include "../shared/ircnet.h"
 
-enum { C_CONNECT = 1, C_DISCONNECT, C_SETTINGS, C_EXIT, C_JOIN, C_CLOSE, C_NEXT, C_PREV };
+enum { C_CONNECT = 1, C_DISCONNECT, C_SETTINGS, C_EXIT, C_JOIN, C_CLOSE, C_NEXT, C_PREV, C_SEARCH };
 
 static struct gui_window *win;
 static struct gui_widget *tree, *view, *users, *input, *topic, *status;
@@ -478,6 +478,121 @@ static void log_line(const struct irc_buffer *b, const struct irc_line *l)
         fprintf(f, "%04ld-%02ld-%02ld %02lu:%02lu:%02lu %s\r\n", y, m, d, s / 3600, s / 60 % 60, s % 60, t);
         fclose(f);
     }
+}
+
+/* ---- (2026-11-23) the logs searched: every line kept that has the words (as Find has them: any case), listed
+   with where it is; Open shows its log (Notepad, or what opens .LOG files) */
+
+#define FOUND_MOST 300
+static struct found_line { char path[300], where[24], text[200]; } *found;
+static int nfound;
+static struct gui_widget *found_list;
+
+static void found_open(int row)
+{
+    if (row >= 0 && row < nfound) {
+        say("log opened %s", found[row].where);
+        glos_open(found[row].path, NULL, NULL);
+    }
+}
+
+static void found_on(struct gui_widget *w, int what)
+{
+    if (what == GUI_ON_ACTIVATE)
+        found_open(gui_list_get(w));
+}
+
+static void found_done(struct gui_widget *b, int what)
+{
+    (void)what;
+    if (b->id == 1)                             /* Open: the log of the line chosen (the list stays) */
+        found_open(gui_list_get(found_list));
+    else
+        gui_end_modal(b->win, GUI_CANCEL_R);
+}
+
+static void logs_file(const char *path, const char *net, const char *name, const char *what)
+{
+    char line[600];
+    FILE *f = gui_fopen(path, "rb");
+    struct gui_found m;
+    if (!f)
+        return;
+    while (nfound < FOUND_MOST && fgets(line, sizeof line, f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        if (gui_match(what, 0, line, (int)strlen(line), 0, &m) > 0) {
+            struct found_line *o = &found[nfound++];
+            snprintf(o->path, sizeof o->path, "%s", path);
+            snprintf(o->where, sizeof o->where, "%.8s %.12s", net, name);
+            snprintf(o->text, sizeof o->text, "%s", line);
+        }
+    }
+    fclose(f);
+}
+
+static void logs_search(void)
+{
+    char what[80] = "", top[300], logs[300], dir[300], path[320], t[120];
+    struct gui_dirent *nets = NULL, *files = NULL;
+    int nn, nf, i, k;
+    struct gui_window *d;
+    struct gui_widget *box, *row;
+    static const char *const heads[2] = { GUI_N("Where"), GUI_N("Said") };
+    static const int widths[2] = { 130, 380 };
+    if (!glos_home() || !gui_ask(win, GUI_T("Search the Logs"), GUI_T("The words to look for:"), what, sizeof what) || !what[0])
+        return;
+    free(found);
+    if (!(found = calloc(FOUND_MOST, sizeof *found)))
+        return;
+    nfound = 0;
+    gui_path_join(top, sizeof top, glos_home(), "CHAT");
+    gui_path_join(logs, sizeof logs, top, "LOGS");
+    nn = gui_dir_read(logs, &nets);
+    for (i = 0; i < nn && nfound < FOUND_MOST; i++) {
+        if (!nets[i].dir)
+            continue;
+        gui_path_join(dir, sizeof dir, logs, nets[i].name);
+        nf = gui_dir_read(dir, &files);
+        for (k = 0; k < nf && nfound < FOUND_MOST; k++) {
+            const char *dot = strrchr(files[k].name, '.');
+            char name[16];
+            if (files[k].dir || !dot || strcmp(dot, ".LOG"))
+                continue;
+            snprintf(name, sizeof name, "%.*s", (int)(dot - files[k].name), files[k].name);
+            gui_path_join(path, sizeof path, dir, files[k].name);
+            logs_file(path, nets[i].name, name, what);
+        }
+        free(files), files = NULL;
+    }
+    free(nets);
+    say("logs searched %s found %d", what, nfound);
+    if (!nfound) {
+        snprintf(t, sizeof t, GUI_T("\"%s\" is in none of the logs."), what);
+        gui_message(win, GUI_T("Search the Logs"), cfg.logs || nn > 0 ? t
+                    : GUI_T("There are no logs: Chat, Settings, Keep logs keeps them."), GUI_MB_OK);
+        return;
+    }
+    d = gui_window(GUI_T("Found in the Logs"), 560, 330, GUI_W_DIALOG);
+    d->owner = win;
+    box = gui_vbox(d->root, 6, 8);
+    found_list = gui_list(box, 2, heads, widths);
+    gui_grow(found_list, 1);
+    for (i = 0; i < nfound; i++) {
+        const char *cells[2] = { found[i].where, found[i].text };
+        gui_list_add(found_list, cells, NULL, NULL);
+    }
+    gui_on(found_list, found_on, 0);
+    gui_list_set(found_list, 0);
+    snprintf(t, sizeof t, nfound >= FOUND_MOST ? GUI_T("The first %d lines with \"%s\".") : GUI_T("%d lines with \"%s\"."),
+             nfound, what);
+    gui_label(box, t);
+    row = gui_hbox(box, 6, 0);
+    gui_space(row, 0, 0);
+    gui_button(row, GUI_T("&Open the Log"), found_done, 1)->flags |= GUI_DEFAULT;
+    gui_button(row, GUI_T("Close"), found_done, 2)->flags |= GUI_CANCEL;
+    gui_focus(found_list);
+    gui_modal(d);
+    found_list = NULL;
 }
 
 /* ---- told (a setting): named in a channel, or spoken to privately, while Chat is not in front */
@@ -1018,6 +1133,9 @@ static void command(struct gui_window *w, int id)
     case C_SETTINGS:
         settings();
         break;
+    case C_SEARCH:
+        logs_search();
+        break;
     case C_EXIT:
         gui_quit(0);
         break;
@@ -1084,6 +1202,7 @@ static void build(void)
     gui_command(win, C_CONNECT, GUI_T("&Connect"), "Ctrl+K", NULL, NULL);
     gui_command(win, C_DISCONNECT, GUI_T("&Disconnect"), NULL, NULL, NULL);
     gui_command(win, C_SETTINGS, GUI_T("&Settings..."), NULL, NULL, NULL);
+    gui_command(win, C_SEARCH, GUI_T("Search the &Logs..."), "Ctrl+F", NULL, GUI_T("Every line kept in the logs that has the words"));
     gui_command(win, C_EXIT, GUI_T("E&xit"), "Alt+F4", NULL, NULL);
     gui_command(win, C_JOIN, GUI_T("&Join..."), "Ctrl+J", NULL, NULL);
     gui_command(win, C_CLOSE, GUI_T("&Leave and Close"), "Ctrl+W", NULL, NULL);
@@ -1093,7 +1212,7 @@ static void build(void)
     m = gui_menu(bar, GUI_T("&Chat"));
     gui_menu_command(m, C_CONNECT), gui_menu_command(m, C_DISCONNECT);
     gui_menu_sep(m);
-    gui_menu_command(m, C_SETTINGS);
+    gui_menu_command(m, C_SETTINGS), gui_menu_command(m, C_SEARCH);
     gui_menu_sep(m);
     gui_menu_command(m, C_EXIT);
     m = gui_menu(bar, GUI_T("C&hannel"));

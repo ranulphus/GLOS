@@ -1221,6 +1221,13 @@ int glos_job_keys(glos_handle job, const unsigned short *k, unsigned n) { (void)
 __attribute__((weak)) int glos_job_signal(glos_handle job, unsigned what) { (void)job, (void)what; return GLOS_E_HANDLE; }
 __attribute__((weak)) int glos_job_status(glos_handle job, struct glos_job_status *out) { (void)job, (void)out; return GLOS_E_HANDLE; }
 int glos_shell(int on) { (void)on; return 0; }
+/* (A file opened with its program: nothing runs on the host; taken as started, as a detached job is.) */
+__attribute__((weak)) int glos_open(const char *path, const char *with, const char *verb)
+{
+    (void)path, (void)with, (void)verb;
+    last_error = 0;
+    return 1;
+}
 
 /* SECRETS: a few, kept for the run (Chat's password). */
 static struct { char name[32]; unsigned char value[128]; unsigned length; } kept_secrets[4];

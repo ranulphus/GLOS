@@ -20,7 +20,9 @@ line names you, or someone speaks to you privately, while Chat is not in front, 
 flashes and a notification says who it was.
 
 Logs are plain text, a file for each channel and conversation, in GLOS's folder under CHAT\LOGS and then the
-network's name: #glos on Libera.Chat is `CHAT\LOGS\LIBERACH\GLOS.LOG`. Each line has its date and time.
+network's name: #glos on Libera.Chat is `CHAT\LOGS\LIBERACH\GLOS.LOG`. Each line has its date and time. **Chat,
+Search the Logs** (Ctrl+F) finds every line kept that has the words you give, in any letters, and opens the
+log of the one you choose.
 
 ## Talking
 
