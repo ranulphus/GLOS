@@ -84,10 +84,13 @@ static glos_handle step_out, step_in;   /* the notes heard as they are put; a MI
 
 /* a drag on the roll */
 enum { D_NONE, D_MOVE, D_STRETCH };
-struct step {                           /* a track's notes before a change and after it */
-    int track;
-    struct song_note *before, *after;
-    unsigned long nbefore, nafter;
+struct step {                           /* a track's notes and its events before a change and after it; and a
+                                           second track's notes where the change took notes there (Move Bars) */
+    int track, track2;                  /* track2 -1: none */
+    struct song_note *before, *after, *before2, *after2;
+    unsigned long nbefore, nafter, nbefore2, nafter2;
+    struct song_event *ev_before, *ev_after;
+    unsigned long nev_before, nev_after;
 };
 static int drag, drag_x, drag_key, drag_added;
 static struct step *drag_step;
@@ -331,36 +334,79 @@ static void notes_put(int track, const struct song_note *n, unsigned long count)
     gui_damage(roll);
 }
 
+static struct song_event *events_copy(const struct song_track *t)
+{
+    struct song_event *e = malloc((t->nevents + 1) * sizeof *e);
+    if (e)
+        memcpy(e, t->events, t->nevents * sizeof *e);
+    return e;
+}
+
+static void events_put(int track, const struct song_event *e, unsigned long count)
+{
+    struct song_track *t = &song->track[track];
+    struct song_event *m = malloc((count + 1) * sizeof *m);
+    if (!m)
+        return;
+    memcpy(m, e, count * sizeof *m);
+    free(t->events);
+    t->events = m, t->nevents = count, t->event_room = count + 1;
+}
+
 static void step_undo(void *p)
 {
     struct step *st = p;
+    if (st->track2 >= 0)
+        notes_put(st->track2, st->before2, st->nbefore2);
+    events_put(st->track, st->ev_before, st->nev_before);
     notes_put(st->track, st->before, st->nbefore);
-    say("undone %lu", song->track[st->track].nnotes);
+    if (st->track2 >= 0)
+        say("undone %lu and %lu", song->track[st->track].nnotes, song->track[st->track2].nnotes);
+    else
+        say("undone %lu", song->track[st->track].nnotes);
 }
 
 static void step_redo(void *p)
 {
     struct step *st = p;
+    if (st->track2 >= 0)
+        notes_put(st->track2, st->after2, st->nafter2);
+    events_put(st->track, st->ev_after, st->nev_after);
     notes_put(st->track, st->after, st->nafter);
-    say("redone %lu", song->track[st->track].nnotes);
+    if (st->track2 >= 0)
+        say("redone %lu and %lu", song->track[st->track].nnotes, song->track[st->track2].nnotes);
+    else
+        say("redone %lu", song->track[st->track].nnotes);
 }
 
 static void step_drop(void *p)
 {
     struct step *st = p;
-    free(st->before);
-    free(st->after);
+    free(st->before), free(st->after);
+    free(st->before2), free(st->after2);
+    free(st->ev_before), free(st->ev_after);
     free(st);
 }
 
-static struct step *step_begin(void)    /* the chosen track's notes as they are, kept */
+static struct step *step_begin_on(int track)   /* a track's notes and events as they are, kept */
 {
     struct step *st = calloc(1, sizeof *st);
     if (!st)
         return NULL;
-    st->track = cur;
-    st->before = notes_copy(&song->track[cur]), st->nbefore = song->track[cur].nnotes;
+    st->track = track, st->track2 = -1;
+    st->before = notes_copy(&song->track[track]), st->nbefore = song->track[track].nnotes;
+    st->ev_before = events_copy(&song->track[track]), st->nev_before = song->track[track].nevents;
     return st;
+}
+
+static struct step *step_begin(void) { return step_begin_on(cur); }    /* (the chosen track's) */
+
+static void step_also(struct step *st, int track)      /* ... and another track's notes (the change takes notes there) */
+{
+    if (!st || track == st->track || track < 0 || track >= (int)song->ntracks)
+        return;
+    st->track2 = track;
+    st->before2 = notes_copy(&song->track[track]), st->nbefore2 = song->track[track].nnotes;
 }
 
 static int same_notes(const struct song_note *a, const struct song_note *b, unsigned long n)   /* (but for which are chosen) */
@@ -375,17 +421,29 @@ static int same_notes(const struct song_note *a, const struct song_note *b, unsi
 /* ... and as they have become: a step of the history, if they differ (1). */
 static int step_end(struct step *st, const char *name)
 {
-    struct song_track *t = &song->track[cur];
+    struct song_track *t;
+    int same;
     if (!st)
         return 0;
+    t = &song->track[st->track];
     song_sort(t);
     st->after = notes_copy(t), st->nafter = t->nnotes;
-    if (!st->before || !st->after || (st->nbefore == st->nafter && same_notes(st->before, st->after, st->nafter))) {
+    st->ev_after = events_copy(t), st->nev_after = t->nevents;
+    same = st->nbefore == st->nafter && same_notes(st->before, st->after, st->nafter);
+    same = same && st->nev_before == st->nev_after && (!st->nev_after || !memcmp(st->ev_before, st->ev_after, st->nev_after * sizeof *st->ev_after));
+    if (st->track2 >= 0) {
+        struct song_track *t2 = &song->track[st->track2];
+        song_sort(t2);
+        st->after2 = notes_copy(t2), st->nafter2 = t2->nnotes;
+        same = same && st->nbefore2 == st->nafter2 && same_notes(st->before2, st->after2, st->nafter2);
+    }
+    if (!st->before || !st->after || !st->ev_before || !st->ev_after || (st->track2 >= 0 && (!st->before2 || !st->after2)) || same) {
         step_drop(st);
         return 0;
     }
-    gui_undo_push(history, name, step_undo, step_redo, st, (unsigned)((st->nbefore + st->nafter) * sizeof st->after[0]), step_drop,
-                  NULL, 0);
+    gui_undo_push(history, name, step_undo, step_redo, st,
+                  (unsigned)((st->nbefore + st->nafter + st->nbefore2 + st->nafter2) * sizeof st->after[0]
+                             + (st->nev_before + st->nev_after) * sizeof st->ev_after[0]), step_drop, NULL, 0);
     changed = 1;
     show_status();
     size_roll();
@@ -426,7 +484,8 @@ static int arrange_event(struct gui_widget *w, struct gui_ev *e, int x, int y)
                 nk += a->notes[i].at >= from && a->notes[i].at < to;
             if (nk && !(keep = malloc(nk * sizeof *keep)))
                 return 1;
-            st = step_begin();
+            st = step_begin_on(amove_t);        /* (the bars' own track, whichever is chosen in the roll) */
+            step_also(st, asel_t);              /* (to another track: both in the step) */
             for (i = a->nnotes, nk = 0; i-- > 0; )
                 if (a->notes[i].at >= from && a->notes[i].at < to) {
                     keep[nk++] = a->notes[i];
@@ -1440,7 +1499,7 @@ static void command(struct gui_window *w, int id)
     case C_BPASTE:                              /* ... onto the track chosen, from the bar chosen */
         if (!arrange || asel_t < 0 || asel_t >= (int)song->ntracks || !bclip_bars)
             break;
-        st = step_begin();
+        st = step_begin_on(asel_t);       /* (the bars' track, whichever the roll shows) */
         for (i = 0; i < nbclip; i++)
             if (song_note_add(&song->track[asel_t], asel_a * bar_ticks() + bclip[i].at, bclip[i].len, bclip[i].key,
                               bclip[i].force) >= 0)
@@ -1457,7 +1516,7 @@ static void command(struct gui_window *w, int id)
             if (asel_t < 0 || asel_t >= (int)song->ntracks)
                 break;
             a = &song->track[asel_t];
-            st = step_begin();
+            st = step_begin_on(asel_t);
             for (i = a->nnotes; i-- > 0; )
                 if (a->notes[i].at >= from && a->notes[i].at < to) {
                     song_note_remove(a, i);
