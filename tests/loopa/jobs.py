@@ -905,6 +905,13 @@ def shell(profile, boot):
 NET_CASES = [("bf6", "ne2kpci"), ("bf6", "ne2k"), ("486dx2", "ne2k"), ("486dx2", "ne2kpci"), ("486dx4", "ne2kpci"),
              ("bf6", "rtl8139c+"), ("bf6", "i82557"), ("bf6", "i82558"), ("486dx2", "rtl8139c+"), ("486dx4", "i82557"),
              ("bf6", "pcnetpci"), ("486dx2", "pcnetpci")]  # (phase H: AMD PCnet-PCI, kernel/drv/pcnet.c)
+try:                                            # (the PCnet only where RetroGPU's run.py knows the card: its
+    _nics = open(os.path.join(os.environ.get("RETROGPU", os.path.expanduser("~/RetroGPU")),   # branch glos-pcnet,
+                              "tools", "loopa", "hostio.py")).read()                          # until merged)
+except OSError:
+    _nics = ""
+if '"pcnetpci"' not in _nics:
+    NET_CASES = [c for c in NET_CASES if c[1] != "pcnetpci"]
 if os.environ.get("NET_ONLY"):                  # e.g. NET_ONLY=rtl8139c+,i82557
     NET_CASES = [c for c in NET_CASES if c[1] in os.environ["NET_ONLY"].split(",")]
 
