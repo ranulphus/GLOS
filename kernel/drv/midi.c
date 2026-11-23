@@ -83,25 +83,39 @@ static void fm_find(u16 port)
     fm_out(0x04, 0x60);                         /* the timers reset */
     fm_out(0x04, 0x80);                         /* the interrupt reset */
     s1 = inb(port);
-    fm_out(0x02, 0xFF);                         /* timer 1 at its shortest */
+    fm_out(0x02, 0xFF);                         /* timer 1 at its shortest: 80 microseconds */
     fm_out(0x04, 0x21);                         /* started */
-    fm_wait(200);
-    s2 = inb(port);
+    {
+        /* Until its flags are up, paced by port 80h (about a microsecond a read on any PC), for 4 ms at most. It
+           was 200 reads of the chip's own status port: over 200 microseconds on an ISA card, but a PCI chip's
+           port (the CMI8738's FM at its I/O base + 50h) reads several times as fast, and bench B's real chip was
+           looked at before its timer had run out (2026-11-23; 86Box's showed it). */
+        u32 n;
+        for (n = 0, s2 = 0; n < 4000 && (s2 & 0xE0) != 0xC0; n++) {
+            inb(0x80);
+            s2 = inb(port);
+        }
+    }
     fm_out(0x04, 0x60);
     fm_out(0x04, 0x80);
     md.fm = (s1 & 0xE0) != 0x00 || (s2 & 0xE0) != 0xC0 ? 0 : (s2 & 0x06) ? 2 : 3;
     irq_restore(f);
     if (md.fm)
         kprintf("GLOS-MIDI fm port=%x chip=opl%u\n", port, md.fm);
+    else if (port >= 0x1000)                    /* (a PCI chip's that was looked for and not found: what it said) */
+        kprintf("GLOS-MIDI fm none port=%x status=%02x,%02x\n", port, s1, s2);
 }
 
 /* ---- the MPU-401 */
 
+/* (Each try is paced by port 80h, about a microsecond: a PCI chip's ports read too fast to count time by.) */
 static int mpu_writable(u32 tries)
 {
-    while (tries--)
+    while (tries--) {
         if (!(inb((u16)(md.mpu + 1)) & 0x40))
             return 1;
+        inb(0x80);
+    }
     return 0;
 }
 
@@ -110,9 +124,11 @@ static int mpu_cmd(u8 cmd, u32 tries)           /* 0: answered */
     if (!mpu_writable(tries))
         return -1;
     outb((u16)(md.mpu + 1), cmd);
-    while (tries--)
+    while (tries--) {
         if (!(inb((u16)(md.mpu + 1)) & 0x80) && inb(md.mpu) == 0xFE)
             return 0;
+        inb(0x80);
+    }
     return -1;
 }
 
@@ -120,8 +136,12 @@ static void mpu_find(u16 port, int sb)
 {
     u32 f;
     int ok;
-    if (inb((u16)(port + 1)) == 0xFF)           /* (nothing there) */
+    u8 st = inb((u16)(port + 1));
+    if (st == 0xFF) {                           /* (nothing there) */
+        if (port >= 0x1000)
+            kprintf("GLOS-MIDI mpu none port=%x status=ff\n", port);
         return;
+    }
     f = irq_save();
     md.mpu = port;
     ok = mpu_cmd(0xFF, 20000) == 0 || mpu_cmd(0xFF, 20000) == 0;       /* (no answer from UART mode: once more) */
@@ -131,6 +151,8 @@ static void mpu_find(u16 port, int sb)
     irq_restore(f);
     if (ok)
         kprintf("GLOS-MIDI mpu port=%x\n", port);
+    else if (port >= 0x1000)
+        kprintf("GLOS-MIDI mpu none port=%x status=%02x,%02x\n", port, st, inb((u16)(port + 1)));
 }
 
 static int mpu_mode(int uart)                   /* (interrupts off) 0: it is in that mode */
@@ -220,10 +242,17 @@ void midi_late(void)
         fm_find(crystal_fm());
     if (!md.mpu && crystal_mpu())
         mpu_find(crystal_mpu(), 0);
-    if (!md.fm && cmi8738_fm())                 /* (phase H: a CMI8738's, in its own I/O space) */
+    if (!md.fm && cmi8738_fm()) {               /* (phase H: a CMI8738's, in its own I/O space; an older chip's at
+                                                   the legacy address, now that the driver has turned it on) */
         fm_find(cmi8738_fm());
-    if (!md.mpu && cmi8738_mpu())
+        if (!md.fm)
+            fm_find(cmi8738_fm_legacy());
+    }
+    if (!md.mpu && cmi8738_mpu()) {
         mpu_find(cmi8738_mpu(), 0);
+        if (!md.mpu)
+            mpu_find(cmi8738_mpu_legacy(), 0);
+    }
 }
 
 static const char *port_name(u32 port) { return port == MIDI_FM ? "fm" : "mpu"; }

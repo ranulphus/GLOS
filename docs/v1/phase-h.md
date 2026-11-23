@@ -18,7 +18,10 @@ At glos exit CONFIGFLAG, the interrupts and the SMI enables are put back and the
 speeds stay out of v1.
 
 - **Tests:** builds, host-test. 86Box has no EHCI, so Loop A cannot test it.
-- **Owed:** bench F (ICH6: 4 UHCI + EHCI) with a USB keyboard or mouse, under GLOS and after `glos exit`.
+- **Bench B (2026-11-23, late evening):** its EHCI (00:0e.2, five ports) was handed over at start-up
+  (`GLOS-USB ehci 00:0e.2 handed bios=0 forced=0 ports=5`: the BIOS did not hold it) with no trouble after.
+- **Owed:** bench F (ICH6: 4 UHCI + EHCI) and bench G (VIA: 3 UHCI + EHCI) with a USB keyboard or mouse, under
+  GLOS and after `glos exit`.
 
 ## Sound cards for the mixer (2026-11-23)
 
@@ -91,6 +94,19 @@ Each driver's head names its source and its SHA-256.
     cut off before its tones are checked (`wav_for_check`). It has no FM chip, so the Player's MIDI file is refused. The Player now passes over a file it can't
     play when the list goes on by itself (it used to stop the list with a message), so the MP3 and Ogg after it
     play.
+- **Bench B's real CMI8738 (2026-11-23, late evening; GLOS main d235e81 put on the P3):** the driver's first
+  silicon. Found (I/O DE00h, IRQ 10, PCI revision 10h) and playing: 86 interrupts a second at 22050 Hz with
+  256-frame halves, as it should be, its count level with the mixer's periods, no watchdog kick. Not yet
+  listened to by anyone.
+  - **Its FM and MPU-401 were not found at first.** This chip is older than the one 86Box models: its ports
+    40h and 50h read 0, and its FM chip and MPU-401 are at the legacy addresses alone. The driver now sets the
+    legacy control register's first choices (388h and 330h; put back at exit), and `midi.c` tries those when the
+    chip's own ports answer nothing: an OPL3 at 388h and the MPU-401 at 330h are found.
+  - **The FM test was too fast for a PCI chip** (found on the way): it waited for the chip's 80-microsecond
+    timer by 200 reads of the status port, which on a PCI port take well under that. It now polls for the
+    timer's flags, paced by port 80h, for up to 4 ms; the MPU-401's waits are paced the same way.
+- **Bench A (the Rage 128 Pro since that evening), same build:** `write_combining = auto` turned its aperture
+  on by itself (MTRR range 3, 32 MB at F0000000h).
 - **Owed:**
   - each chip on its bench;
   - the CMI8738's FM on bench B's chip (an OPL3 on most);

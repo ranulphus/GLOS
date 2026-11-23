@@ -67,6 +67,7 @@ static struct {
     u16 io;
     u8 irq, claimed;
     u32 f1_was, misc_was;               /* (FUNCTRL1 and MISC_CTRL as they were: the legacy parts put back) */
+    u32 legacy_was;                     /* (... and the legacy control register, 14h) */
     u8 *buf, *rbuf;
     u32 phys, rphys, frames, rframes, irqs, half, rhalf;
     mixer_fill fill;
@@ -115,6 +116,11 @@ int cmi8738_init(void)
     wr32(INT_HLDCLR, rd32(INT_HLDCLR) & ~(INT_EN(0) | INT_EN(1)));
     wr32(MISC_CTRL, cm.misc_was | MISC_FM);     /* the FM synthesiser on (at 50h, and at 388h) */
     wr32(FUNCTRL1, cm.f1_was | F1_UART);        /* the MPU-401 on */
+    /* The legacy addresses (14h: VMPU 30:29, FMSEL 25:24) at their first choices, 330h and 388h: an older chip
+       has its FM and its MPU-401 there alone, not at 40h and 50h of its own ports (bench B's onboard one, PCI
+       revision 10h, 2026-11-23: both read 0 there; midi.c tries these after). */
+    cm.legacy_was = rd32(0x14);
+    wr32(0x14, cm.legacy_was & ~((3u << 29) | (3u << 24)));
     cm.found = 1;
     kprintf("GLOS-CMI found io=%x irq=%u rev=%u\n", cm.io, cm.irq, pd->rev);
     ksnprintf(r, sizeof r, "io=%04x-%04x irq=%u", cm.io, cm.io + 0xFF, cm.irq);
@@ -124,6 +130,8 @@ int cmi8738_init(void)
 
 u16 cmi8738_fm(void) { return cm.found ? (u16)(cm.io + FM_PORT) : 0; }
 u16 cmi8738_mpu(void) { return cm.found ? (u16)(cm.io + MPU_PORT) : 0; }
+u16 cmi8738_fm_legacy(void) { return cm.found ? 0x388 : 0; }    /* (an older chip's: see the set-up) */
+u16 cmi8738_mpu_legacy(void) { return cm.found ? 0x330 : 0; }
 
 /* A channel's interrupt said: cleared (its enable bit to 0 and back to 1). */
 static void ack(int c)
@@ -346,6 +354,7 @@ void cmi8738_leave(void)
     cm.running = cm.rec = 0;
     wr32(FUNCTRL1, cm.f1_was);
     wr32(MISC_CTRL, cm.misc_was & ~MISC_RESET);
+    wr32(0x14, cm.legacy_was);
     kprintf("GLOS-CMI left\n");
 }
 

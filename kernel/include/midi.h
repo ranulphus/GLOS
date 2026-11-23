@@ -38,5 +38,7 @@ u16 crystal_fm(void);                           /* (crystal.c) its FM chip's por
 u16 crystal_mpu(void);                          /* ... and its MPU-401's */
 u16 cmi8738_fm(void);                           /* (cmi8738.c) its FM synthesiser's port, 0 if none */
 u16 cmi8738_mpu(void);                          /* ... and its MPU-401's */
+u16 cmi8738_fm_legacy(void);                    /* an older chip's FM, at the legacy address (388h) */
+u16 cmi8738_mpu_legacy(void);                   /* ... and its MPU-401 (330h) */
 
 #endif
