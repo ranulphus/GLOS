@@ -34,7 +34,8 @@
 #include "../shared/webget.h"
 
 enum { C_BACK = 1, C_FORWARD, C_RELOAD, C_STOP, C_HOME, C_ADDRESS, C_OPEN, C_EXIT, C_FIND, C_FINDNEXT, C_FINDPREV, C_MARK,
-       C_MARKS, C_READER };
+       C_MARKS, C_READER, C_MARK_RENAME, C_MARK_GO = 100 /* (C_MARK_GO + n: the Bookmarks menu's nth) */ };
+#define MENU_MARKS 20                   /* (the bookmarks the menu lists: the first so many) */
 
 #define PAGE_MAX (2ul << 20)            /* a page's bytes kept at most */
 #define HISTORY 40
@@ -597,6 +598,26 @@ static void show_failure(const char *url, const char *why)
 static char marks_file[300];
 static struct { char *url, *title; } marks[MARKS];
 static int nmarks, marks_read;
+static struct gui_menu *marks_m;        /* the Bookmarks menu: its commands, then the bookmarks (marks_menu) */
+
+static void marks_menu(void)            /* (made again whenever the bookmarks change) */
+{
+    int i;
+    if (!marks_m)
+        return;
+    gui_menu_clear(marks_m);
+    gui_menu_command(marks_m, C_MARK), gui_menu_command(marks_m, C_MARKS), gui_menu_command(marks_m, C_MARK_RENAME);
+    if (nmarks)
+        gui_menu_sep(marks_m);
+    for (i = 0; i < nmarks && i < MENU_MARKS; i++) {
+        char t[64];
+        if (i < 9)
+            snprintf(t, sizeof t, "&%d %.40s%s", i + 1, marks[i].title, strlen(marks[i].title) > 40 ? "..." : "");
+        else
+            snprintf(t, sizeof t, "%.43s%s", marks[i].title, strlen(marks[i].title) > 43 ? "..." : "");
+        gui_menu_item(marks_m, t, C_MARK_GO + i, NULL);
+    }
+}
 
 static void marks_load(void)
 {
@@ -662,6 +683,7 @@ static void mark_page(void)             /* the page shown kept (once) */
         say("marks not written %s", marks_file);
         return;
     }
+    marks_menu();
     snprintf(t, sizeof t, GUI_T("Kept among the bookmarks: %.200s"), marks[nmarks - 1].title);
     gui_set_text(status, t);
     say("marked %s", current);
@@ -733,6 +755,41 @@ static void unmark(int k)
     nmarks--;
     if (marks_save() != 0)
         say("marks not written %s", marks_file);
+    marks_menu();
+}
+
+static int marked(const char *url)      /* the bookmark of that page: its number, or -1 */
+{
+    int i;
+    marks_load();
+    for (i = 0; i < nmarks; i++)
+        if (!strcmp(marks[i].url, url))
+            return i;
+    return -1;
+}
+
+static void rename_mark(void)           /* the page shown's bookmark given another name */
+{
+    char t[200];
+    int k = marked(current);
+    char *now;
+    if (k < 0) {
+        gui_set_text(status, GUI_T("This page is not among the bookmarks."));
+        say("rename no mark %s", current);
+        return;
+    }
+    snprintf(t, sizeof t, "%s", marks[k].title);
+    if (!gui_ask(win, GUI_T("Rename Bookmark"), GUI_T("The bookmark's name:"), t, sizeof t) || !t[0] || !(now = strdup(t)))
+        return;
+    free(marks[k].title);
+    marks[k].title = now;
+    for (now = marks[k].title; *now; now++)     /* (a tab would end the line's address in the file) */
+        if (*now == '\t')
+            *now = ' ';
+    if (marks_save() != 0)
+        say("marks not written %s", marks_file);
+    marks_menu();
+    say("renamed bookmark %s %s", marks[k].url, marks[k].title);
 }
 
 /* ---- going somewhere */
@@ -1209,6 +1266,11 @@ static void command(struct gui_window *w, int id)
 {
     char p[300] = "";
     (void)w;
+    if (id >= C_MARK_GO && id < C_MARK_GO + MENU_MARKS) {      /* a bookmark chosen in the menu */
+        if (id - C_MARK_GO < nmarks)
+            go(marks[id - C_MARK_GO].url, 1);
+        return;
+    }
     switch (id) {
     case C_BACK:
         if (at > 0) {
@@ -1245,6 +1307,9 @@ static void command(struct gui_window *w, int id)
         break;
     case C_MARKS:
         go("about:bookmarks", 1);
+        break;
+    case C_MARK_RENAME:
+        rename_mark();
         break;
     case C_READER:                              /* the page made again, with or without what is not its text */
         reader = !reader;
@@ -1289,6 +1354,7 @@ static void update(struct gui_window *w)
     gui_command_enable(w, C_RELOAD, current[0] != 0);
     gui_command_enable(w, C_STOP, getting != NULL);
     gui_command_enable(w, C_MARK, current[0] && strncmp(current, "about:", 6));
+    gui_command_enable(w, C_MARK_RENAME, current[0] && marked(current) >= 0);
     gui_command_check(w, C_READER, reader);
 }
 
@@ -1333,6 +1399,7 @@ static void build(void)
     gui_command(win, C_FINDPREV, GUI_T("Find &Previous"), "Shift+F3", NULL, NULL);
     gui_command(win, C_MARK, GUI_T("&Keep This Page"), "Ctrl+D", gui_glyph("star"), GUI_T("Keep the page among the bookmarks"));
     gui_command(win, C_MARKS, GUI_T("&Bookmarks"), "Ctrl+B", NULL, GUI_T("The pages kept"));
+    gui_command(win, C_MARK_RENAME, GUI_T("&Rename This Page's Bookmark..."), NULL, NULL, NULL);
     gui_command(win, C_READER, GUI_T("&Reader View"), "F9", NULL, GUI_T("The page's text alone: its menus and lists of links left out"));
     bar = gui_menubar(win);
     m = gui_menu(bar, GUI_T("&File"));
@@ -1347,8 +1414,9 @@ static void build(void)
     gui_menu_command(m, C_BACK), gui_menu_command(m, C_FORWARD), gui_menu_command(m, C_HOME);
     gui_menu_sep(m);
     gui_menu_command(m, C_RELOAD), gui_menu_command(m, C_STOP);
-    m = gui_menu(bar, GUI_T("&Bookmarks"));
-    gui_menu_command(m, C_MARK), gui_menu_command(m, C_MARKS);
+    marks_m = gui_menu(bar, GUI_T("&Bookmarks"));
+    marks_load();
+    marks_menu();
     tb = gui_toolbar(win);
     gui_toolbar_command(tb, C_BACK), gui_toolbar_command(tb, C_FORWARD);
     gui_toolbar_sep(tb);

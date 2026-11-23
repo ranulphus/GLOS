@@ -1,5 +1,6 @@
 # The Web Reader's bookmarks (apps/web; phase F): none at first; the test page kept (Ctrl+D), then the second
-# page, and the first again (kept already); the bookmarks' page (Ctrl+B) lists both, a link followed from it;
+# page, and the first again (kept already), renamed "Home"; each gone to from the Bookmarks menu (its 2, its 1);
+# the bookmarks' page (Ctrl+B) lists both, a link followed from it;
 # one taken away. (A file of its own, -marks: web-marks2.txt, after it on Loop A's disc, starts the Web Reader
 # again on it.)
 run WEB.EXE -marks C:\OUT\MARKS.TXT about:bookmarks
@@ -19,6 +20,19 @@ key alt+left
 said WEB loaded file:///C:/WEB/INDEX.HTM title=A Test Page blocks=17 links=2
 key ctrl+d
 said WEB marked already file:///C:/WEB/INDEX.HTM
+key alt+b
+key r
+wait "Rename Bookmark"
+key ctrl+a
+type Home\n
+gone "Rename Bookmark"
+said WEB renamed bookmark file:///C:/WEB/INDEX.HTM Home
+key alt+b
+key 2
+said WEB loaded file:///C:/WEB/PAGE2.HTM title=The Second Page blocks=5 links=2
+key alt+b
+key 1
+said WEB loaded file:///C:/WEB/INDEX.HTM title=A Test Page blocks=17 links=2
 key ctrl+b
 said WEB loaded about:bookmarks title=Bookmarks blocks=3 links=4
 shot marks "Bookmarks - Web Reader"

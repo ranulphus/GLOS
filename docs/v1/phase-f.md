@@ -1450,7 +1450,12 @@ takes it away (`about:unmark?N`, the list shown again in its place). The start p
 - **Tests:** `web-marks` (host and the emulated desktops): none at first; two pages kept, one again (kept
   already), the list, a link followed from it, one taken away; `web-marks2` (Loop A, after it on the same
   disc): the Web Reader started again finds the one left.
-- **Not yet:** folders of bookmarks; a bookmark renamed; the bookmarks in the menu itself.
+- **Since built** (2026-11-23): the bookmarks in the Bookmarks menu itself (after its three commands: the first
+  twenty, the first nine numbered as their access keys, titles cut at forty letters; the menu made again
+  whenever they change), and Rename This Page's Bookmark... (enabled when the page shown is one; a tab in the
+  name becomes a space, the file's line being address TAB title). `web-marks` goes on: the first renamed
+  "Home", the second and then the first gone to from the menu (its 2, its 1).
+- **Not yet:** folders of bookmarks.
 
 ## The Web Reader: the reader view (2026-11-22)
 

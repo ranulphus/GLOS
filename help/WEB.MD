@@ -27,6 +27,9 @@ Type in **Address** (Ctrl+L) and press Enter:
 | Ctrl+B | The bookmarks: a page of links, each with **take away** |
 | F9 | Reader View: the page's own text alone, without its menus, lists of links and colours |
 
+The **Bookmarks** menu lists them too (the first nine by the numbers 1 to 9), and **Rename This Page's
+Bookmark** gives the page shown a name of your choosing.
+
 - Pictures inside a page are shown in it (PNG, JPEG, GIF and BMP), made smaller where they are wider than
   the page; those from the web come once the page is there, a moment later. A picture that can't be had is
   shown by its words in brackets. A link that leads to a picture shows it alone.
