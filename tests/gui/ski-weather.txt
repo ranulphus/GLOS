@@ -1,0 +1,27 @@
+# Fall Line's weather (apps/ski; phase F, docs/v1/apps/skiing.md): the demonstration held on mountain 7 at step
+# 240, and the Weather menu's in turn there: snowfall (flakes placed by the run's own steps), fog (the slope ahead
+# whitened, the more the further), night (dark but for the skier's lamp); then clear again.
+run SKI.EXE -demo 7 -grade 2 -until 240 -speed 4 -table C:\\OUT\\SKIWX.DAT -day 20261121
+wait "Fall Line"
+said SKI ready seed=7 grade=2 mode=0 day=0
+said SKI started watching
+pause 1500
+said SKI at 240 x=435 y=827 speed=232 score=0 gates=1/0 falls=0
+key alt+w
+key s
+said SKI weather 1
+shot snow "Fall Line"
+key alt+w
+key f
+said SKI weather 2
+shot fog "Fall Line"
+key alt+w
+key n
+said SKI weather 3
+shot night "Fall Line"
+key alt+w
+key c
+said SKI weather 0
+key alt+f4
+gone "Fall Line"
+expect SKI end

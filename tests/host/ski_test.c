@@ -353,7 +353,7 @@ int main(int argc, char **argv)
               && skitable_place(&t.grade[SKI_SLALOM][SKI_GREEN], SKI_SLALOM, 99000, 0) == 0, "places: too slow, a tie, an empty table");
         skitables_today(&t, 20261121);
         snprintf(t.player, sizeof t.player, "Ada of the Alps");
-        t.grade_last = SKI_BLACK, t.mode_last = SKI_FREE, t.jacket = 3, t.figure = 2;
+        t.grade_last = SKI_BLACK, t.mode_last = SKI_FREE, t.jacket = 3, t.figure = 2, t.weather = 3;
         snprintf(e.name, sizeof e.name, "A name with blanks");
         e.ms = 41234, e.score = 0;
         skitable_add(&t.day[SKI_SLALOM], SKI_SLALOM, &e);

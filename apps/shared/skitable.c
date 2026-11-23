@@ -3,6 +3,7 @@
  *     D mode day ms score seed name              (the day's)
  *     P grade mode jacket name                   (the player's last choices)
  *     F figure                                   (... and the figure: a reader of before passes the line over)
+ *     W weather                                  (... and the weather, the same)
  * in each table's order. A name is the line's rest. */
 #include <stdlib.h>
 #include <string.h>
@@ -81,6 +82,10 @@ int skitables_read(struct ski_tables *t, FILE *f)
             t->figure = day;
             continue;
         }
+        if (!to && sscanf(line, "W %d", &day) == 1 && day >= 0 && day < 8) {
+            t->weather = day;
+            continue;
+        }
         if (!to && sscanf(line, "P %d %d %d %n", &grade, &mode, &day, &used) >= 3 && used && grade >= 0 && grade < 4 && mode >= 0
             && mode < 2 && day >= 0 && day < 16) {
             t->grade_last = grade, t->mode_last = mode, t->jacket = day;
@@ -104,6 +109,7 @@ int skitables_write(const struct ski_tables *t, FILE *f)
     fprintf(f, "SKI 1\n");
     fprintf(f, "P %d %d %d %s\n", t->grade_last, t->mode_last, t->jacket, t->player);
     fprintf(f, "F %d\n", t->figure);
+    fprintf(f, "W %d\n", t->weather);
     for (mode = 0; mode < 2; mode++)
         for (grade = 0; grade < 4; grade++)
             for (i = 0; i < t->grade[mode][grade].n; i++) {

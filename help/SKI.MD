@@ -58,5 +58,6 @@ ranked by its time, a free run by its points.
 exists. It is not the fastest way.
 
 The **Skier** menu chooses who goes down the mountain (a skier, a racer, a snowboarder or a sit-skier)
-and the colour of their jacket. **Game, Sound** turns the game's sounds off and on: the
+and the colour of their jacket. The **Weather** menu brings snowfall, fog (less is seen ahead) or night (only
+your lamp lights the slope). **Game, Sound** turns the game's sounds off and on: the
 skis' hiss tells you your speed and the snow you are on, with your eyes on the slope.

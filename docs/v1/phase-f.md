@@ -1655,3 +1655,19 @@ so is a step back. Recording stops step entry and step entry stops recording.
 - **An accent from the PC's keys** (later the same day): Shift with a piano key, recording or in step entry,
   plays the note at velocity 127 (100 without); `studio-step` puts an F with an accent (said `accent`).
 - **Not yet:** velocities between the two; a chord at one step (keys held together).
+
+## Fall Line: the weather (2026-11-23)
+
+The plan's weather, the pictures of it: **Weather** menu, Clear, Snowfall, Fog, Night, kept in the tables' file
+(a `W n` line, passed over by a reader of before). Snowfall: 140 flakes, each placed by rule from its number
+and the run's own steps (a held picture is the same every time), white with a grey shadow so that they show on
+the piste too. Fog: the slope ahead (below the skier) whitened by a dither of white dots, thicker with the
+distance, to 15 of 16 at the field's foot. Night: everything dark (a dither of night blue) but the skier's lamp,
+a pool of light before them, longer down the slope. Fog's and night's dots are one-bit masks made once (night's
+twice the field's size, its pool at its middle, laid over at the skier) and drawn in one call: the same at 8,
+16 and 32 bits. The run is the same in any weather.
+
+- **Tests:** `ski-weather` (host and the emulated desktops): the demonstration held at step 240, each weather
+  there (pictures); `ski_test`'s round trip keeps it.
+- **Not yet:** the wind (gusts that push across the slope: the run, the ghost and the tables would change with
+  it); the wind's sound.

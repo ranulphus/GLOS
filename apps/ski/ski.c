@@ -51,7 +51,9 @@
 #define GAME_NAME "Fall Line"           /* (the owner's choice, 2026-11-21) */
 
 enum { C_AGAIN = 1, C_NEW, C_DAY, C_NUMBER, C_WATCH, C_TABLES, C_PAUSE, C_EXIT, C_SLALOM, C_FREE, C_GREEN, C_BLUE, C_RED, C_BLACK,
-       C_SOUND, C_JACKET, C_FIGURE = C_JACKET + 8 };     /* (C_JACKET + n: the jackets; C_FIGURE + n: the figures) */
+       C_SOUND, C_JACKET, C_FIGURE = C_JACKET + 8, C_WEATHER = C_FIGURE + 8 };     /* (C_JACKET + n: the jackets;
+                                                   C_FIGURE + n: the figures; C_WEATHER + n: the weathers) */
+enum { W_CLEAR, W_SNOW, W_FOG, W_NIGHT, W_COUNT };
 enum { P_READY, P_RUN, P_PAUSED, P_DONE };
 
 #define FW 480                          /* the field */
@@ -73,7 +75,7 @@ static struct gui_widget *canvas;
 static struct skirun run;
 static int phase = P_READY, watching;   /* watching: the careful skier has the skis */
 static unsigned seed = 1;
-static int grade = SKI_BLUE, mode = SKI_SLALOM, of_day, jacket, figure;
+static int grade = SKI_BLUE, mode = SKI_SLALOM, of_day, jacket, figure, weather;
 static unsigned last_ms, acc;           /* the frame's clock: milliseconds times sixty not yet made steps of */
 static long until = -1;                 /* the suite's: the picture held at this step ... */
 static long untils[8];                  /* ... and at these after it, each when the one before is let go */
@@ -136,7 +138,7 @@ static void tables_load(void)
 static void tables_keep(void)
 {
     FILE *f;
-    tables.grade_last = grade, tables.mode_last = mode, tables.jacket = jacket, tables.figure = figure;
+    tables.grade_last = grade, tables.mode_last = mode, tables.jacket = jacket, tables.figure = figure, tables.weather = weather;
     if (!table_path[0] || !(f = gui_fopen(table_path, "w")))
         return;
     skitables_write(&tables, f);
@@ -524,6 +526,62 @@ static void box_text(struct gfx_surface *s, int ox, int oy, int y, const char *c
     }
 }
 
+/* ---- (phase F) the weather: pictures only, the run the same in any (the plan's wind, which pushes, is not yet).
+   Snowfall: flakes drifting down, placed by rule from the run's own steps (a held picture is the same every
+   time); fog: the slope ahead (below the skier) whitened more and more, by a dither of white dots; night: all
+   dark by a dither but the skier's lamp, a pool of light before them. Fog's and night's dots are one-bit masks
+   made once and laid over in one call: the same at 8, 16 and 32 bits, and cheap on a 486. */
+
+static const unsigned char bayer[4][4] = { { 0, 8, 2, 10 }, { 12, 4, 14, 6 }, { 3, 11, 1, 9 }, { 15, 7, 13, 5 } };
+static unsigned char *fog_bits, *night_bits;    /* FW x FH; 2FW x 2FH, the lamp at its middle */
+
+static int dot(int x, int y, int level)        /* (level 0 to 16 of 16) */
+{
+    return bayer[y & 3][x & 3] < level;
+}
+
+static void masks_make(void)
+{
+    int x, y;
+    if (!fog_bits && (fog_bits = calloc((size_t)(FW / 8) * FH, 1)) != NULL)
+        for (y = SKIER_ROW + 24; y < FH; y++) {         /* (thicker with the distance ahead, to 14 of 16 at the foot) */
+            int level = (y - SKIER_ROW - 24) * 15 / (FH - SKIER_ROW - 24);
+            for (x = 0; x < FW; x++)
+                if (dot(x, y, level))
+                    fog_bits[y * (FW / 8) + x / 8] |= (unsigned char)(0x80 >> (x & 7));
+        }
+    if (!night_bits && (night_bits = calloc((size_t)(2 * FW / 8) * (2 * FH), 1)) != NULL)
+        for (y = 0; y < 2 * FH; y++)
+            for (x = 0; x < 2 * FW; x++) {
+                long dx = x - FW, dy = y - FH - 48;     /* (the lamp's pool: ahead of the skier, longer down the slope) */
+                long d = dx * dx * 100 / (60 * 60) + dy * dy * 100 / (95 * 95), level;
+                level = d < 60 ? 0 : d < 160 ? (d - 60) * 13 / 100 : 13;
+                if (dot(x, y, (int)level))
+                    night_bits[y * (2 * FW / 8) + x / 8] |= (unsigned char)(0x80 >> (x & 7));
+            }
+}
+
+static void draw_weather(struct gfx_surface *s, int ox, int oy, int sx, int sy)
+{
+    if (weather == W_SNOW) {
+        unsigned i, t = run.steps;
+        for (i = 0; i < 140; i++) {             /* (each flake's place by rule from its number and the steps) */
+            unsigned h = i * 2654435761u, fx, fy;
+            fx = (h >> 8) % FW + (t * (1 + (h >> 20) % 2) / 3) % FW + (unsigned)(run.x >> 8);
+            fy = (h >> 16) % FH + t * (2 + (h >> 24) % 3) / 2 + (unsigned)(run.y >> 8) / 2;
+            fx %= FW, fy %= FH;
+            gfx_fill(s, ox + (int)fx + 1, oy + (int)fy + 1, 2, 2, 0x999999u);
+            gfx_fill(s, ox + (int)fx, oy + (int)fy, 2, 2, 0xFFFFFFu);
+        }
+        return;
+    }
+    masks_make();
+    if (weather == W_FOG && fog_bits)
+        gfx_mono(s, ox, oy, fog_bits, FW, FH, FW / 8, 0xFFFFFFu, GFX_NONE);
+    else if (weather == W_NIGHT && night_bits)
+        gfx_mono(s, ox + sx - FW, oy + sy - FH, night_bits, 2 * FW, 2 * FH, 2 * FW / 8, 0x000033u, GFX_NONE);
+}
+
 static void draw_field(struct gfx_surface *s, int ox, int oy)
 {
     int px = run.x >> 8, py = run.y >> 8, cam_x = px - FW / 2, cam_y = py - SKIER_ROW, y, c, i, n, drawn = 0;
@@ -621,6 +679,7 @@ static void draw_field(struct gfx_surface *s, int ox, int oy)
             }
         }
     }
+    draw_weather(s, ox, oy, px - cam_x, py - cam_y);
     /* what is said over it */
     if (phase == P_READY) {
         char l1[80], l2[80];
@@ -799,6 +858,13 @@ static unsigned new_seed(void)
 static void command(struct gui_window *w, int id)
 {
     (void)w;
+    if (id >= C_WEATHER && id < C_WEATHER + W_COUNT) {
+        weather = id - C_WEATHER;
+        tables_keep();
+        gui_damage(canvas);
+        say("weather %d", weather);
+        return;
+    }
     if (id >= C_FIGURE && id < C_FIGURE + FIGURE_COUNT) {
         figure = id - C_FIGURE;
         art_make(figure, jackets[jacket].rgb);
@@ -881,6 +947,8 @@ static void update(struct gui_window *w)
         gui_command_check(w, C_JACKET + i, jacket == i);
     for (i = 0; i < FIGURE_COUNT; i++)
         gui_command_check(w, C_FIGURE + i, figure == i);
+    for (i = 0; i < W_COUNT; i++)
+        gui_command_check(w, C_WEATHER + i, weather == i);
     gui_command_check(w, C_DAY, of_day);
     gui_command_check(w, C_SOUND, sound_on);
     gui_command_enable(w, C_PAUSE, phase == P_RUN || phase == P_PAUSED);
@@ -940,6 +1008,10 @@ static void build(void)
         gui_command(win, C_JACKET + i, GUI_T(jackets[i].name), NULL, NULL, NULL);
     for (i = 0; i < FIGURE_COUNT; i++)
         gui_command(win, C_FIGURE + i, GUI_T(figures[i]), NULL, NULL, NULL);
+    for (i = 0; i < W_COUNT; i++) {
+        static const char *const weathers[W_COUNT] = { GUI_N("&Clear"), GUI_N("&Snowfall"), GUI_N("&Fog"), GUI_N("&Night") };
+        gui_command(win, C_WEATHER + i, GUI_T(weathers[i]), NULL, NULL, NULL);
+    }
     bar = gui_menubar(win);
     m = gui_menu(bar, GUI_T("&Game"));
     gui_menu_command(m, C_AGAIN), gui_menu_command(m, C_PAUSE), gui_menu_command(m, C_WATCH);
@@ -960,6 +1032,9 @@ static void build(void)
     gui_menu_sep(m);
     for (i = 0; i < 5; i++)
         gui_menu_command(m, C_JACKET + i);
+    m = gui_menu(bar, GUI_T("&Weather"));
+    for (i = 0; i < W_COUNT; i++)
+        gui_menu_command(m, C_WEATHER + i);
     canvas = gui_canvas(win->root, FW + SW, FH, draw, field_event);
 }
 
@@ -1002,6 +1077,7 @@ int main(int argc, char **argv)
     ghost_load();
     grade = tables.grade_last, mode = tables.mode_last, jacket = tables.jacket < 5 ? tables.jacket : 0;
     figure = tables.figure < FIGURE_COUNT ? tables.figure : 0;
+    weather = tables.weather < W_COUNT ? tables.weather : 0;
     if (!demo)
         seed = new_seed();
     if (demo_grade >= 0)
