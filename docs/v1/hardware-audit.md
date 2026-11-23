@@ -1,6 +1,14 @@
 # Phase H: the hardware compatibility audit
 
-**Status: a draft for the owner's approval (written 2026-11-23).** The route's phase H (docs/v1-route.md) is
+**Status: APPROVED by the owner, 2026-11-23** (question tool), with these choices:
+
+- **Tiers:** tier 1, then tier 2. Tier 3 only when the owner wants a particular PC covered.
+- **Benches D and E:** GLOS is installed on them, as on B and F, so its Devices page names their hardware.
+- **Spare cards:** fitted as planned. The ALS100 Plus+ goes in bench C; an ES1373 or CT5880 card goes in a free
+  PCI slot (bench B or F); the OPTi 931 is for tier 2.
+- **86Box models:** none. A driver only a bench can prove says so in docs/devices.md, as the Rhine does.
+
+It was written the same day as a draft. The route's phase H (docs/v1-route.md) is
 "settled after a hardware compatibility audit, and nothing is built before that". This is that audit:
 
 1. the bench fleet;
