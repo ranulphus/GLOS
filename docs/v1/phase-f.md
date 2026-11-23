@@ -1837,7 +1837,13 @@ as on a disc), delete, rename, New Folder.
   left behind, mtools lists only what is left, and the renamed file is read. `files-img` (host and the emulated
   desktops; `C:\IMG\WORK.IMG`, 160 KB of mtools' making): a file pasted in, a folder made, a file renamed, one
   deleted, two copied back out and compared to the byte. The other sixteen Files scripts unchanged.
-- **Not yet:** long names written (a DOS name is asked for); a hard disk's image (its partition table).
+- **A hard disk's image** (later the same morning): `fatimg_open` reads a first sector that is no FAT boot
+  sector but has a partition table (55AAh) as a hard disk's, and opens its first FAT12 or FAT16 partition
+  (types 01h, 04h, 06h, 0Eh); every sector of the volume is then counted from the partition's start (`vio`). So
+  Files enters such an image, copies out of it and writes into it, as a floppy's. `fatimg_test.sh`: a 16 MB
+  disk image, its partition table written by the test and a FAT16 volume of mtools' making 63 sectors in: listed,
+  a file read to the byte, renamed, and mtools (by the partition's offset) finds the new name.
+- **Not yet:** long names written (a DOS name is asked for); FAT32 partitions; a partition other than the first.
 
 ## Fall Line: other skiers (2026-11-23)
 

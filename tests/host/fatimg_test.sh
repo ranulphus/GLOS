@@ -3,7 +3,8 @@
 # against the tools everyone else's disks are read by. What it wrote: fsck.fat finds each volume clean, and
 # mtools reads its files to the byte, in the root and two folders deep, and lists the folder that grew. The
 # other way round: a volume mtools made, with long names and a folder, is listed and read by fatimg, and things
-# in it taken away and renamed by fatimg (fsck.fat and mtools then). In the dev container.
+# in it taken away and renamed by fatimg (fsck.fat and mtools then); a hard disk's image, its partition table
+# followed to the first FAT partition. In the dev container.
 set -e
 bin=$1 dir=$2
 rm -rf "$dir" && mkdir -p "$dir"
@@ -51,6 +52,23 @@ grep -qi 'orphan\|lfn\|long file' "$dir/m.fsck" && { echo "FAIL: long names left
 mdir -b -i "$dir/m.img" :: > "$dir/m.left" 2>&1
 [ "$(cat "$dir/m.left")" = "::/LOWER.BIN" ] || { echo "FAIL: mtools' volume after: $(cat "$dir/m.left")"; fails=$((fails + 1)); }
 mcopy -n -i "$dir/m.img" ::/LOWER.BIN "$dir/r3" && cmp -s "$dir/$name.more" "$dir/r3" || { echo "FAIL: the renamed file read"; fails=$((fails + 1)); }
+# a hard disk's image (2026-11-23): a partition table, its first partition a FAT16 volume of mtools' making 63
+# sectors in: listed, read, and written to through the partition (mtools reads what was written)
+hd="$dir/hd.img"
+dd if=/dev/zero of="$hd" bs=512 count=$((63 + 32768)) status=none
+mformat -i "$hd@@32256" -T 32768 -h 16 -s 63 -H 63 -v HARDDISK ::
+mcopy -i "$hd@@32256" "$dir/$name.big" ::/BIG.BIN
+python3 -c "
+import sys, struct
+f = open(sys.argv[1], 'r+b'); f.seek(446)
+f.write(struct.pack('<BBBBBBBBII', 0x80, 1, 1, 0, 0x06, 15, 63, 32, 63, 32768)); f.seek(510); f.write(b'\x55\xaa')
+" "$hd"
+"$bin" list "$hd" "" > "$dir/hd.list" && grep -q '^F 70000 BIG\.BIN BIG\.BIN$' "$dir/hd.list" \
+    || { echo "FAIL: the hard disk's partition not listed:"; cat "$dir/hd.list"; fails=$((fails + 1)); }
+"$bin" read "$hd" "BIG.BIN" "$dir/r4" && cmp -s "$dir/$name.big" "$dir/r4" || { echo "FAIL: a file in the partition read"; fails=$((fails + 1)); }
+"$bin" rename "$hd" "BIG.BIN" "LARGE.BIN" && [ "$(mdir -b -i "$hd@@32256" ::)" = "::/LARGE.BIN" ] \
+    || { echo "FAIL: renamed in the partition: $(mdir -b -i "$hd@@32256" :: 2>&1)"; fails=$((fails + 1)); }
+rm -f "$hd" "$dir/hd.list" "$dir/r4"
 rm -f "$dir"/*.big "$dir"/*.more "$dir/m.img" "$dir/r1" "$dir/r2" "$dir/r3"
 echo "fatimg_test.sh: $fails failures ($n volumes read by fsck.fat and mtools; one of mtools' read here)"
 [ "$fails" = 0 ]

@@ -25,6 +25,8 @@ struct fatimg {
     unsigned char *table;
     int changed;
     char label[12];
+    unsigned long base;                 /* (2026-11-23) the volume's first sector in the disk: a hard disk's image's
+                                           first FAT partition, else 0 */
 };
 
 struct found {                          /* an entry found in a folder */
@@ -37,6 +39,18 @@ struct found {                          /* an entry found in a folder */
 
 static unsigned rd16(const unsigned char *p) { return p[0] | (unsigned)p[1] << 8; }
 static unsigned long rd32(const unsigned char *p) { return rd16(p) | (unsigned long)rd16(p + 2) << 16; }
+
+static int vio(const struct fatimg *v, unsigned long lba, unsigned char *data, unsigned count, int write)
+{
+    return v->io(v->ctx, v->base + lba, data, count, write);    /* (the volume's sectors: from its partition's start) */
+}
+
+/* A first sector that is a FAT volume's boot sector, by its fields (a partition table's is not). */
+static int is_boot(const unsigned char *s)
+{
+    unsigned spc = s[13];
+    return rd16(s + 11) == 512 && spc && !(spc & (spc - 1)) && rd16(s + 14) && s[16] >= 1 && s[16] <= 2 && rd16(s + 17);
+}
 static void wr16(unsigned char *p, unsigned v) { p[0] = (unsigned char)v, p[1] = (unsigned char)(v >> 8); }
 static int upper(int c) { return c >= 'a' && c <= 'z' ? c - 32 : c; }
 
@@ -125,7 +139,7 @@ static int walk(struct fatimg *v, unsigned first, each_fn fn, void *arg)
     unsigned i, k, have = 0, sum = 0;
     memset(lfn, 0, sizeof lfn);
     for (n = 0; n < 65536ul / 16 * 2 && dir_sector(v, first, n, &lba) == 0; n++) {
-        if (v->io(v->ctx, lba, s, 1, 0) != 0)
+        if (vio(v, lba, s, 1, 0) != 0)
             return -1;
         for (i = 0; i < 512; i += 32) {
             const unsigned char *e = s + i;
@@ -258,9 +272,21 @@ struct fatimg *fatimg_open(fatimg_io io, void *ctx, char *why, int room)
     v->io = io, v->ctx = ctx;
     if (io(ctx, 0, s, 1, 0) != 0)
         bad = "its first sector can't be read";
-    else if (rd16(s + 11) != 512)
+    else if (!is_boot(s) && s[510] == 0x55 && s[511] == 0xAA) {      /* a hard disk's: its first FAT partition */
+        int k;
+        for (k = 0; k < 4 && !v->base; k++) {
+            const unsigned char *e = s + 446 + 16 * k;
+            if ((e[4] == 0x01 || e[4] == 0x04 || e[4] == 0x06 || e[4] == 0x0E) && rd32(e + 8))
+                v->base = rd32(e + 8);
+        }
+        if (!v->base)
+            bad = "a hard disk with no FAT12 or FAT16 partition";
+        else if (io(ctx, v->base, s, 1, 0) != 0)
+            bad = "its partition's first sector can't be read";
+    }
+    if (!bad && rd16(s + 11) != 512)
         bad = "no FAT volume (its sectors are not of 512 bytes)";
-    else {
+    else if (!bad) {
         v->spc = s[13], v->reserved = rd16(s + 14), v->nfats = s[16], v->root_entries = rd16(s + 17);
         total = rd16(s + 19) ? rd16(s + 19) : rd32(s + 32);
         v->fat_sectors = rd16(s + 22);
@@ -285,7 +311,7 @@ struct fatimg *fatimg_open(fatimg_io io, void *ctx, char *why, int room)
         bad = "no memory";
     for (i = 0; !bad && i < v->fat_sectors; i += 32) {
         unsigned count = v->fat_sectors - i < 32 ? (unsigned)(v->fat_sectors - i) : 32;
-        if (io(ctx, v->reserved + i, v->table + i * 512, count, 0) != 0)
+        if (vio(v, v->reserved + i, v->table + i * 512, count, 0) != 0)
             bad = "its FAT can't be read";
     }
     if (bad) {
@@ -298,7 +324,7 @@ struct fatimg *fatimg_open(fatimg_io io, void *ctx, char *why, int room)
         unsigned long n, lba;
         unsigned k, got = 0;
         unsigned char d[512];
-        for (n = 0; !got && n < v->root_sectors && dir_sector(v, 0, n, &lba) == 0 && io(ctx, lba, d, 1, 0) == 0; n++)
+        for (n = 0; !got && n < v->root_sectors && dir_sector(v, 0, n, &lba) == 0 && vio(v, lba, d, 1, 0) == 0; n++)
             for (i = 0; i < 512 && d[i]; i += 32)
                 if (d[i] != 0xE5 && (d[i + 11] & 0x3F) != 0x0F && (d[i + 11] & 0x08)) {
                     memcpy(v->label, d + i, 11);
@@ -325,7 +351,7 @@ int fatimg_close(struct fatimg *v)
     for (f = 0; v->changed && f < v->nfats; f++)
         for (i = 0; i < v->fat_sectors; i += 32) {
             unsigned count = v->fat_sectors - i < 32 ? (unsigned)(v->fat_sectors - i) : 32;
-            if (v->io(v->ctx, v->reserved + f * v->fat_sectors + i, v->table + i * 512, count, 1) != 0)
+            if (vio(v, v->reserved + f * v->fat_sectors + i, v->table + i * 512, count, 1) != 0)
                 r = -1;
         }
     free(v->table);
@@ -401,7 +427,7 @@ long fatimg_read(struct fatimg *v, const char *path, unsigned long at, void *buf
         if (c < 2 || c >= v->clusters + 2 || ++steps > 2 * v->clusters + 2)
             return -1;                          /* (the file says it is longer than its chain) */
         for (; sector < v->spc && done < n; sector++, off = 0) {
-            if (v->io(v->ctx, cluster_lba(v, c) + sector, s, 1, 0) != 0)
+            if (vio(v, cluster_lba(v, c) + sector, s, 1, 0) != 0)
                 return -1;
             take = 512 - off < n - done ? 512 - off : n - done;
             memcpy(to + done, s + off, take);
@@ -481,7 +507,7 @@ static int zero_cluster(struct fatimg *v, unsigned c)
     unsigned i;
     memset(s, 0, sizeof s);
     for (i = 0; i < v->spc; i++)
-        if (v->io(v->ctx, cluster_lba(v, c) + i, s, 1, 1) != 0)
+        if (vio(v, cluster_lba(v, c) + i, s, 1, 1) != 0)
             return -1;
     return 0;
 }
@@ -494,7 +520,7 @@ static int slot(struct fatimg *v, unsigned first, unsigned long *lba, unsigned *
     unsigned long n;
     unsigned i, c, last;
     for (n = 0; n < 4096 && dir_sector(v, first, n, lba) == 0; n++) {
-        if (v->io(v->ctx, *lba, s, 1, 0) != 0)
+        if (vio(v, *lba, s, 1, 0) != 0)
             return -1;
         for (i = 0; i < 512; i += 32)
             if (!s[i] || s[i] == 0xE5) {
@@ -542,14 +568,14 @@ static int enter(struct fatimg *v, const struct found *parent, const unsigned ch
     unsigned char s[512];
     unsigned long lba;
     unsigned at;
-    if (slot(v, parent->first, &lba, &at) != 0 || v->io(v->ctx, lba, s, 1, 0) != 0)
+    if (slot(v, parent->first, &lba, &at) != 0 || vio(v, lba, s, 1, 0) != 0)
         return -1;
     memset(s + at, 0, 32);
     memcpy(s + at, name, 11);
     s[at + 11] = (unsigned char)attr;
     wr16(s + at + 22, time), wr16(s + at + 24, date), wr16(s + at + 26, first);
     wr16(s + at + 28, (unsigned)(size & 0xFFFF)), wr16(s + at + 30, (unsigned)(size >> 16));
-    return v->io(v->ctx, lba, s, 1, 1) == 0 ? 0 : -1;
+    return vio(v, lba, s, 1, 1) == 0 ? 0 : -1;
 }
 
 int fatimg_mkdir(struct fatimg *v, const char *path, unsigned short date, unsigned short time)
@@ -565,7 +591,7 @@ int fatimg_mkdir(struct fatimg *v, const char *path, unsigned short date, unsign
     memset(s, ' ', 11), memset(s + 32, ' ', 11);
     s[0] = '.', s[11] = 0x10, wr16(s + 22, time), wr16(s + 24, date), wr16(s + 26, c);
     s[32] = s[33] = '.', s[32 + 11] = 0x10, wr16(s + 32 + 22, time), wr16(s + 32 + 24, date), wr16(s + 32 + 26, parent.first);
-    if (zero_cluster(v, c) != 0 || v->io(v->ctx, cluster_lba(v, c), s, 1, 1) != 0 || enter(v, &parent, name, c, 0, 0x10, date, time) != 0) {
+    if (zero_cluster(v, c) != 0 || vio(v, cluster_lba(v, c), s, 1, 1) != 0 || enter(v, &parent, name, c, 0, 0x10, date, time) != 0) {
         let_go(v, c);
         return -1;
     }
@@ -588,7 +614,7 @@ int fatimg_add(struct fatimg *v, const char *path, const void *data, unsigned lo
             unsigned long take = n - done < 512 ? n - done : 512;
             memset(s, 0, sizeof s);
             memcpy(s, from + done, take);
-            if (v->io(v->ctx, cluster_lba(v, c) + i, s, 1, 1) != 0) {
+            if (vio(v, cluster_lba(v, c) + i, s, 1, 1) != 0) {
                 let_go(v, first);
                 return -2;
             }
@@ -606,10 +632,10 @@ int fatimg_add(struct fatimg *v, const char *path, const void *data, unsigned lo
 static int mark_deleted(struct fatimg *v, unsigned long lba, unsigned at)
 {
     unsigned char s[512];
-    if (v->io(v->ctx, lba, s, 1, 0) != 0)
+    if (vio(v, lba, s, 1, 0) != 0)
         return -1;
     s[at] = 0xE5;
-    return v->io(v->ctx, lba, s, 1, 1) == 0 ? 0 : -1;
+    return vio(v, lba, s, 1, 1) == 0 ? 0 : -1;
 }
 
 /* The parts of a long name just before the entry at (lba, at) in the folder `first` marked deleted, and (entry
@@ -620,7 +646,7 @@ static int unenter(struct fatimg *v, unsigned first, unsigned long lba, unsigned
     unsigned long n, l, plba[20];
     unsigned i, pat[20], np = 0, k;
     for (n = 0; n < 65536ul / 16 * 2 && dir_sector(v, first, n, &l) == 0; n++) {
-        if (v->io(v->ctx, l, s, 1, 0) != 0)
+        if (vio(v, l, s, 1, 0) != 0)
             return -1;
         for (i = 0; i < 512; i += 32) {
             if (!s[i])
@@ -693,11 +719,11 @@ int fatimg_rename(struct fatimg *v, const char *path, const char *name)
     snprintf(to, sizeof to, "%s%s", up, name);
     if (find(v, to, &other) == 0 && (other.lba != f.lba || other.at != f.at))
         return -1;                              /* (another has that name; the same one in other letters is itself) */
-    if (v->io(v->ctx, f.lba, s, 1, 0) != 0)
+    if (vio(v, f.lba, s, 1, 0) != 0)
         return -1;
     memcpy(s + f.at, dn, 11);
     s[f.at + 12] = 0;                           /* (no small letters: the name is as given, in capitals) */
-    if (v->io(v->ctx, f.lba, s, 1, 1) != 0)
+    if (vio(v, f.lba, s, 1, 1) != 0)
         return -1;
     return unenter(v, parent.first, f.lba, f.at, 0);    /* (its long name, which was the old one's) */
 }

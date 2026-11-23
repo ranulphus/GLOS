@@ -47,7 +47,8 @@ archives, and anything deleted with Shift+Del or by a DOS program, are gone at o
 ## Archives
 
 ZIP, TAR, GZ, TGZ, LZH, ARJ and 7z archives are entered like folders in the browser, and so are floppy disk
-images (.IMG, .IMA, .VFD: a DOS disk's FAT12 or FAT16 volume). A disk's image can also be written to, as a
+images (.IMG, .IMA, .VFD: a DOS disk's FAT12 or FAT16 volume; a hard disk's image shows its first FAT
+partition). A disk's image can also be written to, as a
 ZIP can: paste into it, delete, rename and make new folders there (names must be DOS names, eight letters and
 three). Each change is made to a copy of the image that takes its place only when it is done, so an image with
 too little room left is not half changed. **Extract Here** and
