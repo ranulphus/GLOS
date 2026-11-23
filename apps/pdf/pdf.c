@@ -277,7 +277,9 @@ static void show_hit_at(int scroll)     /* what was found (or chosen): tinted, a
 /* ---- text chosen with the mouse (Select Text): the letters from where the button went down to where it is, in
    the order the page's words show them, tinted as what is found is; Copy takes them. */
 
-static long letter_near(int x, int y)   /* the page's letter at the picture's point, or the nearest */
+/* The page's letter at the picture's point, or the nearest; (above, below: only those wholly above the line y, or
+   wholly below it: Shift and the arrows' line up or down) */
+static long letter_near_in(int x, int y, int above, int below, int line)
 {
     long best = -1;
     double best_d = 1e18;
@@ -288,6 +290,8 @@ static long letter_near(int x, int y)   /* the page's letter at the picture's po
         if (letters[i].u == '\n')
             continue;
         letter_box(&letters[i], zoom / 100.0, &x0, &y0, &x1, &y1);
+        if ((above && y1 > line) || (below && y0 < line))
+            continue;
         if (x >= x0 && x < x1 && y >= y0 && y < y1)
             return (long)i;
         cx = x < x0 ? x0 - x : x >= x1 ? x - x1 + 1 : 0;
@@ -298,6 +302,8 @@ static long letter_near(int x, int y)   /* the page's letter at the picture's po
     }
     return best;
 }
+
+static long letter_near(int x, int y) { return letter_near_in(x, y, 0, 0, 0); }
 
 static void show_sel(void)
 {
@@ -310,16 +316,84 @@ static void show_sel(void)
 
 static int page_letters(unsigned n);
 
+static void say_chosen(void)
+{
+    unsigned long n = 0;
+    char *t = hit >= 0 ? pdf_text_utf8(letters, (unsigned)hit, (unsigned)hit + hit_len, &n) : NULL, *c;
+    for (c = t; c && *c; c++)                   /* (a line's end said as a space: one line said) */
+        if (*c == '\n' || *c == '\r')
+            *c = ' ';
+    say("chose %u letters: %.60s", hit_len, t ? t : "");        /* (the suite's: what was chosen, its start) */
+    free(t);
+}
+
+/* (2026-11-23) A double click chooses the word there, a third click the line; Shift and the arrows move the
+   chosen text's end a letter, or a line up or down. */
+static unsigned dbl_ms;
+static int dbl_x, dbl_y;
+
+static int word_letter(unsigned long u) { return u != ' ' && u != '\n' && u != '\t'; }
+
+static void choose_span(long k, int line)
+{
+    long a = k, b = k;
+    if (line) {
+        while (a > 0 && letters[a - 1].u != '\n')
+            a--;
+        while (b + 1 < (long)nletters && letters[b + 1].u != '\n')
+            b++;
+    } else if (word_letter(letters[k].u)) {
+        while (a > 0 && word_letter(letters[a - 1].u))
+            a--;
+        while (b + 1 < (long)nletters && word_letter(letters[b + 1].u))
+            b++;
+    }
+    sel_a = a, sel_b = b;
+    show_sel();
+    say_chosen();
+}
+
 static int view_mouse(struct gui_widget *w, struct gui_ev *e, int x, int y)
 {
     long k;
     (void)w;
     if (!text_tool || !doc)
         return 0;                               /* (the button moves the page, as ever) */
+    if (e->type == GUI_EV_KEY && (e->mods & GLOS_MOD_SHIFT) && sel_a >= 0 && sel_b >= 0 && nletters
+        && (e->key == GUI_K_LEFT || e->key == GUI_K_RIGHT || e->key == GUI_K_UP || e->key == GUI_K_DOWN)) {
+        k = sel_b;
+        if (e->key == GUI_K_LEFT)
+            k = k > 0 ? k - 1 : 0;
+        else if (e->key == GUI_K_RIGHT)
+            k = k + 1 < (long)nletters ? k + 1 : k;
+        else {                                  /* (the nearest letter a line above or below the end's) */
+            int x0, y0, x1, y1;
+            letter_box(&letters[sel_b], zoom / 100.0, &x0, &y0, &x1, &y1);
+            k = e->key == GUI_K_UP ? letter_near_in((x0 + x1) / 2, y0, 1, 0, y0) : letter_near_in((x0 + x1) / 2, y1, 0, 1, y1);
+            if (k < 0)
+                k = sel_b;
+        }
+        sel_b = k;
+        show_sel();
+        say_chosen();
+        return 1;
+    }
     if (e->type == GUI_EV_PRESS && e->button == 1) {
+        unsigned now = glos_ticks();
         if (page_letters(page) != 0 || !nletters)
             return 1;
         k = letter_near(x, y);
+        if (k >= 0 && dbl_ms && now - dbl_ms < 500 && abs(x - dbl_x) < 5 && abs(y - dbl_y) < 5) {
+            dbl_ms = 0, choosing = 0;           /* the third: the line */
+            choose_span(k, 1);
+            return 1;
+        }
+        if (k >= 0 && e->clicks >= 2) {         /* the second: the word */
+            dbl_ms = now ? now : 1, dbl_x = x, dbl_y = y, choosing = 0;
+            choose_span(k, 0);
+            return 1;
+        }
+        dbl_ms = 0;
         sel_a = sel_b = k;
         choosing = k >= 0;
         show_sel();
@@ -334,11 +408,8 @@ static int view_mouse(struct gui_widget *w, struct gui_ev *e, int x, int y)
         return 1;
     }
     if (e->type == GUI_EV_RELEASE && choosing) {
-        unsigned long n = 0;
-        char *t = hit >= 0 ? pdf_text_utf8(letters, (unsigned)hit, (unsigned)hit + hit_len, &n) : NULL;
         choosing = 0;
-        say("chose %u letters: %.60s", hit_len, t ? t : "");    /* (the suite's: what was chosen, its start) */
-        free(t);
+        say_chosen();
         return 1;
     }
     return e->type == GUI_EV_PRESS || e->type == GUI_EV_RELEASE || e->type == GUI_EV_MOVE;

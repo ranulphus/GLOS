@@ -1937,7 +1937,7 @@ static int step(void)
             return 1;
         } else if (!strcmp(cmd, "click") || !strcmp(cmd, "drag")) {
             struct hwin *w;
-            int x, y, x1 = 0, y1 = 0, dbl = 0;
+            int x, y, x1 = 0, y1 = 0, dbl = 0, k;
             unsigned button = 1;
             if (!word(&p, a, sizeof a) || !(w = by_title(a)))
                 fail("%s: no window \"%s\"", cmd, a);
@@ -1954,12 +1954,14 @@ static int step(void)
                     button = 4;
                 else if (!strcmp(b, "double"))
                     dbl = 1;
+                else if (!strcmp(b, "triple"))
+                    dbl = 2;
             point(w->x + x, w->y + y);
             press(button);
             if (!strcmp(cmd, "drag"))
                 point(w->x + x1, w->y + y1);
             release(button);
-            if (dbl) {
+            for (k = 0; k < dbl; k++) {
                 press(button);
                 release(button);
             }

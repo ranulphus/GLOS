@@ -8602,6 +8602,9 @@ class GuiDriver:
                 if cmd == "drag":
                     dx, dy = int(args[3]) - int(args[1]), int(args[4]) - int(args[2])
                     self.agent.ssh("glos key 0:mouse:0:0:%d,0.1:mouse:%d:%d:%d,0.2:mouse:0:0:0" % (button, dx, dy, button))
+                elif "triple" in args:          # (three presses: the second a double click, the third soon after)
+                    self.agent.ssh("glos key 0:mouse:0:0:%d,0.05:mouse:0:0:0,0.15:mouse:0:0:%d,0.2:mouse:0:0:0,"
+                                   "0.3:mouse:0:0:%d,0.35:mouse:0:0:0" % (button, button, button))
                 elif "double" in args:
                     self.agent.ssh("glos key 0:mouse:0:0:%d,0.05:mouse:0:0:0,0.15:mouse:0:0:%d,0.2:mouse:0:0:0"
                                    % (button, button))

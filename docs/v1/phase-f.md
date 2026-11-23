@@ -1379,8 +1379,14 @@ what is chosen, or the page's text when nothing is. The choice goes with the pag
 - **Tests:** `pdf-select` (host and the emulated Pentiums, no pictures: they are the host's alone for PDFs):
   the guide's first page at its actual size, a drag across "GLOS reads PDF files" (20 letters, said), Copy
   20 bytes.
-- **Not yet:** a choice over two pages; double and triple clicks for a word and a line; Shift and the arrow
-  keys.
+- **Since built** (2026-11-23): a double click chooses the word there (letters up to a space or a line's end), a
+  third click soon after (half a second, within four pixels) its line; Shift and the arrows move the chosen
+  text's end a letter, or to the nearest letter wholly on the line above or below (the canvas view's event hook
+  sees the keys first). `pdf-select` goes on: a double click on "reads", three clicks on its line (61 letters),
+  Shift+Left (60), Shift+Up (the end in the title above: "uch" and the line's first letter), a picture. The
+  script players (`glosshim.c`, `jobs.py`) gain `click ... triple`. A line's end in what is chosen is said as a
+  space.
+- **Not yet:** a choice over two pages.
 
 ## The Web Reader: pictures in pages (2026-11-22)
 

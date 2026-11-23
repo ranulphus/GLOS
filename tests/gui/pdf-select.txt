@@ -1,7 +1,7 @@
 #pentium (the PDF Viewer's floor is a Pentium)
 # The PDF Viewer's Select Text (apps/pdf; phase F's second part): the first page of tests/gui/mkpdf.py's PDF at
 # its actual size, the text tool on, a drag across a line's words: those letters chosen and tinted; Copy takes
-# them, not the page.
+# them, not the page. A double click chooses a word, a third click its line; Shift and the arrows move the end.
 run PDF.EXE
 wait "PDF Viewer"
 key ctrl+o
@@ -18,6 +18,20 @@ drag "PDF Viewer" 250 173 355 173
 said PDF chose 20 letters: GLOS reads PDF files
 key ctrl+c
 said PDF copied 20
+pause 1000
+click "PDF Viewer" 300 173 double
+said PDF chose 1 letters: d
+said PDF chose 5 letters: reads
+pause 1000
+click "PDF Viewer" 300 173 triple
+said PDF chose 1 letters: d
+said PDF chose 5 letters: reads
+said PDF chose 61 letters: GLOS reads PDF files with a reader and a renderer of its own
+key shift+left
+said PDF chose 60 letters: GLOS reads PDF files with a reader and a renderer of its own
+key shift+up
+said PDF chose 5 letters: uch  G
+shot lines "PDF Viewer"
 key ctrl+t
 said PDF select text off
 key alt+f4

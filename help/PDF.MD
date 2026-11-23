@@ -13,6 +13,8 @@ Reads PDF files, a page at a time.
 | Ctrl+2 | As wide as the window |
 | Ctrl+F, F3, Shift+F3 | Find words in the whole file; the next place, the one before |
 | Ctrl+T | Select Text: the mouse chooses text (press it again: the mouse moves the page again) |
+| Double click, three clicks | (Select Text) the word there; its whole line |
+| Shift+arrows | (Select Text) move the end of what is chosen a letter, or a line up or down |
 | Ctrl+C | Copy the text chosen, or the whole page's when none is |
 | F9 | The file's outline (its chapters), at the left |
 
