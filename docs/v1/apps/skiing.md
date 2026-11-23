@@ -104,7 +104,9 @@ editor.
 The first part is in `docs/v1/phase-f.md` ("The skiing game"): the mountains, the runs, the tables, slalom,
 free run and the mountain of the day, under the working name "Skiing" and with this page's defaults for the
 points below. Since then (same file): the owner's name, Fall Line, and their answers below; the figures to
-choose (2026-11-22); the weather, all of it: snowfall, fog, night and the wind's gusts (2026-11-23).
+choose (2026-11-22); the weather, all of it: snowfall, fog, night and the wind's gusts; the chair lift and its
+pylons, the hares, other skiers and the piste groomer; the demonstration playing by itself (2026-11-23). Left of
+this page: the window doubled and full screen, and the 486's frame rate measured on the bench.
 
 ## For the owner (answered 2026-11-21)
 
