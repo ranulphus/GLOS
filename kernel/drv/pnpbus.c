@@ -98,7 +98,9 @@ int pnpbus_on(struct pnp_dev *d)
     }
     for (k = 0; k < d->n_dma; k++) {
         for (j = 0; j < sizeof dma_order; j++)
-            if ((d->dma_opt[k] & (1u << dma_order[j])) && (k == 0 || dma[0] != dma_order[j])) {
+            if ((d->dma_opt[k] & (1u << dma_order[j])) && (k == 0 || dma[0] != dma_order[j])
+                && !(k == 1 && dma_order[j] < 4 && (d->dma_opt[k] & 0xE0))) {  /* (a second channel that can be a
+                                                   16-bit one is given one: a Sound Blaster 16's) */
                 dma[k] = dma_order[j];
                 break;
             }

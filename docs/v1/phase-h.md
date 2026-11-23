@@ -188,8 +188,9 @@ initiation key, each card isolated by its 72-bit identifier and given a number, 
 logical device set up and turned on. It is plain C over port callbacks. `kernel/drv/pnpbus.c` is the kernel's
 side.
 
-- **When it runs:** only when a driver asks for a card, or at `glos pnp`. Never by itself at start, so a PC whose
-  cards are found by other means (BLASTER, the Crystal chips' own key, PCI) is not touched.
+- **When it runs:** at `glos pnp`, and at start only on a PC with no BLASTER on which neither a Crystal chip
+  nor a PCI sound card was found: the mixer then looks for a PnP AudioDrive, and for a PnP Sound Blaster 16 or
+  ALS100, last of all. A PC whose card is found by other means is not touched.
 - **What a scan changes:** the cards' numbers, nothing else. A logical device a BIOS or a DOS program has turned
   on is reported and used as it is.
 - **Setting one up:** its preferred I/O ranges (its first dependent function's), an interrupt from 5, 7, 10, 11,
@@ -199,6 +200,9 @@ side.
 - **First user, the ESS driver:** with no BLASTER, `ess.c` asks for ESS's audio device (the one with ports, an
   interrupt and a DMA channel), has it turned on if it isn't, and probes there. That is for the ES1868 and
   ES1869 class; bench D's ES1887 is not a PnP chip and wants BLASTER.
+- **Second, the SB16 driver:** with no BLASTER, `sb16.c` asks for Creative's (CTL) or Avance Logic's (ALS) audio
+  device, the one with two DMA channels, the second a 16-bit one. That is for the ALS100 Plus+ meant for bench
+  C, whose 486 has no PnP BIOS to turn it on. Unproven until the card is in a bench.
 - **`glos pnp`:** scans again and lists each logical device: its card, its ID, on or off, its resources.
 - **Tests:**
   - host: `isapnp_test`, against a model of three cards on one bus (two alike but for one serial bit; logical

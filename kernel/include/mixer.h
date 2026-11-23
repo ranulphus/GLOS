@@ -80,6 +80,8 @@ int es1371_init(void);                          /* (phase H) a PCI ES1371, ES137
 void es1371_leave(void);                        /* glos exit: its channels stopped */
 int cmi8738_init(void);                         /* (phase H) a PCI CMI8738 found and set up: 0 */
 int ess_init(const struct bootinfo *bi);        /* (phase H) an ESS AudioDrive at BLASTER's A, I and D: 0 */
+int ess_init_pnp(void);                         /* ... no BLASTER: a Plug and Play AudioDrive set up: 0 */
+int sb16_init_pnp(void);                        /* (phase H) no BLASTER: a Plug and Play SB16 or ALS100 set up: 0 */
 void ess_leave(void);                           /* glos exit: stopped, a Sound Blaster Pro again */
 void cmi8738_leave(void);                       /* glos exit: its channels stopped, its legacy parts as they were */
 void mixer_refresh(void);                       /* the card started or stopped as things stand now */

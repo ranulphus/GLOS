@@ -22,6 +22,7 @@
 #include "midi.h"
 #include "mixer.h"
 #include "mm.h"
+#include "pnpbus.h"
 #include "timer.h"
 #include "vm.h"
 
@@ -99,15 +100,47 @@ void sb16_left(const struct bootinfo *bi)
     dev_note("sb16", "sb16", DEVS_OFF, "", sb16_res());
 }
 
+static int found_at(void);
+
 int sb16_init(const struct bootinfo *bi)
 {
-    int hi, lo;
     if (!bi->sb_port || bi->sb_irq > 15 || bi->sb_dma16 < 5 || bi->sb_dma16 > 7)
         return -1;
     sb.base = (u16)bi->sb_port;
     sb.irq = (u8)bi->sb_irq;
     sb.dma = (u8)bi->sb_dma16;
     sb.dma8 = (u8)(bi->sb_dma8 <= 3 ? bi->sb_dma8 : 0xFF);
+    return found_at();
+}
+
+/* With no BLASTER (phase H, 2026-11-23): a Plug and Play Sound Blaster 16 or a clone of one that nothing has set
+   up, or that a BIOS has without a word: Creative's own (CTL) and Avance Logic's ALS100 (ALS: the card meant for
+   bench C, whose 486 has no PnP BIOS). Its audio device is the maker's one with ports, an interrupt and two DMA
+   channels, the second a 16-bit one. Unproven until a bench has such a card (86Box's want their PnP ROMs). */
+int sb16_init_pnp(void)
+{
+    static const unsigned long makers[] = { PNP_VENDOR(PNP_ID('C', 'T', 'L', 0)), PNP_VENDOR(PNP_ID('A', 'L', 'S', 0)) };
+    unsigned m;
+    if (dev_turned_off("sb16"))
+        return -1;
+    for (m = 0; m < sizeof makers / sizeof makers[0]; m++) {
+        struct pnp_dev *d = 0;
+        while ((d = pnpbus_find(makers[m], 1, 1, 2, d)) != 0) {
+            u8 hi = d->dma_opt[1] & 0xE0 ? 1 : 0;       /* (its second channel can be 5, 6 or 7) */
+            if (!hi || pnpbus_on(d) != 0 || !d->io[0] || !d->irq[0] || d->dma[1] < 5 || d->dma[1] > 7)
+                continue;
+            sb.base = d->io[0], sb.irq = d->irq[0], sb.dma = d->dma[1];
+            sb.dma8 = (u8)(d->dma[0] <= 3 ? d->dma[0] : 0xFF);
+            if (found_at() == 0)
+                return 0;
+        }
+    }
+    return -1;
+}
+
+static int found_at(void)
+{
+    int hi, lo;
     if (dsp_reset() != 0 || dsp_write(0xE1) != 0 || (hi = dsp_read()) < 0 || (lo = dsp_read()) < 0) {
         kprintf("GLOS-SB none port=%x\n", sb.base);
         return -1;

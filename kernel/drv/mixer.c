@@ -147,7 +147,7 @@ static void late(void)
     else if (ess_init(mx.bi) == 0)              /* (phase H: BLASTER's card an ESS AudioDrive, a Sound Blaster Pro
                                                    to sb16.c: ess.c) */
         mx.card = &ess_card;
-    else if (cmi8738_init() == 0)               /* (phase H: a PCI CMI8738, cmi8738.c) */
+    else if (cmi8738_init() == 0)               /* (... a PCI CMI8738, cmi8738.c) */
         mx.card = &cmi8738_card;
     else if (es1371_init() == 0)                /* (... an ES1371, ES1373 or CT5880, es1371.c) */
         mx.card = &es1371_card;
@@ -155,6 +155,12 @@ static void late(void)
         mx.card = &ich97_card;
     else if (via686_init() == 0)                /* (... VIA's VT82C686 AC'97, or its VT8233 family's: via686.c) */
         mx.card = via686_is8233() ? &via8233_card : &via686_card;
+    /* Last, on a PC with no BLASTER and none of the above: the ISA Plug and Play cards are looked for (pnpbus.c:
+       the only place a scan of them is made by itself), for an AudioDrive, then a Sound Blaster 16 or ALS100. */
+    else if (!mx.bi->sb_port && ess_init_pnp() == 0)
+        mx.card = &ess_card;
+    else if (!mx.bi->sb_port && sb16_init_pnp() == 0)
+        mx.card = &sb16_card;
     else
         return;
     if (mx.bi->sound_flags & BI_SOUND_OFF)

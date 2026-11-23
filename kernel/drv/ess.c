@@ -117,34 +117,43 @@ static int probe(int *hi, int *lo, int *id)
     return 1;
 }
 
+static int found(int hi, int lo, int b);
+
+/* Where BLASTER says (A, I and D: an AudioDrive has no 16-bit channel, no H). */
 int ess_init(const struct bootinfo *bi)
 {
-    int hi = 0, lo = 0, b = 0, there = 0;
+    int hi = 0, lo = 0, b = 0;
+    if (!bi->sb_port || bi->sb_irq > 15 || bi->sb_dma8 > 3 || bi->sb_dma8 == 2)
+        return -1;
+    es.base = (u16)bi->sb_port, es.irq = (u8)bi->sb_irq, es.dma = (u8)bi->sb_dma8;
     if (dev_turned_off("ess")) {
-        if (bi->sb_port) {
-            es.base = (u16)bi->sb_port, es.irq = (u8)bi->sb_irq, es.dma = (u8)bi->sb_dma8;
-            dev_note("ess", "ess", DEVS_OFF, "", res());
-        }
+        dev_note("ess", "ess", DEVS_OFF, "", res());
         return -1;
     }
-    if (bi->sb_port && bi->sb_irq <= 15 && bi->sb_dma8 <= 3 && bi->sb_dma8 != 2) {    /* where BLASTER says */
-        es.base = (u16)bi->sb_port, es.irq = (u8)bi->sb_irq, es.dma = (u8)bi->sb_dma8;
-        there = probe(&hi, &lo, &b);
-    }
-    if (!there && !bi->sb_port) {
-        /* No BLASTER at all: a Plug and Play AudioDrive (ES1868, ES1869 and their kin) that nothing has set up,
-           or that a BIOS has without saying. Its audio device is the one of ESS's with ports, an interrupt and
-           a DMA channel (the others: its game port, its MPU-401, a CD-ROM's IDE). */
-        struct pnp_dev *d = 0;
-        while (!there && (d = pnpbus_find(PNP_VENDOR(PNP_ID('E', 'S', 'S', 0)), 1, 1, 1, d)) != 0) {
-            if (pnpbus_on(d) != 0 || !d->io[0] || !d->irq[0] || d->dma[0] > 3 || d->dma[0] == 2)
-                continue;
-            es.base = d->io[0], es.irq = d->irq[0], es.dma = d->dma[0];
-            there = probe(&hi, &lo, &b);
-        }
-    }
-    if (!there)
+    return probe(&hi, &lo, &b) ? found(hi, lo, b) : -1;
+}
+
+/* No BLASTER at all: a Plug and Play AudioDrive (ES1868, ES1869 and their kin) that nothing has set up, or that
+   a BIOS has without saying. Its audio device is the one of ESS's with ports, an interrupt and a DMA channel (the
+   others: its game port, its MPU-401, a CD-ROM's IDE). */
+int ess_init_pnp(void)
+{
+    struct pnp_dev *d = 0;
+    int hi = 0, lo = 0, b = 0;
+    if (dev_turned_off("ess"))
         return -1;
+    while ((d = pnpbus_find(PNP_VENDOR(PNP_ID('E', 'S', 'S', 0)), 1, 1, 1, d)) != 0) {
+        if (pnpbus_on(d) != 0 || !d->io[0] || !d->irq[0] || d->dma[0] > 3 || d->dma[0] == 2)
+            continue;
+        es.base = d->io[0], es.irq = d->irq[0], es.dma = d->dma[0];
+        if (probe(&hi, &lo, &b))
+            return found(hi, lo, b);
+    }
+    return -1;
+}
+
+static int found(int hi, int lo, int b)
+{
     es.id = (u8)b;
     es.found = 1;
     mix_wr(0x32, 0xFF);                         /* the master, the voice and FM full (88h after a reset: some 30 dB
