@@ -327,6 +327,9 @@ two command sets that don't match). Before phase C, because the Terminal is one 
 
 ### H. Hardware compatibility (to be planned after an audit)
 
+**The audit (2026-11-23, the owner's choice of H before G): `docs/v1/hardware-audit.md`, a draft awaiting the
+owner's approval** (the fleet, what GLOS drives, the period's hardware, the gaps, H proposed in three tiers).
+
 **The owner's decision (2026-11-06):** a phase for the hardware GLOS drives. It holds the drivers the benches and
 typical PCs of the period need. Its contents are settled after a hardware compatibility audit, and nothing is built
 before that.
