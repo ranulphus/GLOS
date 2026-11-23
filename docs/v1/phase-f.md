@@ -1641,7 +1641,7 @@ does not.
 - **Tests:** `arc_test` (host): a 1.44 MB floppy that mtools makes (a file, folders in folders, a long name):
   its entries, their bytes, every folder's list and a walk; the same image spoiled (no sectors a cluster)
   refused; and every damaged copy the test makes of it read without harm.
-- **Not yet:** images written to from Files; a hard disk's image (its partition table).
+- **Not yet:** images written to from Files (since built, 2026-11-23: below); a hard disk's image (its partition table).
 
 ## MIDI Studio: step entry (2026-11-22)
 
@@ -1774,3 +1774,28 @@ the schedule's command. After a backup that succeeded, `bk_thin` (`apps/shared/b
   backup part over real SFTP (a fourth set with `-keep 2`: `thinned keep=2 sets=2 removed=2 held=3`, the
   server's files as said, two manifests, the newest restored whole with its C.BIN from the first);
   `disks-schedule` keeps the newest 10 (`scheduled keep 10`).
+
+## Files: a disk's image written to (2026-11-23)
+
+A disk's image in Files is now written to as a ZIP is: paste into it (files and folders, a replace asked about
+as on a disc), delete, rename, New Folder.
+
+- **`apps/shared/fatimg.c`** gains `fatimg_remove` (a file, or an empty folder: its clusters free again, its
+  entry and its long name's parts marked deleted; the root and a folder with things in it refused) and
+  `fatimg_rename` (a DOS name in the same folder: another's name refused, its own in other letters allowed; its
+  long name, which was the old one's, marked deleted).
+- **Files** (`apps/files/folder.c`): a paste or a delete in an image is a job (`img_work`) that copies the image
+  beside it (`NAME.$$$`), changes the copy (a file goes in whole: 32 MB at most; one of its name there is
+  taken out first, as the paste asked; a folder that is there is gone into), and only when all of it is done
+  puts the copy in the image's place (the image renamed `NAME.BAK` until the copy is in). Anything that fails
+  (no room, a name that is not DOS's, a copy with no room beside it) leaves the image as it was, and a message
+  says why (`FILES image unchanged WHY`). A new folder (dated now) and a rename are one entry each, done to the
+  image itself.
+- **Tests:** `fatimg_test` (host): on each of the three volumes, twenty files taken away (the clusters they had
+  free again), a file, a file in a folder and the folder emptied taken away, the refusals, renames and their
+  refusals, a folder renamed and back; then fsck.fat finds each volume clean. On a volume mtools made: a file
+  taken away by its long name, a folder's file and the folder, a file renamed; fsck.fat clean with no long name
+  left behind, mtools lists only what is left, and the renamed file is read. `files-img` (host and the emulated
+  desktops; `C:\IMG\WORK.IMG`, 160 KB of mtools' making): a file pasted in, a folder made, a file renamed, one
+  deleted, two copied back out and compared to the byte. The other sixteen Files scripts unchanged.
+- **Not yet:** long names written (a DOS name is asked for); a hard disk's image (its partition table).

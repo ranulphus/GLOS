@@ -47,7 +47,10 @@ archives, and anything deleted with Shift+Del or by a DOS program, are gone at o
 ## Archives
 
 ZIP, TAR, GZ, TGZ, LZH, ARJ and 7z archives are entered like folders in the browser, and so are floppy disk
-images (.IMG, .IMA, .VFD: a DOS disk's FAT12 or FAT16 volume), read only. **Extract Here** and
+images (.IMG, .IMA, .VFD: a DOS disk's FAT12 or FAT16 volume). A disk's image can also be written to, as a
+ZIP can: paste into it, delete, rename and make new folders there (names must be DOS names, eight letters and
+three). Each change is made to a copy of the image that takes its place only when it is done, so an image with
+too little room left is not half changed. **Extract Here** and
 **Extract To...** unpack them. **Add to ZIP** packs what is chosen into a new ZIP; inside a ZIP you can also
 paste, rename, delete and make folders. Archives of the other kinds are read, not written. Files locked with a
 password are listed but cannot be unpacked.

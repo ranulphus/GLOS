@@ -1,0 +1,64 @@
+# Files writes into a disk's image (apps/files; phase F, 2026-11-23; apps/shared/fatimg.c): C:\IMG\WORK.IMG (a
+# 160 KB FAT12 volume of mtools' making: mformat -f 160 -N 20261123 -v WORK, then README.TXT, OLD.TXT and DOCS\A.TXT)
+# gone into as a folder; a file copied from C:\INF pasted into it; a folder made in it; OLD.TXT renamed; README.TXT
+# deleted; then its files copied out of it again, to the byte. Each change is written into a copy of the image
+# that takes its place when done.
+run FILES.EXE -browse C:\IMG
+wait "C:\IMG - Files"
+key home
+key enter
+wait "C:\IMG\WORK.IMG - Files"
+shot img "C:\IMG\WORK.IMG - Files"
+key ctrl+l
+type c:\\inf\n
+wait "C:\INF - Files"
+key home
+key down
+key ctrl+c
+key ctrl+l
+type c:\\img\\work.img\n
+wait "C:\IMG\WORK.IMG - Files"
+key ctrl+v
+said FILES pasted 1 copied
+key ctrl+shift+n
+wait "New Folder"
+key ctrl+a
+type MORE\n
+said FILES made MORE
+key end
+key up
+key f2
+wait "Rename"
+key ctrl+a
+type NEW.TXT\n
+said FILES renamed NEW.TXT
+shot changed "C:\IMG\WORK.IMG - Files"
+key end
+key del
+wait "Delete"
+key enter
+said FILES deleted C:\IMG\WORK.IMG\README.TXT
+shot after "C:\IMG\WORK.IMG - Files"
+key end
+key ctrl+c
+key ctrl+l
+type c:\\img\n
+wait "C:\IMG - Files"
+key ctrl+v
+said FILES pasted 1 copied
+key ctrl+l
+type c:\\img\\work.img\n
+wait "C:\IMG\WORK.IMG - Files"
+key end
+key up
+key ctrl+c
+key ctrl+l
+type c:\\img\n
+wait "C:\IMG - Files"
+key ctrl+v
+said FILES pasted 1 copied
+file C:\IMG\NEW.TXT to be renamed\r\n
+file C:\IMG\A.TXT first line\r\nthe needle is here\r\nlast\r\n
+key alt+f4
+gone "C:\IMG - Files"
+expect FILES end

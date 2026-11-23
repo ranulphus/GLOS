@@ -600,3 +600,105 @@ int fatimg_add(struct fatimg *v, const char *path, const void *data, unsigned lo
     }
     return 0;
 }
+
+/* ---- taken away, renamed */
+
+static int mark_deleted(struct fatimg *v, unsigned long lba, unsigned at)
+{
+    unsigned char s[512];
+    if (v->io(v->ctx, lba, s, 1, 0) != 0)
+        return -1;
+    s[at] = 0xE5;
+    return v->io(v->ctx, lba, s, 1, 1) == 0 ? 0 : -1;
+}
+
+/* The parts of a long name just before the entry at (lba, at) in the folder `first` marked deleted, and (entry
+   nonzero) the entry too. 0; -1: the entry was not found, or the disk failed. */
+static int unenter(struct fatimg *v, unsigned first, unsigned long lba, unsigned at, int entry)
+{
+    unsigned char s[512];
+    unsigned long n, l, plba[20];
+    unsigned i, pat[20], np = 0, k;
+    for (n = 0; n < 65536ul / 16 * 2 && dir_sector(v, first, n, &l) == 0; n++) {
+        if (v->io(v->ctx, l, s, 1, 0) != 0)
+            return -1;
+        for (i = 0; i < 512; i += 32) {
+            if (!s[i])
+                return -1;
+            if (l == lba && i == at) {
+                if (entry && mark_deleted(v, lba, at) != 0)
+                    return -1;
+                for (k = 0; k < np; k++)
+                    if (mark_deleted(v, plba[k], pat[k]) != 0)
+                        return -1;
+                return 0;
+            }
+            if (s[i] != 0xE5 && (s[i + 11] & 0x3F) == 0x0F) {
+                if (np < 20)
+                    plba[np] = l, pat[np++] = i;
+            } else {
+                np = 0;
+            }
+        }
+    }
+    return -1;
+}
+
+/* path's folder (up: the path up to its last part) and that part. -1: the root itself, or a path too long. */
+static int split(const char *path, char *up, size_t room, const char **leaf)
+{
+    const char *end = path + strlen(path), *p;
+    while (end > path && (end[-1] == '\\' || end[-1] == '/'))
+        end--;
+    for (p = end; p > path && p[-1] != '\\' && p[-1] != '/'; p--)
+        ;
+    if (p == end || (size_t)(p - path) >= room)
+        return -1;
+    memcpy(up, path, (size_t)(p - path));
+    up[p - path] = 0;
+    *leaf = p;
+    return 0;
+}
+
+int fatimg_remove(struct fatimg *v, const char *path)
+{
+    struct found f, parent;
+    char up[300];
+    const char *leaf;
+    if (split(path, up, sizeof up, &leaf) != 0 || find(v, up, &parent) != 0 || find(v, path, &f) != 0)
+        return -1;
+    if (f.attr & 0x10) {                        /* a folder: only an empty one */
+        struct fatimg_entry *e = NULL;
+        int n = fatimg_list(v, path, &e);
+        free(e);
+        if (n != 0)
+            return -1;
+    }
+    if (unenter(v, parent.first, f.lba, f.at, 1) != 0)
+        return -1;
+    if (f.first)
+        let_go(v, f.first);
+    return 0;
+}
+
+int fatimg_rename(struct fatimg *v, const char *path, const char *name)
+{
+    struct found f, parent, other;
+    unsigned char s[512], dn[11];
+    char up[300], to[600];
+    const char *leaf;
+    if (split(path, up, sizeof up, &leaf) != 0 || find(v, up, &parent) != 0 || find(v, path, &f) != 0
+        || dos_name(name, strlen(name), dn) != 0)
+        return -1;
+    snprintf(to, sizeof to, "%s%s", up, name);
+    if (find(v, to, &other) == 0 && (other.lba != f.lba || other.at != f.at))
+        return -1;                              /* (another has that name; the same one in other letters is itself) */
+    if (v->io(v->ctx, f.lba, s, 1, 0) != 0)
+        return -1;
+    memcpy(s + f.at, dn, 11);
+    s[f.at + 12] = 0;                           /* (no small letters: the name is as given, in capitals) */
+    if (v->io(v->ctx, f.lba, s, 1, 1) != 0)
+        return -1;
+    return unenter(v, parent.first, f.lba, f.at, 0);    /* (its long name, which was the old one's) */
+}
+

@@ -186,6 +186,43 @@ static void a_volume(const char *dir, const char *name, unsigned long sectors, u
     fatimg_info(v, &info);
     CHECK(info.free_clusters == after.free_clusters && fatimg_read(v, "BIG.BIN", 0, back, sizeof back) == (long)sizeof big,
           "%s: ... takes nothing", name);
+    /* (2026-11-23) taken away and renamed: clusters free again, an empty folder only, names DOS's and nobody's */
+    {
+        struct fatimg_info before, now;
+        int listed = fatimg_list(v, "", &e);
+        free(e), e = NULL;
+        for (i = 0, r = 0; i < 20; i++) {       /* (room first: the root, and perhaps the volume, is full) */
+            sprintf(path, "R%04u.X", i);
+            r |= fatimg_remove(v, path);
+        }
+        fatimg_info(v, &now);
+        CHECK(r == 0 && fatimg_list(v, "", &e) == listed - 20 && now.free_clusters == info.free_clusters + 20
+              && fatimg_read(v, "R0005.X", 0, back, 1) == -1 && fatimg_read(v, "R0020.X", 0, back, 1) == 1,
+              "%s: twenty files taken away: %lu clusters free, %lu before", name, now.free_clusters, info.free_clusters);
+        free(e), e = NULL;
+        fatimg_info(v, &before);
+        CHECK(fatimg_add(v, "GONE.BIN", big, 5000, 0, 0) == 0 && fatimg_mkdir(v, "GONEDIR", 0, 0) == 0
+              && fatimg_add(v, "GONEDIR\\IN.TXT", "in", 2, 0, 0) == 0, "%s: things to take away", name);
+        CHECK(fatimg_remove(v, "GONEDIR") == -1 && fatimg_remove(v, "") == -1 && fatimg_remove(v, "NONE.TXT") == -1
+              && fatimg_remove(v, "GONEDIR\\NONE") == -1, "%s: refused: a folder with things in it, the root, nothing", name);
+        CHECK(fatimg_remove(v, "gone.bin") == 0 && fatimg_remove(v, "GONEDIR/IN.TXT") == 0 && fatimg_remove(v, "GoneDir") == 0,
+              "%s: a file, a file in a folder, the folder emptied", name);
+        fatimg_info(v, &now);
+        CHECK(now.free_clusters == before.free_clusters && fatimg_read(v, "GONE.BIN", 0, back, 10) == -1
+              && fatimg_list(v, "GONEDIR", &e) == -1, "%s: all taken away: %lu free, %lu before", name, now.free_clusters,
+              before.free_clusters);
+        free(e), e = NULL;
+        CHECK(fatimg_rename(v, "SMALL.TXT", "TINY.TXT") == 0 && fatimg_read(v, "tiny.txt", 0, back, 100) == 10
+              && !memcmp(back, "ten bytes!", 10) && fatimg_read(v, "SMALL.TXT", 0, back, 10) == -1, "%s: a file renamed", name);
+        CHECK(fatimg_rename(v, "TINY.TXT", "ONE.BIN") == -1 && fatimg_rename(v, "TINY.TXT", "A LONG NAME.TXT") == -1
+              && fatimg_rename(v, "NONE.TXT", "X.TXT") == -1 && fatimg_rename(v, "TINY.TXT", "tiny.txt") == 0
+              && fatimg_rename(v, "TINY.TXT", "SMALL.TXT") == 0, "%s: renames refused (another's, no DOS name, nothing) "
+              "and its own name again", name);
+        CHECK(fatimg_rename(v, "SUB\\DEEP", "DEEPER") == 0 && fatimg_read(v, "SUB\\DEEPER\\MORE.BIN", 0, back, 5000) == 5000
+              && fatimg_rename(v, "SUB\\DEEPER", "DEEP") == 0, "%s: a folder renamed and back", name);
+        fatimg_info(v, &now);
+        CHECK(now.free_clusters == before.free_clusters, "%s: renames take nothing", name);
+    }
     CHECK(fatimg_close(v) == 0, "%s: closed", name);
     {                                           /* its FATs: written, and both the same */
         unsigned fat_sectors = d.b[22] | (unsigned)d.b[23] << 8, reserved = d.b[14] | (unsigned)d.b[15] << 8;
@@ -238,13 +275,25 @@ static void a_volume(const char *dir, const char *name, unsigned long sectors, u
 static int file_io(void *ctx, unsigned long lba, unsigned char *data, unsigned count, int write)
 {
     FILE *f = ctx;
-    if (write || fseek(f, (long)(lba * 512), SEEK_SET) != 0)
+    if (fseek(f, (long)(lba * 512), SEEK_SET) != 0)
         return -1;
-    return fread(data, 512, count, f) == count ? 0 : -1;
+    return (write ? fwrite(data, 512, count, f) : fread(data, 512, count, f)) == count ? 0 : -1;
 }
 
 int main(int argc, char **argv)
 {
+    if (argc >= 4 && (!strcmp(argv[1], "remove") || !strcmp(argv[1], "rename"))) {     /* (fatimg_test.sh's) */
+        FILE *f = fopen(argv[2], "r+b");
+        char why[80];
+        struct fatimg *v = f ? fatimg_open(file_io, f, why, sizeof why) : NULL;
+        int r;
+        if (!v)
+            return 1;
+        r = argv[1][2] == 'm' ? fatimg_remove(v, argv[3]) : argc > 4 ? fatimg_rename(v, argv[3], argv[4]) : -1;
+        r |= fatimg_close(v);
+        fclose(f);
+        return r != 0;
+    }
     if (argc >= 4 && (!strcmp(argv[1], "list") || !strcmp(argv[1], "read"))) {
         FILE *f = fopen(argv[2], "rb");
         char why[80];

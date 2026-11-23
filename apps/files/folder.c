@@ -11,11 +11,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "files.h"
 #include "site.h"
 #include "../shared/remote.h"
 #include "../shared/arc.h"
+#include "../shared/fatimg.h"
 #include "../shared/thumbs.h"
 
 #define HIST 16
@@ -153,6 +155,8 @@ static int connect_ask(struct gui_window *owner, char *out, int room)
    only read. */
 
 static int in_zip(const struct view *v) { return v->arc && !strcmp(arc_kind(v->arc), "ZIP"); }
+static int in_img(const struct view *v) { return v->arc && !strcmp(arc_kind(v->arc), "IMG"); }    /* (a disk's image:
+                                                   written to as a ZIP is, 2026-11-23) */
 
 /* The archive in a path: its file, and what follows as the folder inside. 1 if there is one. */
 static int arc_split(const char *path, char *file, size_t froom, char *inner, size_t iroom)
@@ -871,7 +875,7 @@ static void way(struct view *v)
                                        C_ZIP, C_EXTRACT_TO, C_OPENWITH, C_PROPS, C_THUMBS };
         size_t k;
         for (k = 0; k < sizeof changes / sizeof changes[0]; k++)
-            gui_command_enable(v->win, changes[k], v->site ? k < 5 : !v->arc ? 1 : k < 5 ? in_zip(v) : k >= 11);
+            gui_command_enable(v->win, changes[k], v->site ? k < 5 : !v->arc ? 1 : k < 5 ? in_zip(v) || in_img(v) : k >= 11);
     }
     if (v->address) {
         gui_set_text(v->address, v->dir);
@@ -1129,6 +1133,8 @@ struct job {
                                            (with what is in it, a folder); 2: the `to`s and all under them taken
                                            out of it; 3: as 1, a new ZIP (Add to ZIP): said so */
     char zfile[260];
+    int img;                            /* a disk's image changed (zfile), as zip 1 and 2 (put in; taken out) */
+    char why[120];                      /* (img) why it was not changed */
     unsigned char arc[JOB_ITEMS];       /* the item is a thing of an archive: `from` is its path there */
     volatile int at, ok, counted;       /* the item in hand, the items done well, the count is whole */
     volatile unsigned total_kb, done_kb;
@@ -1549,6 +1555,175 @@ static void zip_work(struct job *j)
         remove_tree(j, j->from[i]);
 }
 
+/* ---- ... into a disk's image shown (2026-11-23: apps/shared/fatimg.c). What is put in or taken out is done to a
+   copy of the image beside it (NAME.$$$), which takes the image's place only once all of it is done: an image half
+   written to (no room, a name that is not DOS's) is the image as it was. A new folder and a rename are done to
+   the image itself: one entry each. */
+
+static int img_io(void *ctx, unsigned long lba, unsigned char *data, unsigned count, int write)
+{
+    FILE *f = ctx;
+    if (fseek(f, (long)(lba * 512), SEEK_SET) != 0)
+        return -1;
+    return (write ? fwrite(data, 512, count, f) : fread(data, 512, count, f)) == count ? 0 : -1;
+}
+
+/* A folder `path` made in the image `file` (name NULL), or the thing at `path` given the name `name`. 0, or -1. */
+static int img_edit(const char *file, const char *path, const char *name)
+{
+    FILE *f = gui_fopen(file, "r+b");
+    char why[80];
+    struct fatimg *v = f ? fatimg_open(img_io, f, why, sizeof why) : NULL;
+    int r;
+    if (!v) {
+        if (f)
+            fclose(f);
+        return -1;
+    }
+    {
+        time_t now = time(NULL);                /* (a new folder dated now, as DOS dates them) */
+        struct tm *t = localtime(&now);
+        unsigned short date = t ? (unsigned short)((t->tm_year - 80) << 9 | (t->tm_mon + 1) << 5 | t->tm_mday) : 0;
+        unsigned short tim = t ? (unsigned short)(t->tm_hour << 11 | t->tm_min << 5 | t->tm_sec / 2) : 0;
+        r = name ? fatimg_rename(v, path, name) : fatimg_mkdir(v, path, date, tim);
+    }
+    r |= fatimg_close(v);
+    fclose(f);
+    return r ? -1 : 0;
+}
+
+static int img_put(struct job *j, struct fatimg *v, const char *from, const char *name, int depth)
+{
+    struct gui_dirent st, *e;
+    char a[260], b[520];
+    int n, i, r;
+    unsigned char *data;
+    FILE *f;
+    if (job_stopped(j) || gui_stat(from, &st) != 0)
+        return -1;
+    if (st.dir) {
+        struct fatimg_entry *x = NULL;
+        int there = fatimg_list(v, name, &x) >= 0;
+        free(x);
+        if (!there && fatimg_mkdir(v, name, st.date, st.time) != 0) {
+            snprintf(j->why, sizeof j->why, GUI_T("the folder %s couldn't be made there (no room, or not a DOS name)"),
+                     gui_path_name(name));
+            return -1;
+        }
+        if (depth > 24 || (n = gui_dir_read(from, &e)) < 0)
+            return -1;
+        for (i = 0, r = 0; i < n && !r; i++) {
+            gui_path_join(a, sizeof a, from, e[i].name);
+            snprintf(b, sizeof b, "%s/%s", name, e[i].name);
+            r = img_put(j, v, a, b, depth + 1);
+        }
+        free(e);
+        return r;
+    }
+    for (i = 0; folder_slow && i < 200 && !job_stopped(j); i++)
+        glos_sleep(50);
+    if (st.size > (32ul << 20) || !(data = malloc(st.size ? st.size : 1)))     /* (it goes in whole) */
+        return snprintf(j->why, sizeof j->why, GUI_T("%s is too large"), gui_path_name(from)), -1;
+    if (!(f = gui_fopen(from, "rb")) || fread(data, 1, st.size, f) != st.size) {
+        if (f)
+            fclose(f);
+        free(data);
+        return snprintf(j->why, sizeof j->why, GUI_T("%s couldn't be read"), gui_path_name(from)), -1;
+    }
+    fclose(f);
+    r = fatimg_add(v, name, data, st.size, st.date, st.time);
+    if (r == -1 && fatimg_remove(v, name) == 0)         /* one of its name there: put in its place (as asked) */
+        r = fatimg_add(v, name, data, st.size, st.date, st.time);
+    free(data);
+    j->done_kb += (unsigned)(st.size >> 10);
+    if (r == -2)
+        snprintf(j->why, sizeof j->why, GUI_T("there is no room in it for %s"), gui_path_name(from));
+    else if (r)
+        snprintf(j->why, sizeof j->why, GUI_T("%s is not a DOS name"), gui_path_name(name));
+    return r ? -1 : 0;
+}
+
+static int img_take(struct fatimg *v, const char *name, int depth)     /* a file, or a folder with all in it */
+{
+    struct fatimg_entry *e = NULL;
+    char b[520];
+    int n = fatimg_list(v, name, &e), i, r = 0;
+    if (n < 0) {
+        free(e);
+        return fatimg_remove(v, name);
+    }
+    for (i = 0; i < n && !r; i++) {
+        snprintf(b, sizeof b, "%s/%s", name, e[i].dos);
+        r = depth < 24 ? img_take(v, b, depth + 1) : -1;
+    }
+    free(e);
+    return r ? -1 : fatimg_remove(v, name);
+}
+
+static void img_work(struct job *j)
+{
+    char tmp[270], bak[270], why[80];
+    const char *dot = strrchr(gui_path_name(j->zfile), '.');
+    size_t stem = dot ? (size_t)(dot - j->zfile) : strlen(j->zfile);
+    struct fatimg *v = NULL;
+    FILE *a, *b = NULL, *rw = NULL;
+    size_t got;
+    int i, bad = 0;
+    for (i = 0; j->img == 1 && i < j->n; i++)
+        job_count(j, j->from[i], 0);
+    j->counted = 1;
+    snprintf(tmp, sizeof tmp, "%.*s.$$$", (int)stem, j->zfile);
+    snprintf(bak, sizeof bak, "%.*s.BAK", (int)stem, j->zfile);
+    if (!j->buf && !(j->buf = malloc(JOB_BUF))) {        /* (a delete's job has none of its own) */
+        snprintf(j->why, sizeof j->why, "%s", GUI_T("there is not enough memory"));
+        return;
+    }
+    if (!(a = gui_fopen(j->zfile, "rb")) || !(b = gui_fopen(tmp, "wb"))) {    /* the copy written to */
+        snprintf(j->why, sizeof j->why, "%s", GUI_T("there is no room for a copy of it beside it"));
+        bad = 1;
+    }
+    while (!bad && (got = fread(j->buf, 1, JOB_BUF, a)) > 0)
+        bad = fwrite(j->buf, 1, got, b) != got;
+    if (a)
+        fclose(a);
+    if (b && fclose(b) != 0)
+        bad = 1;
+    if (!bad && (!(rw = gui_fopen(tmp, "r+b")) || !(v = fatimg_open(img_io, rw, why, sizeof why)))) {
+        snprintf(j->why, sizeof j->why, "%s", why);
+        bad = 1;
+    }
+    for (i = 0; !bad && i < j->n && !job_stopped(j); i++) {
+        j->at = i;
+        bad = (j->img == 1 ? img_put(j, v, j->from[i], j->to[i], 0) : img_take(v, j->to[i], 0)) != 0;
+        if (bad && !j->why[0])
+            snprintf(j->why, sizeof j->why, GUI_T("%s couldn't be taken out"), gui_path_name(j->to[i]));
+    }
+    if (v && fatimg_close(v) != 0 && !bad) {
+        snprintf(j->why, sizeof j->why, "%s", GUI_T("its tables couldn't be written"));
+        bad = 1;
+    }
+    if (rw && fclose(rw) != 0 && !bad) {
+        snprintf(j->why, sizeof j->why, "%s", GUI_T("the copy couldn't be written"));
+        bad = 1;
+    }
+    if (bad || job_stopped(j)) {
+        gui_unlink(tmp);
+        return;
+    }
+    gui_unlink(bak);                            /* the copy in the image's place: the image kept until it is */
+    if (gui_rename(j->zfile, bak) != 0 || gui_rename(tmp, j->zfile) != 0) {
+        gui_rename(bak, j->zfile);
+        gui_unlink(tmp);
+        snprintf(j->why, sizeof j->why, "%s", GUI_T("the new image couldn't take its place"));
+        return;
+    }
+    gui_unlink(bak);
+    for (i = 0; i < j->n; i++)
+        j->well[i] = 1, j->ok++;
+    for (i = 0; j->cut && j->img == 1 && i < j->n; i++)        /* (a move: what was put in is taken away where it was) */
+        remove_tree(j, j->from[i]);
+}
+
 /* ---- ... to and from another computer (phase F; site.c). A folder goes with what is in it. What is fetched gets
    names DOS can have (one that is there already: the next number); what is sent keeps the names it has. */
 
@@ -1689,6 +1864,11 @@ static void job_work(struct gui_task *t, void *arg)
         j->t_end = glos_ticks();
         return;
     }
+    if (j->img) {
+        img_work(j);
+        j->t_end = glos_ticks();
+        return;
+    }
     for (i = 0; i < j->n; i++) {
         char file[260], in[520];
         if (j->arc[i] && arc_split(j->from[i], file, sizeof file, in, sizeof in))
@@ -1807,8 +1987,14 @@ static void job_done(struct gui_window *owner, void *arg, int cancelled)
         snprintf(t, sizeof t, "%d %s%s", j->ok, j->ext ? "unpacked" : j->cut ? "moved" : "copied", cancelled ? " stopped" : "");
         say(j->ext ? "extracted" : "pasted", t);
     }
-    if (j->zip)
+    if (j->zip || j->img)
         arc_changed(j->zfile);
+    if (j->img && j->ok < j->n && !cancelled && j->why[0]) {   /* (all or nothing: nothing of it went in) */
+        char m[220];
+        snprintf(m, sizeof m, GUI_T("The image was not changed: %s."), j->why);
+        say("image unchanged", j->why);
+        gui_message(owner, GUI_T("Files"), m, GUI_MB_OK);
+    }
     for (v = views; v; v = v->next) {           /* (where it wrote and what it took from, shown as they are now) */
         v->stale = 0;
         if (v->site && j->site)
@@ -1949,7 +2135,10 @@ static void paste_zip(struct view *v)
         return;
     }
     j->cut = clip.cut;
-    j->zip = 1;
+    if (in_img(v))
+        j->img = 1;
+    else
+        j->zip = 1;
     snprintf(j->zfile, sizeof j->zfile, "%s", v->arc_file);
     for (i = 0; i < clip.n && j->n < JOB_ITEMS; i++) {
         const char *name = gui_path_name(clip.paths[i]);
@@ -2193,7 +2382,7 @@ static void command(struct gui_window *w, int id)
         return;                                 /* (on another computer: done there its own way, or not at all) */
     if (v->arc && (id == C_CUT || id == C_FIND || id == C_EXTRACT || id == C_ZIP || id == C_EXTRACT_TO || id == C_OPENWITH
                    || ((id == C_NEWDIR || id == C_DELETE || id == C_DELETE_NOW || id == C_PASTE || id == C_RENAME)
-                       && !in_zip(v))))
+                       && !in_zip(v) && !in_img(v))))
         return;                                 /* (in an archive: what a ZIP can have done to it, and no more) */
     switch (id) {
     case C_OPEN:
@@ -2255,6 +2444,16 @@ static void command(struct gui_window *w, int id)
         if (gui_ask(w, GUI_T("New Folder"), GUI_T("The new folder's name:"), name, sizeof name) && name[0]) {
             if (!dos_name(w, name))
                 break;
+            if (in_img(v)) {                    /* in the image shown: a folder made there */
+                snprintf(t, sizeof t, "%s%s%s", v->arc_in, v->arc_in[0] ? "/" : "", name);
+                if (img_edit(v->arc_file, t, NULL) != 0)
+                    gui_message(w, GUI_T("Files"), GUI_T("The folder couldn't be made."), GUI_MB_OK);
+                else
+                    say("made", t);
+                arc_changed(v->arc_file);
+                fill(v);
+                break;
+            }
             if (v->arc) {                       /* in the ZIP shown: an entry for it */
                 struct arcw *z;
                 snprintf(t, sizeof t, "%s%s%s", v->arc_in, v->arc_in[0] ? "/" : "", name);
@@ -2281,6 +2480,20 @@ static void command(struct gui_window *w, int id)
         if (v->arc) {                           /* in the ZIP shown: the entry, or the folder and all under it */
             char was[600], now[600];
             int k;
+            if (in_img(v)) {                    /* in the image shown: a DOS name in its folder */
+                snprintf(name, sizeof name, "%s", v->ents[(size_t)gui_list_user(v->list, r)].text);
+                if (!gui_ask(w, GUI_T("Rename"), GUI_T("Its new name:"), name, sizeof name) || !name[0] || !dos_name(w, name))
+                    break;
+                snprintf(was, sizeof was, "%s%s%s", v->arc_in, v->arc_in[0] ? "/" : "",
+                         v->arc_row[(size_t)gui_list_user(v->list, r)]);
+                if (img_edit(v->arc_file, was, name) != 0)
+                    gui_message(w, GUI_T("Files"), GUI_T("It couldn't be renamed: is there one of that name already?"), GUI_MB_OK);
+                else
+                    say("renamed", name);
+                arc_changed(v->arc_file);
+                fill(v);
+                break;
+            }
             if (strcmp(arc_kind(v->arc), "ZIP") != 0) {
                 gui_message(w, GUI_T("Files"), GUI_T("Only what is in a ZIP can be renamed."), GUI_MB_OK);
                 break;
@@ -2346,8 +2559,11 @@ static void command(struct gui_window *w, int id)
                 break;
             j->del = 1;
             j->bin = bin;
-            if (v->arc) {                       /* out of the ZIP shown: each by its name there */
-                j->zip = 2;
+            if (v->arc) {                       /* out of the ZIP (or image) shown: each by its name there */
+                if (in_img(v))
+                    j->img = 2;
+                else
+                    j->zip = 2;
                 snprintf(j->zfile, sizeof j->zfile, "%s", v->arc_file);
             }
             for (i = 0; i < n && i < JOB_ITEMS; i++) {

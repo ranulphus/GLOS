@@ -44,5 +44,12 @@ int fatimg_mkdir(struct fatimg *v, const char *path, unsigned short date, unsign
 /* A new file with those bytes, dated so. 0; -1: its name is not DOS's, it is there; -2: no room (nothing of it
    stays). */
 int fatimg_add(struct fatimg *v, const char *path, const void *data, unsigned long n, unsigned short date, unsigned short time);
+/* (2026-11-23: Files writes into images) A file, or a folder with nothing in it, taken away: its clusters free
+   again, its entry and its long name's parts marked deleted. 0; -1: no such thing, a folder with things in it (or
+   the root), or the disk failed. */
+int fatimg_remove(struct fatimg *v, const char *path);
+/* A file or folder given another name in its folder (a DOS name; its long name, if it had one, goes). 0; -1: no
+   such thing, the name is not DOS's, another has it, or the disk failed. */
+int fatimg_rename(struct fatimg *v, const char *path, const char *name);
 
 #endif
