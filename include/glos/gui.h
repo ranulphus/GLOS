@@ -918,6 +918,9 @@ int gui_richview_find(struct gui_widget *w, const char *what, unsigned flags, in
                                            the one before it), in a block's text, round the end once: chosen and
                                            scrolled to, 1; 0 none; -1 a wrong expression. With nothing chosen, from
                                            the start (back: the end) */
+/* (2026-11-23) Every match of what (GUI_FIND_ flags) tinted, as the matches Find has not chosen are shown: how many
+   (at most 2000 tinted); -1 a wrong expression. NULL or "": none tinted. Kept until the document is set again. */
+int gui_richview_tint(struct gui_widget *w, const char *what, unsigned flags);
 int gui_richview_pos(struct gui_widget *w);    /* (phase F) how far it is scrolled: pixels from the top */
 void gui_richview_set_pos(struct gui_widget *w, int pos);      /* ... scrolled there (laid out first; held to the
                                            document's length) */

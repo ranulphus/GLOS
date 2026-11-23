@@ -27,6 +27,7 @@ key ctrl+f
 wait "Find"
 type needle\n
 said WEB found needle block=8 at=48
+said WEB tinted 2
 shot found "A Long Page - Web Reader"
 key f3
 said WEB found needle block=21 at=54

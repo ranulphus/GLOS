@@ -32,6 +32,7 @@ shot found "Welcome to GLOS - Help"
 key enter
 said HELP page TROUBLE.MD
 said HELP at two block=10 at=13
+said HELP tinted 5
 wait "When something goes wrong - Help"
 shot trouble "When something goes wrong - Help"
 key f1

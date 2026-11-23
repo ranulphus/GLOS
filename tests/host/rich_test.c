@@ -1,5 +1,5 @@
 /* rich_test.c - the rich-text view's find and show (make host-test; phase F, sdk/gui/rich.c): a document of
- * paragraphs, a closed details block and a picture; gui_richview_find forward and back, from what is chosen,
+ * paragraphs, a closed details block and a picture; gui_richview_tint's counts; gui_richview_find forward and back, from what is chosen,
  * round the end once, into the closed block (opened), case, a wrong expression; gui_richview_show scrolls. */
 #include <stdio.h>
 #include <stdlib.h>
@@ -80,6 +80,10 @@ int main(void)
     CHECK(r == 1, "regex: %d", r);
     chosen_is(v, "Line 20", "regex");
     CHECK(gui_richview_show(v, 0) == 0 && gui_richview_show(v, 99) == -1, "show");
+    /* (2026-11-23) every match tinted: the heading's, two in block 12, the hidden one; none in the picture */
+    CHECK(gui_richview_tint(v, "apple", 0) == 4 && gui_richview_tint(v, "Apple", GUI_FIND_CASE) == 2
+          && gui_richview_tint(v, "a(", GUI_FIND_REGEX) == -1 && gui_richview_tint(v, "Line [0-9]+ ", GUI_FIND_REGEX) == 30
+          && gui_richview_tint(v, "pear", 0) == 0 && gui_richview_tint(v, "", 0) == 0, "tints");
     if (!fails)
         printf("rich_test: ok\n");
     return fails != 0;

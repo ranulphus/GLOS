@@ -283,11 +283,22 @@ struct rview {
     int at_end;                         /* ... while it is scrolled to the end */
     int limit;                          /* (a chat view) the blocks kept at most (0: no limit) */
     int tight;                          /* (gui_richview_tight) paragraphs close under one another: a log's lines */
+    struct rtint { int block, a, b; } *tint;    /* (gui_richview_tint) the matches tinted, in the document's order */
+    int ntint;
 };
 
 #define RV(w) ((struct rview *)(w))
 #define MARGIN 6
 #define INDENT 20
+
+static unsigned tint_colour(void)       /* (a match not chosen: a third of the way from the field to the chosen) */
+{
+    unsigned a = GUI_FIELD, b = GUI_CHOSEN, out = 0;
+    int sh;
+    for (sh = 0; sh < 24; sh += 8)
+        out |= ((((a >> sh) & 0xFF) * 2 + ((b >> sh) & 0xFF)) / 3) << sh;
+    return out;
+}
 
 static const struct gfx_font *font_of(int kind, unsigned style)
 {
@@ -663,6 +674,24 @@ static void rv_draw(struct gui_widget *w, struct gfx_surface *s)
                 int ty = y + ln->h - f->height - 1, s0 = 0, s1 = 0;
                 if (r->style & GUI_RS_CODE && b->kind != GUI_RB_CODE)
                     gfx_fill(s, x - 1, ty, p->w + 2, f->height, GUI_FACE);
+                if (v->ntint) {                 /* (every match tinted: the first of its block found by halves) */
+                    int lo = 0, hi = v->ntint, t;
+                    while (lo < hi) {
+                        int mid = (lo + hi) / 2;
+                        if (v->tint[mid].block < p->block)
+                            lo = mid + 1;
+                        else
+                            hi = mid;
+                    }
+                    for (t = lo; t < v->ntint && v->tint[t].block == p->block; t++) {
+                        int ta = v->tint[t].a - p->at, tb = v->tint[t].b - p->at;
+                        if (tb <= 0 || ta >= p->len)
+                            continue;
+                        ta = ta < 0 ? 0 : ta, tb = tb > p->len ? p->len : tb;
+                        gfx_fill(s, x + gfx_text_width(f, r->text + p->off, ta), ty,
+                                 gfx_text_width(f, r->text + p->off + ta, tb - ta), f->height, tint_colour());
+                    }
+                }
                 if (v->sel_on && before(b0, a0, p->block, p->at + p->len) && before(p->block, p->at, b1, a1)) {
                     s0 = p->block == b0 && a0 > p->at ? a0 - p->at : 0;      /* (the part of it chosen) */
                     s1 = p->block == b1 && a1 < p->at + p->len ? a1 - p->at : p->len;
@@ -893,7 +922,7 @@ static void rv_destroy(struct gui_widget *w)
 {
     struct rview *v = RV(w);
     gui_rdoc_free(v->doc);
-    free(v->p), free(v->l), free(v->link_text);
+    free(v->p), free(v->l), free(v->link_text), free(v->tint);
 }
 
 static const struct gui_class rv_class = { "richview", GUI_C_FOCUS, rv_draw, rv_event, rv_measure, NULL, rv_destroy };
@@ -912,6 +941,7 @@ void gui_richview_set(struct gui_widget *w, struct gui_rdoc *doc)
         gui_rdoc_free(v->doc);
     v->doc = doc;
     v->laid_w = 0, v->sel_on = 0, v->link = -1, v->sb.pos = 0;
+    free(v->tint), v->tint = NULL, v->ntint = 0;
     gui_damage(w);
 }
 
@@ -1008,6 +1038,43 @@ static char *block_text(const struct rblock *b, int *len)     /* a block's runs 
 }
 
 int gui_richview_pos(struct gui_widget *w) { return RV(w)->sb.pos; }
+
+int gui_richview_tint(struct gui_widget *w, const char *what, unsigned flags)
+{
+    struct rview *v = RV(w);
+    struct gui_rdoc *d = v->doc;
+    int bi, room = 0, n = 0;
+    free(v->tint), v->tint = NULL, v->ntint = 0;
+    gui_damage(w);
+    if (!d || !what || !*what)
+        return 0;
+    for (bi = 0; bi < d->n && n < 2000; bi++) {
+        int len = 0, from = 0, r;
+        char *t;
+        struct gui_found f;
+        if (d->b[bi].kind == GUI_RB_IMAGE && d->b[bi].px)
+            continue;
+        if (!(t = block_text(&d->b[bi], &len)))
+            break;
+        while (from <= len && n < 2000 && (r = gui_match(what, flags, t, len, from, &f)) != 0) {
+            if (r < 0) {
+                free(t), free(v->tint), v->tint = NULL;
+                return -1;
+            }
+            if (n == room) {
+                struct rtint *m = realloc(v->tint, (size_t)(room = room ? room * 2 : 32) * sizeof *m);
+                if (!m)
+                    break;
+                v->tint = m;
+            }
+            v->tint[n].block = bi, v->tint[n].a = f.start, v->tint[n].b = f.end, n++;
+            from = f.end > f.start ? f.end : f.start + 1;
+        }
+        free(t);
+    }
+    v->ntint = n;
+    return n;
+}
 
 void gui_richview_set_pos(struct gui_widget *w, int pos)
 {
@@ -1153,6 +1220,7 @@ static void chat_trim(struct gui_widget *w)
         gui_rdoc_drop_first(v->doc, k);
         if (v->sel_on)                          /* (the choice moves with its blocks; gone with them, gone) */
             v->sa_block -= k, v->sb_block -= k, v->sel_on = v->sa_block >= 0 && v->sb_block >= 0;
+        free(v->tint), v->tint = NULL, v->ntint = 0;
     }
     gui_richview_changed(w);
 }

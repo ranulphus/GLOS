@@ -1240,9 +1240,12 @@ static void find_next(int back)
     }
     r = gui_richview_find(view, needle, 0, back);
     if (r > 0) {
+        int all = gui_richview_tint(view, needle, 0);   /* (the others tinted: where else it is) */
         block = gui_richview_chosen(view, &from, &to);
-        gui_set_text(status, "");
+        snprintf(t, sizeof t, all == 1 ? GUI_T("Found once in this page.") : GUI_T("Found %d times in this page."), all);
+        gui_set_text(status, t);
         say("found %s block=%d at=%d", needle, block, from);
+        say("tinted %d", all);
         return;
     }
     snprintf(t, sizeof t, GUI_T("\"%s\" is not in this page."), needle);

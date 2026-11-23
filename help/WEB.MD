@@ -21,7 +21,7 @@ Type in **Address** (Ctrl+L) and press Enter:
 | F5 | Fetch the page again |
 | Esc | Stop fetching |
 | Ctrl+O | Open a file from a disk |
-| Ctrl+F | Find words in the page |
+| Ctrl+F | Find words in the page (the other places they are in it are shaded) |
 | F3, Shift+F3 | Find them again further on, or further back |
 | Ctrl+D | Keep the page among your bookmarks |
 | Ctrl+B | The bookmarks: a page of links, each with **take away** |

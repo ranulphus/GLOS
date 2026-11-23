@@ -61,4 +61,4 @@ file C:\IMG\NEW.TXT to be renamed\r\n
 file C:\IMG\A.TXT first line\r\nthe needle is here\r\nlast\r\n
 key alt+f4
 gone "C:\IMG - Files"
-expect FILES end
+expect FILES end 

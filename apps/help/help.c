@@ -341,6 +341,8 @@ static void results_on(struct gui_widget *w, int what)
             break;
     block = gui_richview_chosen(view, &from, NULL);
     say("at %s block=%d at=%d", first_word, block, from);
+    if (first_word[0])                          /* (the word's other places in the page tinted) */
+        say("tinted %d", gui_richview_tint(view, first_word, 0));
 }
 
 /* ---- the tour: TOUR.MD's parts, a step each */

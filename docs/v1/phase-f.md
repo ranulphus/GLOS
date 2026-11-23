@@ -1441,7 +1441,15 @@ round the end once; what it finds chosen and scrolled to), with `gui_richview_ch
   was. The rich view's `gui_richview_pos` and `gui_richview_set_pos`. `web-find`: Back and Forward between the
   places at the top and the end (292 pixels), and Back from another page to the long page as it was left (173
   pixels, the second needle), not at its `#middle`.
-- **Not yet:** Find's matches all tinted; Help's `#part` links (the guide has none).
+- **Since built** (2026-11-23): every match tinted. The rich view's `gui_richview_tint(w, what, flags)` keeps
+  every match of what (gui_match's text, case, expressions; 2000 at most) in the document's order and shades
+  them a third of the way from the field's ground to the chosen colour (so in any theme), the one Find chose
+  drawn as chosen over it; a document set again, or a chat's first blocks dropped, clears them. The Web Reader
+  tints after each Find (the status says "Found N times in this page.", said `tinted N`); Help tints the
+  search's word in the page its result opens (`tinted N`). `rich_test`: the counts (four "apple" in any case,
+  two in its own, thirty by an expression, none, a wrong expression); `web-find` (`tinted 2`; the picture
+  shows the other needle shaded) and `help` (`tinted 5`).
+- **Not yet:** Help's `#part` links (the guide has none).
 
 ## The Web Reader: bookmarks (2026-11-22)
 
