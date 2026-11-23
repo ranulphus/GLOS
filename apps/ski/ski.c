@@ -51,7 +51,7 @@
 #define GAME_NAME "Fall Line"           /* (the owner's choice, 2026-11-21) */
 
 enum { C_AGAIN = 1, C_NEW, C_DAY, C_NUMBER, C_WATCH, C_TABLES, C_PAUSE, C_EXIT, C_SLALOM, C_FREE, C_GREEN, C_BLUE, C_RED, C_BLACK,
-       C_SOUND, C_JACKET, C_FIGURE = C_JACKET + 8, C_WEATHER = C_FIGURE + 8 };     /* (C_JACKET + n: the jackets;
+       C_SOUND, C_JACKET, C_FIGURE = C_JACKET + 8, C_WEATHER = C_FIGURE + 8, C_DOUBLE = C_WEATHER + 8, C_FULL };     /* (C_JACKET + n: the jackets;
                                                    C_FIGURE + n: the figures; C_WEATHER + n: the weathers) */
 enum { W_CLEAR, W_SNOW, W_FOG, W_NIGHT, W_WIND, W_COUNT };
 enum { P_READY, P_RUN, P_PAUSED, P_DONE };
@@ -319,9 +319,14 @@ static void finished(void)
 static int mouse_on, mouse_x, mouse_y;
 static unsigned mouse_buttons;
 
+static void game_corner(const struct gui_widget *w, int *ox, int *oy);
+static int scale_now(void);
+
 static int field_event(struct gui_widget *w, struct gui_ev *e)
 {
-    int x = e->x - w->r.x, y = e->y - w->r.y;
+    int ox, oy, x, y;
+    game_corner(w, &ox, &oy);
+    x = (e->x - ox) / scale_now(), y = (e->y - oy) / scale_now();     /* (the field's own pixels) */
     if (e->type != GUI_EV_MOVE && e->type != GUI_EV_PRESS && e->type != GUI_EV_RELEASE)
         return 0;
     if (e->type == GUI_EV_PRESS || (e->type == GUI_EV_MOVE && abs(x - mouse_x) + abs(y - mouse_y) >= 4)) {
@@ -527,7 +532,8 @@ static void frame(void *arg)            /* the game's clock: the steps that are 
     if (++frames % 3 == 0 || phase != P_RUN) {  /* the figures ten times a second, and whenever the run stops */
         gui_damage(canvas);
     } else {                            /* the field alone */
-        struct gfx_rect field = { canvas->r.x, canvas->r.y, FW, FH };
+        struct gfx_rect field = { canvas->r.x, canvas->r.y, FW * scale_now(), FH * scale_now() };
+        game_corner(canvas, &field.x, &field.y);
         gui_damage_rect(win, &field);
     }
 }
@@ -886,19 +892,108 @@ static void draw_strip(struct gfx_surface *s, int x0, int oy)
         text_at(s, x, oy + FH - 22, gui_font, GUI_T("The careful skier"), GUI_ROLE(GLOS_ROLE_DIM));
 }
 
+/* (2026-11-23) The game at double size (View, Double Size: a window twice as large, on a screen that has room) or
+   full screen (View, Full Screen: the game in the middle, black round it, doubled where the screen has room for
+   that). Doubled, the field and the strip are drawn at their size into memory, then each pixel made four. */
+static int doubled, full;
+static unsigned *one_px, *big_px;       /* (doubled) the picture at its size, and at twice it */
+
+static int scale_now(void) { return doubled ? 2 : 1; }
+
+static void game_corner(const struct gui_widget *w, int *ox, int *oy)  /* where the game's picture begins */
+{
+    int sc = scale_now();
+    *ox = w->r.x + (w->r.w > (FW + SW) * sc ? (w->r.w - (FW + SW) * sc) / 2 : 0);
+    *oy = w->r.y + (w->r.h > FH * sc ? (w->r.h - FH * sc) / 2 : 0);
+}
+
 static void draw(struct gui_widget *w, struct gfx_surface *s)
 {
-    struct gfx_rect was = s->clip, field = { w->r.x, w->r.y, FW, FH };
+    struct gfx_rect was = s->clip, field;
+    int ox, oy, sc = scale_now();
+    game_corner(w, &ox, &oy);
+    if (w->r.w > (FW + SW) * sc || w->r.h > FH * sc) { /* (full screen: black round the game) */
+        gfx_fill(s, w->r.x, w->r.y, w->r.w, oy - w->r.y, 0);
+        gfx_fill(s, w->r.x, oy + FH * sc, w->r.w, w->r.y + w->r.h - oy - FH * sc, 0);
+        gfx_fill(s, w->r.x, oy, ox - w->r.x, FH * sc, 0);
+        gfx_fill(s, ox + (FW + SW) * sc, oy, w->r.x + w->r.w - ox - (FW + SW) * sc, FH * sc, 0);
+    }
+    if (sc == 2) {                      /* (at its size into memory, then doubled) */
+        struct gfx_surface one;
+        int x, y, W = FW + SW;
+        if (!one_px && !(one_px = malloc((size_t)W * FH * 4)))
+            return;
+        if (!big_px && !(big_px = malloc((size_t)W * 2 * FH * 2 * 4)))
+            return;
+        memset(&one, 0, sizeof one);
+        one.pix = (unsigned char *)one_px, one.w = W, one.h = FH, one.pitch = (unsigned)W * 4, one.fmt = gfx_fmt888;
+        one.clip.x = 0, one.clip.y = 0, one.clip.w = FW, one.clip.h = FH;
+        draw_field(&one, 0, 0);
+        one.clip.w = W;
+        draw_strip(&one, FW, 0);
+        for (y = 0; y < FH; y++) {
+            const unsigned *a = one_px + (size_t)y * W;
+            unsigned *b = big_px + (size_t)y * 2 * W * 2;
+            for (x = 0; x < W; x++)
+                b[2 * x] = b[2 * x + 1] = a[x] & 0xFFFFFF;
+            memcpy(b + W * 2, b, (size_t)W * 2 * 4);
+        }
+        gfx_image(s, ox, oy, big_px, W * 2, FH * 2, (unsigned)W * 2);
+        return;
+    }
+    field.x = ox, field.y = oy, field.w = FW, field.h = FH;
     if (gfx_rect_cut(&field, &was)) {
         gfx_clip(s, &field);
-        draw_field(s, w->r.x, w->r.y);
+        draw_field(s, ox, oy);
         gfx_clip(s, &was);
     }
     {                                   /* the strip, when its pixels are asked for (frame: every third time) */
-        struct gfx_rect strip = { w->r.x + FW, w->r.y, SW, FH };
+        struct gfx_rect strip = { ox + FW, oy, SW, FH };
         if (gfx_rect_cut(&strip, &was))
-            draw_strip(s, w->r.x + FW, w->r.y);
+            draw_strip(s, ox + FW, oy);
     }
+}
+
+static void size_game(void)             /* the canvas as large as the window's way needs, the window round it */
+{
+    int sw = 640, sh = 480, sc = scale_now();
+    gui_screen_size(&sw, &sh);
+    if (full)
+        gui_size(canvas, sw, sh - 24);  /* (the menu's bar above it) */
+    else
+        gui_size(canvas, (FW + SW) * sc, FH * sc);
+    if (!full)
+        gui_fit(win);
+    gui_damage(canvas);
+}
+
+static void view_double(void)
+{
+    int sw = 640, sh = 480;
+    gui_screen_size(&sw, &sh);
+    if (!doubled && (sw < (FW + SW) * 2 + 20 || sh < FH * 2 + 80)) {
+        say("double refused %dx%d", sw, sh);
+        gui_message(win, GUI_T(GAME_NAME), GUI_T("The screen is too small for the game at double size: it wants 1280 by "
+                                                  "800 at least."), GUI_MB_OK);
+        return;
+    }
+    doubled = !doubled;
+    size_game();
+    say("double %s", doubled ? "on" : "off");
+}
+
+static void view_full(void)
+{
+    int sw = 640, sh = 480;
+    full = !full;
+    gui_screen_size(&sw, &sh);
+    if (full)                           /* (doubled where the screen has room for it) */
+        doubled = sw >= (FW + SW) * 2 && sh - 24 >= FH * 2;
+    else
+        doubled = 0;
+    glos_show(win->id, full ? GLOS_WS_FULL : GLOS_WS_NORMAL);
+    size_game();
+    say("full %s %dx%d%s", full ? "on" : "off", sw, sh, doubled ? " doubled" : "");
 }
 
 /* ---- the tables' window */
@@ -983,8 +1078,17 @@ static void command(struct gui_window *w, int id)
 {
     (void)w;
     someone();
-    if (attract && id != C_EXIT && id != C_SOUND)       /* (the game back, then what was asked) */
+    if (attract && id != C_EXIT && id != C_SOUND && id != C_DOUBLE && id != C_FULL)  /* (the game back, then what was asked) */
         attract_end();
+    if (id == C_DOUBLE) {
+        if (!full)
+            view_double();
+        return;
+    }
+    if (id == C_FULL) {
+        view_full();
+        return;
+    }
     if (id >= C_WEATHER && id < C_WEATHER + W_COUNT) {
         weather = id - C_WEATHER;
         tables_keep();
@@ -1165,6 +1269,10 @@ static void build(void)
     gui_menu_sep(m);
     for (i = 0; i < 5; i++)
         gui_menu_command(m, C_JACKET + i);
+    gui_command(win, C_DOUBLE, GUI_T("&Double Size"), "Ctrl+D", NULL, GUI_T("The game twice as large (on a screen with room)"));
+    gui_command(win, C_FULL, GUI_T("&Full Screen"), "F11", NULL, GUI_T("The game alone on the screen (F11 again: back)"));
+    m = gui_menu(bar, GUI_T("&View"));
+    gui_menu_command(m, C_DOUBLE), gui_menu_command(m, C_FULL);
     m = gui_menu(bar, GUI_T("&Weather"));
     for (i = 0; i < W_COUNT; i++)
         gui_menu_command(m, C_WEATHER + i);

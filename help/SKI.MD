@@ -61,6 +61,9 @@ exists. It is not the fastest way.
 Leave the game at the top of a mountain for half a minute and the careful skier starts by itself, going on
 from mountain to mountain; any key or click gives the game back where it is.
 
+**View, Double Size** (Ctrl+D) makes the game twice as large on a big screen, and **View, Full Screen** (F11)
+gives it the whole screen (F11 again to go back).
+
 The **Skier** menu chooses who goes down the mountain (a skier, a racer, a snowboarder or a sit-skier)
 and the colour of their jacket. The **Weather** menu brings snowfall, fog (less is seen ahead), night (only
 your lamp lights the slope) or wind: gusts that push you across the slope, shown by streaks blown past. Steer

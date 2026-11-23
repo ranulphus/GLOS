@@ -72,6 +72,9 @@ struct hwin {
     unsigned pitch;
     int shown, used;
     unsigned z;                         /* raised order: the higher, the more on top */
+    int full, nx, ny, nw, nh;           /* (2026-11-23) full screen (GLOS_WS_FULL), and where it was before */
+    unsigned char *old_pix;             /* (2026-11-23) the pixels before a resize GLOS made, kept until the program
+                                           next asks for its pixels (it draws into them until it has the event) */
 };
 
 static struct {
@@ -498,11 +501,32 @@ int glos_show_quiet(glos_handle id, unsigned state)      /* (shown, the focus wh
     return 0;
 }
 
+int glos_resize(glos_handle id, int cw, int ch);
+
+static void resized_to(struct hwin *w, int x, int y, int cw, int ch)    /* (and the program told: GLOS_EV_SIZE) */
+{
+    struct hev e;
+    glos_resize(w->id, cw, ch);
+    w->x = x, w->y = y;
+    memset(&e, 0, sizeof e);
+    e.type = HEV_RESIZE;
+    e.window = w->id;
+    e.time = H.clock;
+    push(&e);
+}
+
 int glos_show(glos_handle id, unsigned state)
 {
     struct hwin *w = find(id);
     if (!w)
         return GLOS_E_HANDLE;
+    if (state == GLOS_WS_FULL && !w->full) {    /* (full screen: the whole screen; back as it was after) */
+        w->nx = w->x, w->ny = w->y, w->nw = w->w, w->nh = w->h, w->full = 1;
+        resized_to(w, 0, 0, H.sw, H.sh);
+    } else if (state != GLOS_WS_FULL && state != GLOS_WS_HIDDEN && w->full) {
+        w->full = 0;
+        resized_to(w, w->nx, w->ny, w->nw, w->nh);
+    }
     w->shown = state != GLOS_WS_HIDDEN;
     if (w->shown)
         set_focus(id);
@@ -534,7 +558,8 @@ int glos_resize(glos_handle id, int cw, int ch)
     bytes = (int)((cw < w->w ? cw : w->w) * (H.fmt.bpp / 8));
     for (y = 0; y < ch && y < w->h; y++)
         memcpy(p + (unsigned)y * pitch, w->pix + (unsigned)y * w->pitch, (size_t)bytes);
-    free(w->pix);
+    free(w->old_pix);
+    w->old_pix = w->pix;                        /* (freed once the program has asked for the new ones) */
     w->pix = p, w->pitch = pitch, w->w = cw, w->h = ch;
     return 0;
 }
@@ -592,6 +617,7 @@ int glos_pixels(glos_handle id, struct glos_pixels *g)
     unsigned size = g->size;
     if (!w)
         return GLOS_E_HANDLE;
+    free(w->old_pix), w->old_pix = NULL;        /* (it has the new ones now) */
     memset(g, 0, sizeof *g);
     g->size = size;
     g->handle = id;
@@ -2529,6 +2555,14 @@ int main(int argc, char **argv)
             p[strcspn(p, "\r\n")] = 0;
             if (config_set(sec, key, p, why, sizeof why) < 0)
                 fail("config: %s", why);
+            continue;
+        }
+        if (!strcmp(buf, "screen")) {           /* screen W H: the host's screen that size (2026-11-23; host-only) */
+            char a[16], b[16];
+            if (!word(&p, a, sizeof a) || !word(&p, b, sizeof b) || atoi(a) < 320 || atoi(b) < 200 || atoi(a) > 2048
+                || atoi(b) > 1536)
+                fail("screen W H");
+            H.sw = atoi(a), H.sh = atoi(b);
             continue;
         }
         if (strcmp(buf, "run"))

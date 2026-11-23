@@ -1898,7 +1898,16 @@ The plan's "other skiers (slow ones who zigzag, to be passed)": `skirun_other` (
   across, a fall; flown over, nothing; the careful skier's golden runs unchanged, no fall on 1200 and 24,000
   mountains. (Set off first from the edge nearer the line, faster, it was met by the careful skier on a few
   black slaloms: the far edge, 18 pixels a second and 400 pixels' notice give it room.)
-- **Not yet:** the window doubled and full screen; the 486's frame rate (measured on the bench).
+- **Double size and full screen** (2026-11-23, after the owner chose to finish phase F's leftovers): View,
+  **Double Size** (Ctrl+D): the window twice as large, the field and the strip drawn at their size into memory
+  (a 32-bit surface) and each pixel made four; refused, with a word, on a screen under 1280 by 800. View, **Full
+  Screen** (F11): GLOS_WS_FULL, the game in the middle of the screen with black round it, doubled where the
+  screen has room (1240 by 720 under the menu's bar), F11 again back. The mouse's steering maps the pointer back
+  to the field's own pixels. The host's GLOS stand-in gains `screen W H` (a script's first lines, host-only)
+  and full screen as GLOS does it (the client the whole screen, a resize event; the pixels a resize leaves kept
+  until the program asks for its new ones). `ski-view` (host-only, 1280 by 1024: doubled, full and doubled) and
+  `ski-full` (640 by 480: Double Size refused, full screen at its own size).
+- **Not yet:** the 486's frame rate (measured on the bench).
 
 ## MIDI Studio: Quantise and Transpose (2026-11-23)
 

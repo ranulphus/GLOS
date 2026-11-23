@@ -1,0 +1,20 @@
+# Fall Line full screen on a 640 by 480 screen (apps/ski; phase F, 2026-11-23): Double Size refused (it wants 1280
+# by 800); Full Screen (F11): the game alone, at its own size in the middle, black round it (a picture); F11: back.
+run SKI.EXE -demo 7 -grade 2 -until 240 -speed 4 -table C:\\OUT\\SKIFULL.DAT -day 20261121
+wait "Fall Line"
+said SKI started watching
+pause 1500
+said SKI at 240 x=435 y=827 speed=232 score=0 gates=1/0 falls=0
+key ctrl+d
+said SKI double refused 640x480
+wait "Fall Line"
+key enter
+key f11
+said SKI full on 640x480
+pause 300
+shot full "Fall Line"
+key f11
+said SKI full off 640x480
+key alt+f4
+gone "Fall Line"
+expect SKI end

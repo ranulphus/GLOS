@@ -1,0 +1,25 @@
+#host-only (a screen of 1280 by 1024: the host's `screen`)
+# Fall Line at double size and full screen (apps/ski; phase F, 2026-11-23) on a large screen: View, Double Size
+# (Ctrl+D): the window twice as large, each pixel four (a picture); again: as it was; View, Full Screen (F11): the
+# game alone on the screen, doubled (the screen has room), black round it; F11 again: back.
+screen 1280 1024
+run SKI.EXE -demo 7 -grade 2 -until 240 -speed 4 -table C:\\OUT\\SKIVIEW.DAT -day 20261121
+wait "Fall Line"
+said SKI started watching
+pause 1500
+said SKI at 240 x=435 y=827 speed=232 score=0 gates=1/0 falls=0
+key ctrl+d
+said SKI double on
+pause 300
+shot doubled "Fall Line"
+key ctrl+d
+said SKI double off
+key f11
+said SKI full on 1280x1024 doubled
+pause 300
+shot full "Fall Line"
+key f11
+said SKI full off 1280x1024
+key alt+f4
+gone "Fall Line"
+expect SKI end
