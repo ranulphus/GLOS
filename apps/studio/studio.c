@@ -674,7 +674,7 @@ static void rec_poll(void)
         unsigned key = PC_BASE + (unsigned)i;
         int down = GLOS_KEY_DOWN(&k, pc_keys[i]);
         if (down && !held[key].on)
-            rec_on(key, 100, 1);
+            rec_on(key, GLOS_KEY_DOWN(&k, 0x2A) || GLOS_KEY_DOWN(&k, 0x36) ? 127 : 100, 1);   /* (Shift: an accent) */
         else if (!down && held[key].on && held[key].pc)
             rec_off(key);
     }
@@ -781,7 +781,7 @@ static void step_note(unsigned key, unsigned force)
     }
     step_end(st, GUI_T("Step Note"));
     step_sound(key, force ? force : 100);
-    say("step note %u at=%lu", key, step_at);
+    say("step note %u at=%lu%s", key, step_at, force > 100 ? " accent" : "");
     step_at += len;
     size_roll();
     gui_damage(roll);
@@ -1236,14 +1236,15 @@ static int key(struct gui_window *w, struct gui_ev *e)
             say("take at %lu", rec_raw());      /* (the suite's: each second as it is taken, before the next key) */
         return 1;
     }
-    if (recording && !e->mods && pc_key(e->key) >= 0) {        /* (a key of the PC's piano: its note, however short
-                                                   the press; the idle's look at the keys ends it) */
-        rec_on((unsigned)pc_key(e->key), 100, 1);
+    if (recording && !(e->mods & ~GLOS_MOD_SHIFT) && pc_key(e->key) >= 0) {     /* (a key of the PC's piano: its
+                                                   note, however short the press; the idle's look at the keys ends it;
+                                                   with Shift an accent) */
+        rec_on((unsigned)pc_key(e->key), e->mods & GLOS_MOD_SHIFT ? 127 : 100, 1);
         return 1;
     }
     if (stepping && !recording) {               /* step entry's keys */
-        if (!e->mods && pc_key(e->key) >= 0) {
-            step_note((unsigned)pc_key(e->key), 100);
+        if (!(e->mods & ~GLOS_MOD_SHIFT) && pc_key(e->key) >= 0) {
+            step_note((unsigned)pc_key(e->key), e->mods & GLOS_MOD_SHIFT ? 127 : 100);   /* (Shift: an accent) */
             return 1;
         }
         if (!e->mods && e->key == 0x39) {       /* Space: a rest */

@@ -1652,4 +1652,6 @@ cursor there, on a sixteenth. The cursor is a blue line on the roll. Each note i
 so is a step back. Recording stops step entry and step entry stops recording.
 
 - **Tests:** `studio-step` (host and the emulated desktops): C, D, a rest and E put; E taken back; undone.
-- **Not yet:** velocity from the PC's keys; a chord at one step (keys held together).
+- **An accent from the PC's keys** (later the same day): Shift with a piano key, recording or in step entry,
+  plays the note at velocity 127 (100 without); `studio-step` puts an F with an accent (said `accent`).
+- **Not yet:** velocities between the two; a chord at one step (keys held together).

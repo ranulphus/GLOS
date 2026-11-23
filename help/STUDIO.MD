@@ -27,7 +27,7 @@ Undo is Ctrl+Z, Redo Ctrl+Y. Ctrl++ and Ctrl+- show more or less of the roll.
 **F7** (Record) records into the chosen track while the song plays from its start: play a **MIDI keyboard**
 plugged into the sound card's MIDI port (an MPU-401), or the **PC's keys** as a piano: the bottom row
 Z S X D C V G B H N J M is the octave from middle C, the row Q 2 W 3 E R 5 T 6 Y 7 U the one above. Each note
-lands where you played it, on the nearest sixteenth. **F7** or **F6** stops; **Ctrl+Z** takes the whole take
+lands where you played it, on the nearest sixteenth; hold **Shift** with a key for an accent (a louder note). **F7** or **F6** stops; **Ctrl+Z** takes the whole take
 away again.
 
 While recording, a **click** sounds each beat (a wood block, higher on a bar's first beat). **Transport, Click
