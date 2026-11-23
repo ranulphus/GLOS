@@ -158,6 +158,102 @@ static void meet(struct skirun *r, int speed)
     }
 }
 
+/* ---- (phase F) the other skiers */
+
+#define OTHER_LANE    320               /* the lane's length: then it stops, at the side */
+#define OTHER_NEAR    34                /* the lane's nearest to the clear line ... */
+#define OTHER_SWING   22                /* ... and how far further out it zigzags, */
+#define OTHER_PERIOD  160               /* ... once in so many pixels down */
+#define OTHER_REACH   6
+
+static int other_x(const struct skimount *m, int y0, int side, int y)  /* the lane's x at y */
+{
+    int t = (y - y0) % OTHER_PERIOD, half = OTHER_PERIOD / 2;
+    int out = OTHER_NEAR + OTHER_SWING * (t < half ? t : OTHER_PERIOD - t) / half;
+    return skimount_line(m, y) + side * out;
+}
+
+static unsigned other_dice(const struct skirun *r, int c)
+{
+    unsigned h = (unsigned)c * 2654435761u ^ (r->m.seed * 0x9E3779B1u + 0x7F4A7C15u);
+    h ^= h >> 15, h *= 0x2C1B3C6Du, h ^= h >> 12, h *= 0x297A2D39u, h ^= h >> 15;
+    return h;
+}
+
+static int lane_clear(struct skirun *r, int y0, int side)       /* nothing in the lane's way, and on the piste */
+{
+    int y;
+    for (y = y0; y <= y0 + OTHER_LANE; y += 6) {
+        int x = other_x(&r->m, y0, side, y), c0 = (y - 40) / SKI_CHUNK, c1 = (y + 40) / SKI_CHUNK, c, i, n, d;
+        d = x - skimount_centre(&r->m, y);
+        if ((d < 0 ? -d : d) > skimount_half(&r->m, y) - 12)
+            return 0;
+        for (c = c0 < 0 ? 0 : c0; c <= c1; c++) {
+            const struct ski_thing *t = skirun_piece(r, c, &n);
+            for (i = 0; i < n; i++) {
+                int dx = t[i].x - x, dy = t[i].y - y, reach = (t[i].r ? t[i].r : 5) + OTHER_REACH + 8;
+                if (dx * dx + dy * dy < reach * reach)
+                    return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+int skirun_other(struct skirun *r, int c, int *x, int *y, int *moving, int *heading)
+{
+    int y0, along, ya, yb;
+    if (c < 0 || c >= SKI_OTHERS)
+        return 0;
+    if (!r->other[c].known) {           /* (worked out once: one piece in four, a lane that is clear) */
+        unsigned h = other_dice(r, c);
+        r->other[c].known = 1;
+        y0 = c * SKI_CHUNK + 16 + (int)((h >> 8) % 96);
+        if (h % 4 == 0 && c >= 3 && y0 + OTHER_LANE < r->m.length - 160) {
+            int side = (h >> 4) & 1 ? 1 : -1;
+            if (!lane_clear(r, y0, side))
+                side = -side;
+            if (lane_clear(r, y0, side)) {
+                r->other[c].has = 1, r->other[c].y0 = (short)y0, r->other[c].side = (signed char)side;
+                r->other[c].speed = (unsigned char)(128 + (h >> 16) % 96);
+            }
+        }
+    }
+    if (!r->other[c].has)
+        return 0;
+    y0 = r->other[c].y0;
+    along = r->other[c].start ? (int)((long)(r->steps - r->other[c].start) * r->other[c].speed / 256) : 0;
+    if (along > OTHER_LANE)
+        along = OTHER_LANE;
+    *y = y0 + along;
+    *x = other_x(&r->m, y0, r->other[c].side, *y);
+    *moving = r->other[c].start && along < OTHER_LANE;
+    ya = *y, yb = *y + 8;               /* (its heading: down its lane, as it swings) */
+    {
+        int dx = other_x(&r->m, y0, r->other[c].side, yb) - other_x(&r->m, y0, r->other[c].side, ya);
+        *heading = !*moving ? 8 * r->other[c].side : dx * 4 / 8;        /* (stopped: across the slope) */
+    }
+    return 1;
+}
+
+static void others_step(struct skirun *r)       /* those near set off; one skied into is a fall */
+{
+    int px = r->x >> 8, py = r->y >> 8, c, x, y, moving, heading;
+    for (c = py / SKI_CHUNK; c <= (py + 400) / SKI_CHUNK && c < SKI_OTHERS; c++)
+        if (skirun_other(r, c, &x, &y, &moving, &heading) && !r->other[c].start && y - py <= 400)
+            r->other[c].start = (unsigned short)(r->steps ? r->steps : 1);
+    if (r->state != SKI_S_SKIING || r->grace)
+        return;
+    for (c = (py - OTHER_LANE - 40) / SKI_CHUNK; c <= py / SKI_CHUNK + 1 && c < SKI_OTHERS; c++) {
+        if (c < 0 || !skirun_other(r, c, &x, &y, &moving, &heading))
+            continue;
+        if ((x - px) * (x - px) + (y - py) * (y - py) < (OTHER_REACH + 6) * (OTHER_REACH + 6)) {
+            fall(r, 0);
+            return;
+        }
+    }
+}
+
 void skirun_step(struct skirun *r, unsigned keys)
 {
     int h, ux, uy, along, sx, sy, snow, drag, grip, speed, px, py, turn;
@@ -248,6 +344,8 @@ void skirun_step(struct skirun *r, unsigned keys)
         r->grace--;
     if (r->state != SKI_S_FALLEN)
         meet(r, speed);
+    if (r->state != SKI_S_FALLEN)
+        others_step(r);
     px = r->x >> 8, py = r->y >> 8;
     while (r->next_gate < r->m.ngates) {        /* the gates gone by in this step */
         int gx, gy;

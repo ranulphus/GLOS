@@ -1828,3 +1828,24 @@ as on a disc), delete, rename, New Folder.
   desktops; `C:\IMG\WORK.IMG`, 160 KB of mtools' making): a file pasted in, a folder made, a file renamed, one
   deleted, two copied back out and compared to the byte. The other sixteen Files scripts unchanged.
 - **Not yet:** long names written (a DOS name is asked for); a hard disk's image (its partition table).
+
+## Fall Line: other skiers (2026-11-23)
+
+The plan's "other skiers (slow ones who zigzag, to be passed)": `skirun_other` (apps/shared/skirun.c).
+
+- **Where:** a piece in four may have one, by dice of its own from the mountain's number: a lane beside the clear
+  line, on one side, 34 to 56 pixels off it (zigzagging out and back every 160 pixels down), 320 pixels long.
+  The lane is taken only if it is on the piste and nothing stands within its reach all the way (gates' poles
+  counted); else the other side is tried; else that piece has none. Worked out once a piece, kept in the run.
+- **How:** it waits at the lane's top until the skier is within 400 pixels above it, then goes down at 30 to 52
+  pixels a second, turning as it swings; at the lane's end it stops, across the slope, at the side. Its state
+  is the run's (the step it set off), so a run is still its mountain and its keys: the ghost's and the
+  demonstration's others do as they did.
+- **In the way:** skied into (within twelve pixels) it is a fall, as a tree is; flown over in a jump, nothing.
+  No near-miss points (the careful skier's golden scores stay as they were).
+- **Pictures:** the same figure as the skier's first, in green, purple or orange jackets, with a shadow.
+- **Tests:** `ski_test`: 657 others on 120 mountains, all set off, most stopped at their lanes' ends by the
+  run's end, none near the line, off the piste or in anything; the first of each mountain, skied into, is a
+  fall; the careful skier's golden runs unchanged and no fall on 1200 mountains (24,000 in `ski_test more`).
+  `ski.txt` holds the demonstration at step 1920 beside one (a picture).
+- **Not yet:** the groomer (which crosses the line, so the careful skier would have to wait for it).

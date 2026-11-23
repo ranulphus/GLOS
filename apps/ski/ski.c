@@ -782,6 +782,14 @@ static void draw_field(struct gfx_surface *s, int ox, int oy)
             }
         }
     }
+    {                                   /* the other skiers in sight (and a little beyond: their shadows) */
+        int c, x, yy, moving, heading;
+        for (c = (cam_y - 40) / SKI_CHUNK - 3; c <= (cam_y + FH + 40) / SKI_CHUNK; c++)
+            if (c >= 0 && skirun_other(&run, c, &x, &yy, &moving, &heading) && yy - cam_y > -30 && yy - cam_y < FH + 30) {
+                art_draw(s, &art_thing[ART_SHADOW], ox + x - cam_x + 2, oy + yy - cam_y + 3);
+                art_draw(s, &art_other[c % OTHER_JACKETS][heading & 31], ox + x - cam_x, oy + yy - cam_y);
+            }
+    }
     draw_lift(s, ox, oy, cam_x, cam_y);
     draw_hares(s, ox, oy, cam_x, cam_y);
     draw_weather(s, ox, oy, px - cam_x, py - cam_y);

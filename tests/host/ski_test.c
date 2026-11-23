@@ -211,6 +211,56 @@ int main(int argc, char **argv)
           more ? 24000 : 1200, unfinished, falls, missed);
     printf("  the careful skier's runs: %ld seconds each on average\n", steps_sum / (more ? 24000 : 1200) / SKI_STEPS);
 
+    /* (phase F) the other skiers: there are some (about one piece in five, where a lane is clear); each waits until
+       the skier is near, goes down its lane slowly and stops at its end (those near the valley may not have got
+       there when the run ends); its lane is on the piste, off the clear
+       line and clear of things all the way; skied into, it is a fall */
+    {
+        long count = 0, mountains = 0, waited = 0, set_off = 0, stopped = 0, too_near = 0, off_piste = 0, hits = 0;
+        for (seed = 1; seed <= 120; seed++) {
+            int c, x, y, moving, heading, x2, y2;
+            run_auto(&r, seed * 131u + 7, (int)(seed % 4), (int)(seed & 1), 5 * 60 * SKI_STEPS);
+            mountains++;
+            for (c = 0; c < SKI_OTHERS; c++) {
+                const struct ski_thing *t;
+                int k, n, cc;
+                if (!skirun_other(&r, c, &x, &y, &moving, &heading))
+                    continue;
+                count++;
+                set_off += r.other[c].start != 0;
+                stopped += r.other[c].start && !moving && y == r.other[c].y0 + 320;
+                {
+                    int d = x - skimount_line(&r.m, y), e = x - skimount_centre(&r.m, y);
+                    too_near += (d < 0 ? -d : d) < 34;
+                    off_piste += (e < 0 ? -e : e) > skimount_half(&r.m, y);
+                }
+                for (cc = (y - 40) / SKI_CHUNK; cc <= (y + 40) / SKI_CHUNK; cc++)  /* (where it stopped: clear) */
+                    for (t = skirun_piece(&r, cc < 0 ? 0 : cc, &n), k = 0; k < n; k++) {
+                        int dx = t[k].x - x, dy = t[k].y - y, reach = (t[k].r ? t[k].r : 5) + 6;
+                        hits += dx * dx + dy * dy < reach * reach;
+                    }
+            }
+            {                                   /* a fresh run: none has set off; the first one skied into */
+                struct skirun f;
+                skirun_start(&f, seed * 131u + 7, (int)(seed % 4), (int)(seed & 1));
+                for (c = 0; c < SKI_OTHERS && !skirun_other(&f, c, &x2, &y2, &moving, &heading); c++)
+                    ;
+                if (c < SKI_OTHERS) {
+                    waited += !moving && !f.other[c].start;
+                    f.x = x2 * 256, f.y = (y2 - 2) * 256, f.vx = 0, f.vy = 64, f.state = SKI_S_SKIING, f.grace = 0;
+                    skirun_step(&f, 0);
+                    CHECK(f.state == SKI_S_FALLEN && f.falls == 1, "seed %u: skied into another skier, no fall", seed);
+                }
+            }
+        }
+        printf("  other skiers: %ld on %ld mountains, %ld set off, %ld stopped at their lanes' ends\n", count, mountains,
+               set_off, stopped);
+        CHECK(count >= mountains * 2 && set_off == count && stopped >= count * 8 / 10 && too_near == 0 && off_piste == 0 && hits == 0,
+              "other skiers: %ld, %ld set off, %ld stopped, %ld near the line, %ld off the piste, %ld in things", count,
+              set_off, stopped, too_near, off_piste, hits);
+        CHECK(waited >= mountains / 2, "other skiers waiting at the start: %ld", waited);
+    }
+
     /* (phase F) in the wind: the gusts blow by rule (a run skied twice is the same run), they push (the run is
        not the calm one's), they blow both ways and calm between, and the careful skier still gets down */
     {

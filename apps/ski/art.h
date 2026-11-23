@@ -27,6 +27,8 @@ enum { POSE_SKI, POSE_TUCK, POSE_PLOUGH, POSE_COUNT };
 extern struct art art_thing[ART_COUNT];
 extern struct art art_skier[POSE_COUNT][32];    /* by pose, and by where the skis point: 32nds of a turn, clockwise
                                                    from straight down the slope */
+#define OTHER_JACKETS 3
+extern struct art art_other[OTHER_JACKETS][32]; /* (phase F) the other skiers: skiers, in jackets of their own */
 
 enum { FIGURE_SKIER, FIGURE_RACER, FIGURE_BOARDER, FIGURE_SITTER, FIGURE_COUNT };      /* (the owner's: 2026-11-22) */
 

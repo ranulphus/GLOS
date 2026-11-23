@@ -33,6 +33,7 @@ enum { SKI_S_SKIING, SKI_S_AIR, SKI_S_FALLEN, SKI_S_DONE };
 #define SKI_GUST_STEPS (5 * SKI_STEPS)  /* the wind (phase F): a spell of five seconds, a gust in its first half or calm */
 
 #define SKI_PIECES 8
+#define SKI_OTHERS 96                   /* (phase F) the pieces that may have another skier: 12,288 pixels of mountain */
 struct ski_piece {                      /* a piece of the mountain as made (skimount_chunk), kept while the skier is near */
     int index, n;
     struct ski_thing t[48];
@@ -60,6 +61,13 @@ struct skirun {
     unsigned ev;                        /* SKI_EV_ of the last step */
     int wind;                           /* the last step's SKI_K_WIND: gusts pushed across the slope */
     struct ski_piece piece[SKI_PIECES]; /* (skirun_piece's) */
+    struct {                            /* (phase F) another skier a piece, at most: worked out when first asked for */
+        short y0;                       /* where it waits (its lane's top) */
+        signed char side;               /* the clear line's side its lane is on */
+        unsigned char known, has;       /* worked out; there is one */
+        unsigned char speed;            /* 256ths of a pixel a step, from 128 */
+        unsigned short start;           /* the step it set off (0: not yet: it waits for the skier to come near) */
+    } other[SKI_OTHERS];
 };
 
 void skirun_start(struct skirun *r, unsigned seed, int grade, int mode);
@@ -71,6 +79,11 @@ const struct ski_thing *skirun_piece(struct skirun *r, int index, int *n);
    demonstration's skier, and the tests'. */
 unsigned skirun_auto(const struct skirun *r);
 int skirun_speed(const struct skirun *r);       /* pixels a second */
+/* (phase F) Piece c's other skier, if it has one: a slow skier who zigzags down a lane of its own beside the clear
+   line (never on it, nothing in its way: chosen so when the mountain is made), setting off once the skier is
+   within 400 pixels above it, and stopping at the side at its lane's end. 1 and where it is (pixels), whether it
+   moves, its heading (32nds of a turn, as the skier's); 0: none. Skied into, it is a fall (flown over, nothing). */
+int skirun_other(struct skirun *r, int c, int *x, int *y, int *moving, int *heading);
 /* The wind's push across the slope at this step: 1/256 pixel a step, rightwards (0: calm, or no wind). */
 int skirun_gust(const struct skirun *r);
 int skirun_height(const struct skirun *r);      /* in the air: pixels off the ground */

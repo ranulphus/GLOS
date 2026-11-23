@@ -4,7 +4,7 @@
 # down: falls and missed gates, and still the valley), whose time goes into the table under a name; a mountain
 # by its number (the run just skied is that mountain's ghost when it is skied again); another jacket. Every run is its mountain's number and its keys: the same on every PC, and
 # the same with the suite's clock four times faster (-speed 4), which is what keeps this script short.
-run SKI.EXE -demo 7 -grade 2 -until 240,700,1300 -speed 4 -table C:\\OUT\\SKI.DAT -day 20261121
+run SKI.EXE -demo 7 -grade 2 -until 240,700,1300,1920 -speed 4 -table C:\\OUT\\SKI.DAT -day 20261121
 wait "Fall Line"
 said SKI ready seed=7 grade=2 mode=0 day=0
 said SKI started watching
@@ -23,7 +23,12 @@ said SKI at 1300 x=570 y=4418 speed=223 score=0 gates=10/0 falls=0
 shot later "Fall Line"
 key esc
 said SKI resumed
-pause 7000
+pause 3500
+said SKI at 1920 x=364 y=6411 speed=223 score=0 gates=15/0 falls=0
+shot others "Fall Line"
+key esc
+said SKI resumed
+pause 4500
 within 300
 said SKI finished steps=2730 ms=45500 score=0 passed=21 missed=0 falls=0 place=-1
 pause 1500

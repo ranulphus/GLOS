@@ -9,6 +9,7 @@
 
 struct art art_thing[ART_COUNT];
 struct art art_skier[POSE_COUNT][32];
+struct art art_other[OTHER_JACKETS][32];
 
 /* sin of n * 11.25 degrees, in 1024ths: a quarter turn; the rest by symmetry. */
 static const short SIN9[9] = { 0, 200, 392, 569, 724, 851, 946, 1004, 1024 };
@@ -344,6 +345,13 @@ void art_make(int fig, unsigned jacket)
     for (pose = 0; pose < POSE_COUNT; pose++)
         for (o = 0; o < 32; o++)
             figure(&art_skier[pose][o], fig, pose, o, jacket);
+    {                                   /* the other skiers: green, purple and orange jackets, the same figure always */
+        static const unsigned others[OTHER_JACKETS] = { 0x2E8B57u, 0x7B4FB0u, 0xE08A1Eu };
+        int k;
+        for (k = 0; k < OTHER_JACKETS; k++)
+            for (o = 0; o < 32; o++)
+                figure(&art_other[k][o], FIGURE_SKIER, POSE_SKI, o, others[k]);
+    }
     a = &art_thing[ART_FALLEN];         /* down: what it rides crossed or on its side, the figure beside it */
     begin(a, 31, 31, 15, 15);
     colour(a, DARK);
