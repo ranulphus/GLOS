@@ -1886,3 +1886,19 @@ the history (Undo).
 
 - **Tests:** `studio-step` (after its notes: up a semitone, down an octave, Quantise moving none, Undo; a
   picture); `studio-click` (WALTZ.MID gains a D at tick 1000: Quantise moves it alone, to 960).
+
+## A spin box's typing (2026-11-23)
+
+Toolkit 2's spin boxes held each digit typed to their limits at once, so a number whose first digits are below
+the minimum could not be typed: "90" in MIDI Studio's tempo (20 to 400) gave 20 at the "9" and 200 at the "0".
+Now the digits typed are kept as typed (`typed`, shown while typing) and the value is they held to the limits;
+typing starts again only when the digits pass the far limit, which more digits can only take further (500 in
+20 to 400). Backspace and the minus sign work on the digits typed. Leaving the box shows the value. Found by
+`studio-meter`, which types 90.
+
+## MIDI Studio: the time signature and tempo changes (2026-11-23)
+
+Transport, **Time Signature...**: beats a bar (1 to 16) and the beat's note (a half, a quarter, an eighth, a
+sixteenth); the roll's bars, the clicks and the file's time signature follow it. **Tempo...** gains **From bar**
+(1 to 999): the tempo set there, a change of tempo from that bar on (by the time signature's bars), kept and
+played (`song_tempo_set`). `studio-meter` (new): 3/4, then 90 a minute from bar 3 (tick 2880).

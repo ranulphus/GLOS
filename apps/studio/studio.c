@@ -29,7 +29,7 @@
 
 enum { C_NEW = 1, C_OPEN, C_SAVE, C_SAVEAS, C_EXIT, C_UNDO, C_REDO, C_DELETE, C_SELALL, C_TRACK, C_DRUMS, C_UNTRACK, C_INSTR,
        C_MUTE, C_SOLO, C_PLAY, C_STOP, C_TEMPO, C_ZOOMIN, C_ZOOMOUT, C_RECORD, C_CLICK, C_COUNTIN, C_STEP, C_STEPLEN,
-       C_QUANT = C_STEPLEN + 4, C_UP, C_DOWN, C_OCTUP, C_OCTDOWN };
+       C_QUANT = C_STEPLEN + 4, C_UP, C_DOWN, C_OCTUP, C_OCTDOWN, C_METER };
                                         /* (C_STEPLEN + n: a sixteenth, an eighth, a quarter, a half) */
 
 #define ROW 8                           /* a key's row on the roll: pixels */
@@ -1009,14 +1009,16 @@ static int ask_save(void)               /* 1: go on (saved, or not wanted); 0: t
 
 /* ---- dialogs */
 
-static struct gui_widget *dlg_list, *dlg_spin;
-static int dlg_value;
+static struct gui_widget *dlg_list, *dlg_spin, *dlg_spin2, *dlg_choice;
+static int dlg_value, dlg_value2;
 
 static void dlg_done(struct gui_widget *b, int what)
 {
     (void)what;                         /* (the button's own number is b->id) */
-    if (b->id == 1)                                /* (read while the dialog is there: gui_modal closes it) */
+    if (b->id == 1) {                              /* (read while the dialog is there: gui_modal closes it) */
         dlg_value = dlg_list ? gui_list_get(dlg_list) : gui_value(dlg_spin);
+        dlg_value2 = dlg_spin2 ? gui_value(dlg_spin2) : dlg_choice ? gui_value(dlg_choice) : 0;
+    }
     gui_end_modal(b->win, b->id == 1 ? GUI_OK : GUI_CANCEL_R);
 }
 
@@ -1084,19 +1086,57 @@ static void pick_tempo(void)
     d->owner = win;
     box = gui_vbox(d->root, 6, 8);
     form = gui_form(box);
-    dlg_list = NULL;
+    dlg_list = NULL, dlg_choice = NULL;
     dlg_spin = gui_spin(gui_row(form, GUI_T("&Quarter notes a minute:"), NULL), 20, 400, (int)song_tempo_at(song, 0));
+    dlg_spin2 = gui_spin(gui_row(form, GUI_T("From &bar:"), NULL), 1, 999, 1);    /* (2026-11-23: a change later on) */
     dlg_buttons(d, box);
     gui_focus(dlg_spin);
-    dlg_value = 0;
+    dlg_value = 0, dlg_value2 = 1;
     if (gui_modal(d) != GUI_OK) {
         say("tempo left");
     } else if (dlg_value >= 20 && dlg_value <= 400) {
-        song_tempo_set(song, 0, (unsigned)dlg_value);
+        unsigned long bar = SONG_PPQ * 4ul / (song->unit ? song->unit : 4) * (song->beats ? song->beats : 4);
+        unsigned long at = (unsigned long)(dlg_value2 > 1 ? dlg_value2 - 1 : 0) * bar;
+        song_tempo_set(song, at, (unsigned)dlg_value);
         changed = 1;
-        say("tempo %u", song_tempo_at(song, 0));
+        say("tempo %u at=%lu", song_tempo_at(song, at), at);
         show_status();
     }
+    dlg_spin2 = NULL;
+}
+
+static void pick_meter(void)            /* (2026-11-23) the time signature: beats a bar, and the beat's note */
+{
+    static const unsigned units[4] = { 2, 4, 8, 16 };
+    struct gui_window *d = gui_window(GUI_T("Time Signature"), 240, 0, GUI_W_DIALOG);
+    struct gui_widget *box, *form;
+    int k;
+    d->owner = win;
+    box = gui_vbox(d->root, 6, 8);
+    form = gui_form(box);
+    dlg_list = NULL, dlg_spin2 = NULL;
+    dlg_spin = gui_spin(gui_row(form, GUI_T("&Beats a bar:"), NULL), 1, 16, (int)(song->beats ? song->beats : 4));
+    dlg_choice = gui_choice(gui_row(form, GUI_T("The beat &is a:"), NULL), 12);
+    gui_choice_add(dlg_choice, GUI_T("half note"));
+    gui_choice_add(dlg_choice, GUI_T("quarter note"));
+    gui_choice_add(dlg_choice, GUI_T("eighth note"));
+    gui_choice_add(dlg_choice, GUI_T("sixteenth"));
+    for (k = 0; k < 4 && units[k] != (song->unit ? song->unit : 4); k++)
+        ;
+    gui_set_value(dlg_choice, k < 4 ? k : 1);
+    dlg_buttons(d, box);
+    gui_focus(dlg_spin);
+    dlg_value = 0;
+    if (gui_modal(d) != GUI_OK || dlg_value < 1 || dlg_value > 16 || dlg_value2 < 0 || dlg_value2 > 3) {
+        say("meter left");
+    } else {
+        song->beats = (unsigned)dlg_value, song->unit = units[dlg_value2];
+        changed = 1;
+        say("meter %u/%u", song->beats, song->unit);
+        show_status();
+        gui_damage(roll);
+    }
+    dlg_choice = NULL;
 }
 
 /* ---- commands */
@@ -1279,6 +1319,9 @@ static void command(struct gui_window *w, int id)
     case C_TEMPO:
         pick_tempo();
         break;
+    case C_METER:
+        pick_meter();
+        break;
     case C_STEP:
         step_toggle();
         break;
@@ -1413,8 +1456,8 @@ static void build(void)
     gui_command(win, C_REDO, GUI_T("&Redo"), "Ctrl+Y", gui_glyph("redo"), GUI_T("Redo"));
     gui_command(win, C_DELETE, GUI_T("&Delete Notes"), "Del", gui_glyph("remove"), GUI_T("Delete the chosen notes"));
     gui_command(win, C_SELALL, GUI_T("Select &All"), "Ctrl+A", NULL, NULL);
-    gui_command(win, C_QUANT, GUI_T("&Quantise"), "Ctrl+Q", NULL, GUI_T("The chosen notes' starts (or all of them) to the nearest sixteenth"));
-    gui_command(win, C_UP, GUI_T("Transpose &Up"), "Ctrl+Up", NULL, GUI_T("The chosen notes (or all of them) a semitone up"));
+    gui_command(win, C_QUANT, GUI_T("Quan&tise"), "Ctrl+Q", NULL, GUI_T("The chosen notes' starts (or all of them) to the nearest sixteenth"));
+    gui_command(win, C_UP, GUI_T("Trans&pose Up"), "Ctrl+Up", NULL, GUI_T("The chosen notes (or all of them) a semitone up"));
     gui_command(win, C_DOWN, GUI_T("Transpose Do&wn"), "Ctrl+Down", NULL, GUI_T("... a semitone down"));
     gui_command(win, C_OCTUP, GUI_T("An &Octave Up"), "Ctrl+Shift+Up", NULL, NULL);
     gui_command(win, C_OCTDOWN, GUI_T("An Octave Dow&n"), "Ctrl+Shift+Down", NULL, NULL);
@@ -1439,6 +1482,7 @@ static void build(void)
     gui_command(win, C_CLICK, GUI_T("C&lick While Recording"), NULL, NULL, GUI_T("A click on each beat while recording"));
     gui_command(win, C_COUNTIN, GUI_T("Count &In a Bar"), NULL, NULL, GUI_T("A bar of clicks before recording begins"));
     gui_command(win, C_TEMPO, GUI_T("&Tempo..."), NULL, NULL, NULL);
+    gui_command(win, C_METER, GUI_T("Time Si&gnature..."), NULL, NULL, NULL);
     gui_command(win, C_ZOOMIN, GUI_T("Zoom &In"), "Ctrl++", gui_glyph("zoom-in"), GUI_T("Zoom in"));
     gui_command(win, C_ZOOMOUT, GUI_T("Zoom &Out"), "Ctrl+-", gui_glyph("zoom-out"), GUI_T("Zoom out"));
     bar = gui_menubar(win);
@@ -1469,7 +1513,7 @@ static void build(void)
     gui_menu_sep(m);
     gui_menu_command(m, C_CLICK), gui_menu_command(m, C_COUNTIN);
     gui_menu_sep(m);
-    gui_menu_command(m, C_TEMPO);
+    gui_menu_command(m, C_TEMPO), gui_menu_command(m, C_METER);
     m = gui_menu(bar, GUI_T("&View"));
     gui_menu_command(m, C_ZOOMIN), gui_menu_command(m, C_ZOOMOUT);
     tb = gui_toolbar(win);

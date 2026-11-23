@@ -1,0 +1,30 @@
+# MIDI Studio's time signature and tempo changes (apps/studio; phase F): Transport, Time Signature: 3 beats of a
+# quarter (3/4: the roll's bars three beats long, a picture); Transport, Tempo: 90 a minute from bar 3 (tick 2880
+# in 3/4); the song saved and opened again keeps both.
+run STUDIO.EXE -demo
+wait "MIDI Studio"
+key alt+n
+key g
+wait "Time Signature"
+key ctrl+a
+type 3
+key enter
+gone "Time Signature"
+said STUDIO meter 3/4
+shot meter "MIDI Studio"
+key alt+n
+key t
+wait "Tempo"
+key ctrl+a
+type 90
+key alt+b
+key ctrl+a
+type 3
+key enter
+gone "Tempo"
+said STUDIO tempo 90 at=2880
+key alt+f4
+wait "MIDI Studio"
+key alt+n
+gone "MIDI Studio"
+expect STUDIO end
