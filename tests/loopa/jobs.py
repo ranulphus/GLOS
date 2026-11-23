@@ -904,14 +904,14 @@ def shell(profile, boot):
 
 NET_CASES = [("bf6", "ne2kpci"), ("bf6", "ne2k"), ("486dx2", "ne2k"), ("486dx2", "ne2kpci"), ("486dx4", "ne2kpci"),
              ("bf6", "rtl8139c+"), ("bf6", "i82557"), ("bf6", "i82558"), ("486dx2", "rtl8139c+"), ("486dx4", "i82557"),
-             ("bf6", "pcnetpci"), ("486dx2", "pcnetpci")]  # (phase H: AMD PCnet-PCI, kernel/drv/pcnet.c)
+             ("bf6", "pcnetpci"), ("486dx2", "pcnetpci"),  # (phase H: AMD PCnet-PCI, kernel/drv/pcnet.c)
+             ("bf6", "dec_21140_tulip_migrate"), ("bf6", "dec_21143_tulip")]   # (... DEC's Tulip, kernel/drv/tulip.c)
 try:                                            # (the PCnet only where RetroGPU's run.py knows the card: its
     _nics = open(os.path.join(os.environ.get("RETROGPU", os.path.expanduser("~/RetroGPU")),   # branch glos-pcnet,
                               "tools", "loopa", "hostio.py")).read()                          # until merged)
 except OSError:
     _nics = ""
-if '"pcnetpci"' not in _nics:
-    NET_CASES = [c for c in NET_CASES if c[1] != "pcnetpci"]
+NET_CASES = [c for c in NET_CASES if '"%s"' % c[1] in _nics or c[1] in ("ne2k", "ne2kpci", "rtl8139c+", "i82557", "i82558")]
 if os.environ.get("NET_ONLY"):                  # e.g. NET_ONLY=rtl8139c+,i82557
     NET_CASES = [c for c in NET_CASES if c[1] in os.environ["NET_ONLY"].split(",")]
 
@@ -930,7 +930,7 @@ def net(profile, card):
         "--cmd", "SERSAY HX-START net", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE /SELFTEST /RUN WAITSEC 12",
         "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"])
     want = {"ne2kpci": "rtl8029", "rtl8139c+": "rtl8139", "i82557": "i8255x", "i82558": "i8255x",
-            "pcnetpci": "pcnet"}.get(card, "ne2000")
+            "pcnetpci": "pcnet", "dec_21140_tulip_migrate": "tulip", "dec_21143_tulip": "tulip"}.get(card, "ne2000")
     echo = os.path.join(ROOT, "out", "net-" + tag, "tcp-0.txt")
     echo = open(echo, "rb").read().decode("latin-1") if os.path.exists(echo) else ""
     checks = {

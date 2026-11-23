@@ -36,6 +36,7 @@ int rtl8139_probe(void);
 int e100_probe(void);
 int rhine_probe(void);
 int pcnet_probe(void);                  /* (phase H) AMD PCnet-PCI, kernel/drv/pcnet.c */
+int tulip_probe(void);                  /* (phase H) DEC's 21140 and 21143, kernel/drv/tulip.c */
 void net_start(int selftest);           /* the net thread, once a card is claimed */
 void net_rx(struct nic *n, const u8 *frame, u32 len);
 void net_irq(struct trapframe *tf);     /* the card's IRQ handler */

@@ -62,6 +62,12 @@ Each driver's head names its source and its SHA-256.
     has not stopped since. Until neither stops, the two cases are out of the gate's audio suite
     (`AUDIO_CASES_H`, run by `LOOPA_AUDIO_SOUND=cmi8738,es1371`).
   - **ES1371 codec:** its codec's vendor reads as FFFFFFFF in 86Box (its model's codec).
+  - **The CMI8738's stop, later the same day:** a third run stopped again at 1,548 interrupts, as recording
+    started. 86Box's model restarts a channel's DMA at every write of FUNCTRL0's channel byte with that
+    channel's enable bit set, even while it runs. Starting recording writes that byte three times with channel
+    0's enable kept, so playback is restarted three times. That alone should not stop its interrupts, and the
+    model's source gave no clearer cause. Bench B's real chip is the next judge; until then the case stays
+    out of the gate.
 - **Owed:**
   - each chip on its bench;
   - the CMI8738's FM on bench B's chip (an OPL3 on most);
@@ -88,6 +94,26 @@ It is probed after the Rhine and before the NE2000.
 - **Tests:** builds. Loop A's NET_CASES gain bf6 and 486dx2 with `pcnetpci`. Loop A's run.py takes the card
   only with RetroGPU branch `glos-pcnet` (one line in `tools/loopa/hostio.py`'s NICS), whose merge waits for
   the owner's OK; until then the cases run with `RETROGPU=~/wt-rgpu-pcnet`.
+
+## Tier 2: DEC's Tulip (2026-11-23)
+
+`kernel/drv/tulip.c` drives the 21140 (1011:0009) and the 21142/21143 (1011:0019), from Intel's 21143 hardware
+reference manual (278074-001):
+
+- the CSRs in I/O space; descriptors in ring mode, 16 receive and 8 transmit, in one page;
+- the station's address from the serial ROM (bytes 20 to 25 of the 21X4 SROM format), read bit by bit through
+  CSR9, as a 93C46 and then as a 93C66;
+- a setup frame first, for the perfect filter: its own address and the broadcast; every multicast taken;
+- the MII/SYM port at 100 Mbit, half duplex. The SIA's 10 Mbit ports and autosensing are not done; a bench
+  Tulip would want them.
+
+The Tulip's clones (Macronix, Lite-On, ADMtek, Davicom) have other IDs, ROMs and PHYs, and are not driven. It
+is probed after the PCnet and before the NE2000.
+
+- **Tests:** Loop A NET_CASES `bf6` with 86Box's `dec_21140_tulip_migrate` (its 21140) and `dec_21143_tulip`:
+  both passed (DHCP, echo, mDNS) on the first runs. run.py takes the cards only with RetroGPU branch
+  `glos-tulip` (two lines in hostio.py's NICS), whose merge waits for the owner's OK; the cases are left out
+  until then.
 
 ## Still to come in tier 1
 

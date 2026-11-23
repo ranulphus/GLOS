@@ -107,6 +107,6 @@ int nic_probe(void)
         refused = "packet-driver";
         return -1;
     }
-    return rtl8139_probe() == 0 || e100_probe() == 0 || rhine_probe() == 0 || pcnet_probe() == 0 || ne2k_probe() == 0
-           ? 0 : -1;
+    return rtl8139_probe() == 0 || e100_probe() == 0 || rhine_probe() == 0 || pcnet_probe() == 0 || tulip_probe() == 0
+           || ne2k_probe() == 0 ? 0 : -1;
 }

@@ -20,6 +20,10 @@ design. The exact structures and numbers are written in `include/glos/api.h` in 
 ## What stays from 1.x
 
 - **Finding GLOS:** DPMI function 0A00h with the name "GLOS". The entry comes back in ES:EDI as a far procedure.
+  A program under DOS/4GW (Open Watcom's) never gets that far: DOS/4GW answers 0A00h itself, for its own name
+  only. It uses INT 2Fh AX=168Ah instead (DPMI 1.0's vendor entry: DS:(E)SI the name, "GLOS"; AL=0 and the same
+  entry in ES:(E)DI), which DOS/4GW passes to GLOS. Proven by DOS-GL on bench B, 2026-11-23; RetroGPU's
+  `hal/port/ow_dos4g.c` tries 168Ah when 0A00h comes back with the carry set.
   Plain DOS and other DPMI hosts have no such name, so a program that gets no answer runs as a DOS program.
 - **Becoming an app:** an app is a DOS program that calls INIT. It then runs on a thread of its own beside the
   other apps, and has the rest of the API.
