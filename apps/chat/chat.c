@@ -13,7 +13,15 @@
  * The settings are CHAT.CFG in GLOS's folder; the account's password is in GLOS's secrets. The connection is on
  * a thread of its own (apps/shared/ircnet.c); the protocol is apps/shared/irc.c.
  *
+ * The second part (2026-11-23): a connection lost is made again by itself (5 seconds, then twice as long each
+ * time, five minutes at most), the channels it was in joined again; a server silent for two minutes is pinged,
+ * and one that does not answer within a minute is a connection lost; logs of what is said (CHAT\LOGS\NETWORK\
+ * NAME.LOG in GLOS's folder, plain text); comings and goings hidden, colours left out, and a flash of the task
+ * bar's button with a notification when the user is named or spoken to while Chat is not in front: settings.
+ *
  * CHAT -demo talks to a server made up inside it (no network: the suite's, and a look at Chat without one).
+ * In it "!drop" said in a channel ends the connection as a network would, and "!mute" makes the server silent;
+ * -silence SECONDS (the suite's) pings after that long and gives up after as long again.
  *
  * "CHAT ..." lines on stdout (the suite's). */
 #include <stdarg.h>
@@ -44,7 +52,15 @@ static struct {
     char server[80], nick[32], alt[32], real[64], account[40], join[160];
     unsigned port;
     int tls, at_start;
-} cfg = { "irc.libera.chat", "", "", "", "", "", 6697, 1, 0 };
+    int again, logs, quiet, plain, tell;        /* (the second part's: made again; logs kept; comings and goings
+                                                   hidden; colours left out; told when named) */
+} cfg = { "irc.libera.chat", "", "", "", "", "", 6697, 1, 0, 1, 0, 0, 0, 1 };
+static int want_on;                     /* the user wants to be connected: a connection lost is made again */
+static unsigned again_at, again_wait;   /* when to connect again (glos_ticks; 0: not waiting), and the wait (s) */
+static char rejoin[400];                /* the channels this user was in when the connection was lost */
+static unsigned heard_ms, pinged_ms;    /* when the server last said anything; when it was pinged (0: not) */
+static unsigned silence_s = 120;        /* (-silence: the suite's) */
+static int demo_dropped, demo_mute;
 static char history[20][400];
 static unsigned nhistory, at_history;
 static char begun[40];                  /* Tab: what is being completed, and how many times Tab was pressed */
@@ -98,6 +114,8 @@ static void demo_line(const char *fmt, ...)
     unsigned long s = demo_clock % 86400;
     va_list ap;
     int n;
+    if (demo_mute)
+        return;
     va_start(ap, fmt);
     vsnprintf(t, sizeof t, fmt, ap);
     va_end(ap);
@@ -135,6 +153,8 @@ static void demo_hears(char *line)
         demo_user = 1;
     } else if (!strcmp(line, "PING")) {
         demo_line("PONG %s", rest);
+        if (!demo_mute)
+            demo_clock -= 7;            /* (a PONG takes none of the made-up time: pings come by the wall clock) */
     } else if (!strcmp(line, "JOIN")) {
         char *end = strchr(rest, ' ');
         if (end)
@@ -151,6 +171,14 @@ static void demo_hears(char *line)
         *text = 0, text += 2;
         if (text[0] == 1)                               /* (an action: seen, not answered) */
             return;
+        if (!strcmp(text, "!drop")) {                   /* (the suite's: the connection lost, as a network loses it) */
+            demo_dropped = 1;
+            return;
+        }
+        if (!strcmp(text, "!mute")) {                   /* (... and a server that says nothing more) */
+            demo_mute = 1;
+            return;
+        }
         if (rest[0] != '#')
             demo_line(":%s!a@demo PRIVMSG %s :Got it: %s", rest, demo_nick, text);
         else if (strchr(text, '?'))
@@ -219,7 +247,7 @@ static void put_text(struct gui_rdoc *d, const char *text, unsigned base, unsign
         unsigned style = base | (span[i].flags & IRC_BOLD ? GUI_RS_BOLD : 0) | (span[i].flags & IRC_ITALIC ? GUI_RS_ITALIC : 0)
                          | (span[i].flags & IRC_MONO ? GUI_RS_CODE : 0) | (span[i].flags & IRC_STRIKE ? GUI_RS_STRIKE : 0);
         const char *p = plain + span[i].start, *end = p + span[i].len;
-        gui_rdoc_colour(d, span[i].fg >= 0 ? colours[span[i].fg & 15] : rgb);
+        gui_rdoc_colour(d, span[i].fg >= 0 && !cfg.plain ? colours[span[i].fg & 15] : rgb);
         while (p < end) {
             const char *link = NULL, *q;
             for (q = p; q < end; q++)
@@ -252,6 +280,8 @@ static void put_line(struct gui_rdoc *d, const struct irc_buffer *b, const struc
     unsigned long local = l->when + (unsigned long)zone(), s = local % 86400;
     const unsigned grey = 0x707070;
     char t[160];
+    if (cfg.quiet && !l->mine && (l->kind == IRC_L_JOIN || l->kind == IRC_L_PART || l->kind == IRC_L_QUIT))
+        return;                         /* (comings and goings hidden: a setting) */
     gui_rdoc_block(d, GUI_RB_PARA, 0);
     snprintf(t, sizeof t, "%02lu:%02lu ", s / 3600, s / 60 % 60);
     gui_rdoc_colour(d, grey);
@@ -386,6 +416,85 @@ static const struct gui_model user_rows = { u_count, u_row, NULL, NULL, NULL };
 
 /* ---- what IRC tells */
 
+/* ---- the logs (a setting): CHAT\LOGS\NETWORK\NAME.LOG in GLOS's folder, a line each, as plain text */
+
+static void log_part(char *out, size_t room, const char *name, const char *none)        /* a name as 8 letters */
+{
+    size_t n = 0;
+    for (; *name && n + 1 < room && n < 8; name++)
+        if ((*name >= 'A' && *name <= 'Z') || (*name >= '0' && *name <= '9') || *name == '-' || *name == '_')
+            out[n++] = *name;
+        else if (*name >= 'a' && *name <= 'z')
+            out[n++] = (char)(*name - 'a' + 'A');
+    out[n] = 0;
+    if (!n)
+        snprintf(out, room, "%s", none);
+}
+
+static void log_line(const struct irc_buffer *b, const struct irc_line *l)
+{
+    static char made[300];              /* (the network's folder last made) */
+    char dir[300], path[320], net_name[12], name[12], plain[520], t[700];
+    unsigned long local = l->when + (unsigned long)zone(), days = local / 86400, s = local % 86400;
+    long y, m, d;
+    FILE *f;
+    if (!glos_home() || !glos_home()[0] || !irc_network(irc)[0])
+        return;                         /* (the connection's first lines, before the network says its name: not kept,
+                                           so that a network's logs are in one folder) */
+    log_part(net_name, sizeof net_name, irc_network(irc), "NETWORK");
+    log_part(name, sizeof name, b->kind == IRC_B_SERVER ? "SERVER" : b->name, "NONAME");
+    gui_path_join(dir, sizeof dir, glos_home(), "CHAT");
+    gui_path_join(path, sizeof path, dir, "LOGS");
+    gui_path_join(dir, sizeof dir, path, net_name);
+    if (strcmp(made, dir)) {
+        char top[300];
+        gui_path_join(top, sizeof top, glos_home(), "CHAT");
+        gui_mkdir(top);
+        gui_mkdir(path);
+        gui_mkdir(dir);
+        snprintf(made, sizeof made, "%s", dir);
+    }
+    snprintf(t, sizeof t, "%s.LOG", name);
+    gui_path_join(path, sizeof path, dir, t);
+    {                                   /* (the civil date from the days: Howard Hinnant's) */
+        long z = (long)days + 719468, era = z / 146097, doe = z - era * 146097;
+        long yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365, doy = doe - (365 * yoe + yoe / 4 - yoe / 100), mp = (5 * doy + 2) / 153;
+        d = doy - (153 * mp + 2) / 5 + 1, m = mp < 10 ? mp + 3 : mp - 9, y = yoe + era * 400 + (m <= 2);
+    }
+    irc_format(l->text, plain, sizeof plain, NULL, 0);
+    switch (l->kind) {
+    case IRC_L_MSG: snprintf(t, sizeof t, "<%s> %s", l->nick, plain); break;
+    case IRC_L_NOTICE: snprintf(t, sizeof t, "-%s- %s", l->nick, plain); break;
+    case IRC_L_ACTION: snprintf(t, sizeof t, "* %s %s", l->nick, plain); break;
+    case IRC_L_JOIN: snprintf(t, sizeof t, "--> %s has joined", l->nick); break;
+    case IRC_L_PART: snprintf(t, sizeof t, "<-- %s has left%s%s%s", l->nick, plain[0] ? " (" : "", plain, plain[0] ? ")" : ""); break;
+    case IRC_L_QUIT: snprintf(t, sizeof t, "<-- %s has quit%s%s%s", l->nick, plain[0] ? " (" : "", plain, plain[0] ? ")" : ""); break;
+    case IRC_L_NICK: snprintf(t, sizeof t, "%s is now %s", l->nick, plain); break;
+    case IRC_L_MODE: snprintf(t, sizeof t, "%s sets %s", l->nick, plain); break;
+    case IRC_L_TOPIC: snprintf(t, sizeof t, "%s changed the topic to: %s", l->nick, plain); break;
+    default: snprintf(t, sizeof t, "-- %s", plain);
+    }
+    if ((f = gui_fopen(path, "ab")) != NULL) {          /* (DOS's text: CR LF, the same from the host's build) */
+        fprintf(f, "%04ld-%02ld-%02ld %02lu:%02lu:%02lu %s\r\n", y, m, d, s / 3600, s / 60 % 60, s % 60, t);
+        fclose(f);
+    }
+}
+
+/* ---- told (a setting): named in a channel, or spoken to privately, while Chat is not in front */
+
+static void tell_user(const struct irc_buffer *b, const struct irc_line *l)
+{
+    char title[80], plain[200];
+    if (!cfg.tell || l->mine || win->active || (l->kind != IRC_L_MSG && l->kind != IRC_L_ACTION)
+        || !(l->highlight || b->kind == IRC_B_PRIVATE))
+        return;
+    glos_set(win->id, GLOS_PROP_WIN_FLASH, 1);
+    irc_format(l->text, plain, sizeof plain, NULL, 0);
+    snprintf(title, sizeof title, b->kind == IRC_B_PRIVATE ? GUI_T("%s, privately") : GUI_T("%s in %s"), l->nick, b->name);
+    glos_notify(title, plain, NULL, NULL, NULL, 0);
+    say("told %s %s", b->name, l->nick);
+}
+
 static void events(void *ctx, int what, struct irc_buffer *b)
 {
     (void)ctx;
@@ -404,6 +513,10 @@ static void events(void *ctx, int what, struct irc_buffer *b)
         break;
     case IRC_E_LINE: {
         const struct irc_line *l = irc_line_at(b, b->nlines - 1);
+        if (l && cfg.logs)
+            log_line(b, l);
+        if (l)
+            tell_user(b, l);
         if (l && (l->kind == IRC_L_MSG || l->kind == IRC_L_ACTION || l->kind == IRC_L_NOTICE || l->kind == IRC_L_ERROR)) {
             char plain[520];                            /* (as text: its codes are for the window) */
             irc_format(l->text, plain, sizeof plain, NULL, 0);
@@ -435,11 +548,23 @@ static void events(void *ctx, int what, struct irc_buffer *b)
     case IRC_E_NICK:
         status_stale = 1;
         if (what == IRC_E_STATE && irc_state(irc) == IRC_ON) {         /* on: the channels to join */
-            char list[160], *w;
+            char *w, all[600], seen[16][64];
+            int nseen = 0;
             say("on %s", irc_nick(irc));
-            snprintf(list, sizeof list, "%s", cfg.join);
-            for (w = strtok(list, ", "); w; w = strtok(NULL, ", ")) {
+            again_wait = 0;                     /* (on: the next connection lost waits the shortest again) */
+            if (rejoin[0])
+                say("rejoining %s", rejoin);
+            snprintf(all, sizeof all, "%s,%s", cfg.join, rejoin);
+            rejoin[0] = 0;
+            for (w = strtok(all, ", "); w; w = strtok(NULL, ", ")) {
                 char line[80];
+                int k;
+                for (k = 0; k < nseen && !irc_same(irc, seen[k], w); k++)
+                    ;                           /* (a channel both in the settings and joined since: once) */
+                if (k < nseen)
+                    continue;
+                if (nseen < 16)
+                    snprintf(seen[nseen++], sizeof seen[0], "%s", w);
                 snprintf(line, sizeof line, "/join %s", w);
                 irc_input(irc, irc_buffer(irc, 0), line);
             }
@@ -504,13 +629,43 @@ static void disconnect(const char *why)
     status_stale = 1;
 }
 
+/* A connection ended that the user did not end: the channels it was in kept to join again, and, while the user
+   wants to be connected (and the setting says so), a time to connect again: 5 seconds, then twice as long each
+   time (five minutes at most) until it is on again. */
+static void lost(const char *why)
+{
+    char t[200];
+    unsigned i;
+    if (irc && irc_state(irc) == IRC_ON) {
+        rejoin[0] = 0;
+        for (i = 1; i < irc_buffers(irc); i++) {
+            const struct irc_buffer *b = irc_buffer(irc, i);
+            if (b->kind == IRC_B_CHANNEL && b->joined && strlen(rejoin) + strlen(b->name) + 2 < sizeof rejoin)
+                strcat(strcat(rejoin, rejoin[0] ? "," : ""), b->name);
+        }
+    }
+    disconnect(why);
+    if (!want_on || !cfg.again)
+        return;
+    again_wait = !again_wait ? 5 : again_wait >= 150 ? 300 : again_wait * 2;
+    again_at = glos_ticks() + again_wait * 1000u;
+    if (!again_at)
+        again_at = 1;
+    snprintf(t, sizeof t, GUI_T("The connection was lost (%s). Connecting again in %u seconds..."), why, again_wait);
+    gui_set_text(status, t);
+    status_stale = 0;
+    say("again in %u", again_wait);
+}
+
 static void connect_now(void)
 {
     char certs[300];
     if (!irc || irc_state(irc) != IRC_OFF || net)
         return;
+    want_on = 1, again_at = 0;
+    heard_ms = glos_ticks(), pinged_ms = 0;
     if (demo) {
-        demo_n = 0, demo_user = demo_on = demo_ended = 0;
+        demo_n = 0, demo_user = demo_on = demo_ended = demo_dropped = demo_mute = 0;
         snprintf(demo_nick, sizeof demo_nick, "*");
         irc_start(irc);
         return;
@@ -536,16 +691,45 @@ static void tick(void *arg)             /* ten times a second: what came is read
     (void)arg;
     if (!irc)
         return;
+    if (again_at && (int)(glos_ticks() - again_at) >= 0) {       /* the time to connect again */
+        again_at = 0;
+        say("connecting again");
+        connect_now();
+    }
+    if (irc_state(irc) == IRC_ON) {     /* a server silent too long: pinged; silent as long again: lost */
+        unsigned ms = glos_ticks();
+        if (!pinged_ms && ms - heard_ms >= silence_s * 1000u) {
+            char line[40];
+            snprintf(line, sizeof line, "/raw PING :glos%u", ms);
+            irc_input(irc, irc_buffer(irc, 0), line);
+            pinged_ms = ms ? ms : 1;
+            say("pinged");
+        } else if (pinged_ms && ms - pinged_ms >= (silence_s < 60 ? silence_s : 60) * 1000u) {
+            pinged_ms = 0;
+            if (net) {
+                ircnet_close(net);
+                net = NULL;
+            }
+            lost(GUI_T("no answer from the server"));
+            refresh();
+            return;
+        }
+    }
     if (demo) {
         while (demo_n) {                        /* (what it answers is answered in turn, until it has no more to say) */
             unsigned n = demo_n < sizeof piece ? demo_n : (unsigned)sizeof piece;
             memcpy(piece, demo_out, n);
             memmove(demo_out, demo_out + n, demo_n - n);
             demo_n -= n;
+            heard_ms = glos_ticks(), pinged_ms = 0;
             irc_feed(irc, piece, n);
         }
         if (demo_ended && irc_state(irc) != IRC_OFF)
-            disconnect("closed by the server");
+            lost("closed by the server");
+        if (demo_dropped && irc_state(irc) != IRC_OFF) {
+            demo_dropped = 0;
+            lost(GUI_T("the network went away"));
+        }
     } else if (net) {
         state = ircnet_state(net, why, sizeof why);
         if (state == IRCNET_ON && net_was == IRCNET_CONNECTING) {
@@ -553,15 +737,21 @@ static void tick(void *arg)             /* ten times a second: what came is read
             irc_start(irc);
         }
         net_was = state;
-        while ((r = ircnet_read(net, piece, sizeof piece)) > 0)
+        while ((r = ircnet_read(net, piece, sizeof piece)) > 0) {
+            heard_ms = glos_ticks(), pinged_ms = 0;
             irc_feed(irc, piece, (unsigned)r);
+        }
         if (state == IRCNET_ENDED) {
             char t[200];
             int was_on = irc_state(irc) != IRC_OFF;
-            disconnect(why);
+            lost(why);
             if (!was_on) {                              /* (it never got there: said, not only in the tab) */
                 say("failed %s", why);
-                snprintf(t, sizeof t, GUI_T("%s could not be reached: %s."), cfg.server, why);
+                if (again_at)
+                    snprintf(t, sizeof t, GUI_T("%s could not be reached: %s. Trying again in %u seconds..."), cfg.server, why,
+                             again_wait);
+                else
+                    snprintf(t, sizeof t, GUI_T("%s could not be reached: %s."), cfg.server, why);
                 gui_set_text(status, t);
                 status_stale = 0;
             }
@@ -601,6 +791,16 @@ static void settings_read(void)
             snprintf(cfg.join, sizeof cfg.join, "%s", v);
         else if (!strcmp(line, "start"))
             cfg.at_start = atoi(v) != 0;
+        else if (!strcmp(line, "again"))
+            cfg.again = atoi(v) != 0;
+        else if (!strcmp(line, "logs"))
+            cfg.logs = atoi(v) != 0;
+        else if (!strcmp(line, "quiet"))
+            cfg.quiet = atoi(v) != 0;
+        else if (!strcmp(line, "plain"))
+            cfg.plain = atoi(v) != 0;
+        else if (!strcmp(line, "tell"))
+            cfg.tell = atoi(v) != 0;
     }
     fclose(f);
 }
@@ -612,6 +812,7 @@ static void settings_keep(void)
         return;
     fprintf(f, "server %s\nport %u\ntls %d\nnick %s\nalt %s\nreal %s\naccount %s\njoin %s\nstart %d\n", cfg.server, cfg.port, cfg.tls, cfg.nick,
             cfg.alt, cfg.real, cfg.account, cfg.join, cfg.at_start);
+    fprintf(f, "again %d\nlogs %d\nquiet %d\nplain %d\ntell %d\n", cfg.again, cfg.logs, cfg.quiet, cfg.plain, cfg.tell);
     fclose(f);
 }
 
@@ -638,6 +839,7 @@ static void make_irc(void)              /* IRC's state made anew from the settin
 }
 
 static struct gui_widget *s_server, *s_port, *s_tls, *s_nick, *s_alt, *s_real, *s_account, *s_password, *s_join, *s_start;
+static struct gui_widget *s_again, *s_logs, *s_quiet, *s_plain, *s_tell;
 static char s_pw[128];
 static int s_ok;
 
@@ -655,6 +857,8 @@ static void settings_done(struct gui_widget *b, int what)
         snprintf(s_pw, sizeof s_pw, "%s", gui_get_text(s_password));
         snprintf(cfg.join, sizeof cfg.join, "%s", gui_get_text(s_join));
         cfg.at_start = gui_checked(s_start);
+        cfg.again = gui_checked(s_again), cfg.logs = gui_checked(s_logs), cfg.quiet = gui_checked(s_quiet);
+        cfg.plain = gui_checked(s_plain), cfg.tell = gui_checked(s_tell);
         s_ok = 1;
     }
     gui_end_modal(b->win, b->id == 1 ? GUI_OK : GUI_CANCEL_R);
@@ -684,7 +888,15 @@ static void settings(void)
     gui_field_mask(s_password, 1);
     s_join = gui_field(gui_row(form, GUI_T("&Channels:"), NULL), 30);
     gui_set_text(s_join, cfg.join);
-    s_start = gui_check(box, GUI_T("Connect as Chat &starts"), cfg.at_start);
+    {                                   /* (the checks in two columns: the dialog fits a 640 x 480 screen) */
+        struct gui_widget *cols = gui_hbox(box, 12, 0), *a = gui_vbox(cols, 4, 0), *b = gui_vbox(cols, 4, 0);
+        s_start = gui_check(a, GUI_T("Connect as Chat &starts"), cfg.at_start);
+        s_again = gui_check(b, GUI_T("Connect a&gain by itself"), cfg.again);
+        s_quiet = gui_check(a, GUI_T("&Hide comings and goings"), cfg.quiet);
+        s_plain = gui_check(b, GUI_T("Leave co&lours out"), cfg.plain);
+        s_logs = gui_check(a, GUI_T("&Keep logs"), cfg.logs);
+        s_tell = gui_check(b, GUI_T("Tell &me when I am named"), cfg.tell);
+    }
     gui_label(box, GUI_T("A password typed here is kept in GLOS's secrets; left empty, the one kept stays."));
     row = gui_hbox(box, 6, 0);
     gui_space(row, 0, 0);
@@ -700,8 +912,11 @@ static void settings(void)
         glos_secret_put("chat", s_pw, (unsigned)strlen(s_pw), 0);
     memset(s_pw, 0, sizeof s_pw);
     settings_keep();
-    say("settings %s %u %s nick=%s join=%s", cfg.server, cfg.port, cfg.tls ? "tls" : "plain", cfg.nick, cfg.join);
+    say("settings %s %u %s nick=%s join=%s again=%d logs=%d quiet=%d plain=%d tell=%d", cfg.server, cfg.port,
+        cfg.tls ? "tls" : "plain", cfg.nick, cfg.join, cfg.again, cfg.logs, cfg.quiet, cfg.plain, cfg.tell);
     make_irc();
+    if (shown)                          /* (hidden lines and colours: the tab drawn again) */
+        show(shown);
 }
 
 /* ---- the line typed */
@@ -720,6 +935,8 @@ static void typed(struct gui_widget *w, int what)
     snprintf(history[0], sizeof history[0], "%s", line);
     at_history = 0, tab_count = 0;
     gui_set_text(w, "");
+    if ((!strncmp(line, "/quit", 5) || !strncmp(line, "/QUIT", 5)) && (!line[5] || line[5] == ' '))
+        want_on = 0, again_at = 0;                      /* (left on purpose: not made again) */
     if (!strncmp(line, "/close", 6) && (!line[6] || line[6] == ' ')) {
         if (shown && shown != irc_buffer(irc, 0)) {
             say("closed %s", shown->name);
@@ -792,6 +1009,7 @@ static void command(struct gui_window *w, int id)
         connect_now();
         break;
     case C_DISCONNECT:
+        want_on = 0, again_at = 0;
         if (irc && irc_state(irc) == IRC_ON)
             irc_input(irc, irc_buffer(irc, 0), "/quit");
         else
@@ -909,6 +1127,8 @@ int main(int argc, char **argv)
     for (i = 1; i < argc; i++)
         if (!strcmp(argv[i], "-demo"))
             demo = 1;
+        else if (!strcmp(argv[i], "-silence") && i + 1 < argc)
+            silence_s = atoi(argv[i + 1]) > 0 ? (unsigned)atoi(argv[i + 1]) : 120, i++;
     home = glos_home();
     if (home && home[0] && !demo)
         gui_path_join(cfg_path, sizeof cfg_path, home, "CHAT.CFG");

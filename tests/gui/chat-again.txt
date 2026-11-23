@@ -1,0 +1,58 @@
+# Chat's second part (apps/chat; phase F, docs/v1/apps/chat.md) with the server made up inside it, which pings
+# after three seconds of silence here (-silence 3; two minutes without the suite): left by /quit, it is not made
+# again; the settings keep logs and hide comings and goings; connected again by hand, a second channel joined; the
+# connection lost ("!drop": as a network loses it) is made again by itself five seconds on, both channels joined
+# again; the server made silent ("!mute") is pinged, given up on, and the connection made again. The second
+# channel's log, the same every run (the made-up server's own clock).
+run CHAT.EXE -demo -silence 3
+wait "Chat"
+pause 300
+said CHAT on glos
+said CHAT shown #glos lines=0
+type /quit\n
+pause 300
+said CHAT ended closed by the server
+pause 6500
+key alt+c
+key s
+wait "Chat Settings"
+key alt+k
+key alt+h
+shot settings "Chat Settings"
+key enter
+gone "Chat Settings"
+said CHAT settings demo 6697 tls nick=glos join=#glos again=1 logs=1 quiet=1 plain=0 tell=1
+key ctrl+k
+pause 300
+said CHAT on glos
+said CHAT shown #glos lines=0
+type /join #more\n
+pause 300
+said CHAT shown #more lines=0
+said CHAT line #more <grace> Hello glos, welcome to #more
+type !drop\n
+pause 300
+said CHAT ended the network went away
+said CHAT again in 5
+shot lost "Chat"
+pause 6000
+said CHAT connecting again
+said CHAT on glos
+said CHAT rejoining #glos,#more
+pause 300
+said CHAT line #more <grace> Hello glos, welcome to #more
+shot back "Chat"
+type !mute\n
+pause 4000
+said CHAT pinged
+pause 4000
+said CHAT ended no answer from the server
+said CHAT again in 5
+pause 6000
+said CHAT connecting again
+said CHAT on glos
+said CHAT rejoining #glos,#more
+key alt+f4
+gone "Chat"
+expect CHAT end
+file C:\\GLOS\\CHAT\\LOGS\\DEMONET\\MORE.LOG 2026-11-21 12:02:41 --> glos has joined\r\n2026-11-21 12:03:09 <grace> Hello glos, welcome to #more\r\n2026-11-21 12:03:16 <glos> !drop\r\n2026-11-21 12:03:16 -- The connection has ended.\r\n2026-11-21 12:04:33 --> glos has joined\r\n2026-11-21 12:05:01 <grace> Hello glos, welcome to #more\r\n2026-11-21 12:05:08 <glos> !mute\r\n2026-11-21 12:05:08 -- The connection has ended.\r\n2026-11-21 12:06:25 --> glos has joined\r\n2026-11-21 12:06:53 <grace> Hello glos, welcome to #more\r\n

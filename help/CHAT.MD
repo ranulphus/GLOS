@@ -9,6 +9,19 @@ nick you want and a second one in case it is taken, an account and its password 
 channels to join at once. **Connect** is Ctrl+K. The password is kept in GLOS's store of secrets, not in the
 settings file.
 
+If the connection is lost, Chat connects again by itself: first after five seconds, then waiting twice as long
+each time, up to five minutes. It joins again the channels you were in. A server that has been silent for two
+minutes is asked whether it is still there; with no answer in a minute, Chat counts the connection as lost.
+**Disconnect** or /quit ends it for good.
+
+The settings also choose whether to **hide comings and goings** (people joining and leaving), to **leave
+colours out** of what people say, to **keep logs**, and whether Chat **tells you when you are named**: when a
+line names you, or someone speaks to you privately, while Chat is not in front, its button in the task bar
+flashes and a notification says who it was.
+
+Logs are plain text, a file for each channel and conversation, in GLOS's folder under CHAT\LOGS and then the
+network's name: #glos on Libera.Chat is `CHAT\LOGS\LIBERACH\GLOS.LOG`. Each line has its date and time.
+
 ## Talking
 
 The server, each channel and each private conversation are in the list at the left, with a count of what you

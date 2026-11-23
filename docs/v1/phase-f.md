@@ -893,6 +893,8 @@ The plan is `docs/v1/apps/chat.md`. CHAT.EXE, "Chat" in the Start menu: an IRC c
   search over them; notifications when the window is not in front and the task bar's flash; IRCv3's chat
   history, account-notify and message tags beyond the time; stripping colours by a setting; joins and parts
   hidden by a setting; reconnecting by itself; a ping of its own when the server is silent.
+  (Since built, 2026-11-23: the logs, the notifications and flash, colours and comings and goings by settings,
+  reconnecting and the ping: "Chat: the second part" below.)
 
 ## The Web Reader (2026-11-21): the first part
 
@@ -1716,3 +1718,35 @@ none unless they give it.
   Esc gives it back there (a picture).
 - With this, of the plan's "Not yet" for Fall Line only the other skiers and the groomer are left, and the
   window doubled and full screen; the 486's frame rate is still to be measured.
+
+## Chat: the second part (2026-11-23)
+
+- **Made again by itself:** a connection that ends without the user ending it (Disconnect or /quit) is made
+  again: 5 seconds on, then twice as long each time up to five minutes, the wait back to 5 once it is on. The
+  status line says why and how long (`The connection was lost (closed). Connecting again in 10 seconds...`; a
+  first connection that never got there says it could not be reached, and when it is tried again). The tabs
+  stay; the channels it was in are joined again with the settings' own (each once). A connection the user
+  ended and then made again by hand also joins again the channels it was in.
+- **A ping of its own:** a server silent for two minutes while on is pinged (`PING :glosN`); silent for a minute
+  more, the connection is closed and counted as lost (made again as above).
+- **Settings** (CHAT.CFG gains `again`, `logs`, `quiet`, `plain`, `tell`; the dialog's six checks in two
+  columns, 470 by 330): connect again by itself (on), hide comings and goings (joins, parts and quits of
+  others: the user's own stay; still logged), leave colours out (bold and the rest stay), keep logs (off), tell
+  me when I am named (on).
+- **Logs:** `CHAT\LOGS\NETWORK\NAME.LOG` in GLOS's folder (the network's and the tab's names cut to eight
+  letters and figures; the server's tab is SERVER.LOG), a line each as plain text with its local date and time
+  (`2026-11-21 12:03:09 <grace> Hello glos`), written CR LF in binary so the host's build writes the same bytes.
+  The connection's first lines, before the network says its name (005's NETWORK=), are not kept: one network,
+  one folder.
+- **Told:** a message or action that names the user in a channel, or any in a private conversation, while
+  Chat's window is not the active one: its task-bar button flashes (`GLOS_PROP_WIN_FLASH`, until it has the
+  focus) and a notification gives who and where with the line's words.
+- **The demo** (CHAT -demo): "!drop" said in a channel loses the connection as a network would; "!mute" makes the
+  server silent; `-silence S` (the suite's) pings after S seconds and gives up after as many more. A PONG
+  takes none of the made-up clock's time, so a log's times are the same however often it was pinged.
+- **Tests:** `chat-again` (host and the emulated desktops): /quit is not made again; the settings (a picture:
+  it fits); connected by hand; a second channel; "!drop": again in 5, on, `rejoining #glos,#more`; "!mute":
+  pinged, no answer, again in 5, on and rejoined; the second channel's log, byte for byte. `chat` unchanged.
+  The notification is not driven by a script (the window would have to lose the focus as a line comes).
+- **Not yet:** more than one network at a time; a search over the logs; IRCv3's chat history, account-notify
+  and message tags beyond the time.
