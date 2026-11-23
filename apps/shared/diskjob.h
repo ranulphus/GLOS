@@ -36,4 +36,19 @@ int diskjob_from_file(diskjob_io io, void *ctx, unsigned long total, unsigned ru
 /* Every sector read. 0: all of them could be; -1: stopped, or some could not (counted). */
 int diskjob_check(diskjob_io io, void *ctx, unsigned long total, unsigned run, diskjob_tick tick, void *arg, struct diskjob_report *r);
 
+/* (2026-11-23) A floppy's full format: one track formatted, and read back (the app's goes to GLOS_FS_FORMAT).
+   0, or the drive's error; *bad: the track's sectors that could not be read back (bit 0: sector 1). */
+typedef int (*diskjob_track)(void *ctx, unsigned cyl, unsigned head, unsigned long long *bad);
+/* Every track of a disk of `cyls` cylinders, `heads` sides and `spt` sectors a track formatted, cylinder by
+   cylinder; the bad sectors counted in r, by their numbers from the disk's start (the first sixteen listed).
+   0: done (bad sectors or not); -1: stopped, or a track could not be formatted (r->why: the drive's error, as
+   "error 03h"; the error in *err). */
+int diskjob_format(diskjob_track fmt, void *ctx, unsigned cyls, unsigned heads, unsigned spt, diskjob_tick tick, void *arg,
+                   struct diskjob_report *r, int *err);
+/* A FAT12 or FAT16 volume just made (its clusters all free): the clusters with the bad sectors in them marked
+   bad in each of its FATs (FF7h, FFF7h), as DOS's FORMAT marks them. 0; -1 one is where the file system itself
+   is (its first sector, FATs or root folder: the disk can't hold one); -2 the disk could not be read or written,
+   or the first sector is not a FAT12 or FAT16 volume's. */
+int diskjob_mark_bad(diskjob_io io, void *ctx, const unsigned long *bad, unsigned nbad);
+
 #endif

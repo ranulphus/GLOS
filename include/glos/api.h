@@ -56,7 +56,9 @@
 /* (2026-11-23) GLOS's own version, as `glos ver` says it: "preview" until v1 is released (docs/v1-route.md, G) */
 #define GLOS_RELEASE "1.0 preview"
 #define GLOS_MAJOR 2
-#define GLOS_MINOR 13           /* (2.13: CORE's POST to another app of the same program (glos_post's `to`);
+#define GLOS_MINOR 14           /* (2.14: SHELL's SHOW, a part of the shell shown (the launcher: the tour's "show
+                                   me"); FS's FORMAT, a floppy's track formatted (Disk Tools' full format);
+                                   2.13: CORE's POST to another app of the same program (glos_post's `to`);
                                    2.12: SYS's STAT GLOS_STAT_DEVICES, the devices and what serves each;
                                    2.11: DRAW's CACHE takes a page of a video card's own memory;
                                    2.10: NET's SERIAL, a COM port as a connection;
@@ -882,6 +884,7 @@ struct glos_ev_job {
 #define GLOS_FS_INFO    GLOS_FN(GLOS_AREA_FS, 1)        /* struct glos_fs_info: several files' details at once */
 #define GLOS_FS_DRIVES  GLOS_FN(GLOS_AREA_FS, 2)        /* struct glos_fs_drives: the drives */
 #define GLOS_FS_WATCH   GLOS_FN(GLOS_AREA_FS, 3)        /* struct glos_fs_watch: a folder or a file watched */
+#define GLOS_FS_FORMAT  GLOS_FN(GLOS_AREA_FS, 5)        /* (2.14) struct glos_fs_format: a floppy's track formatted */
 #define GLOS_FS_SECTORS GLOS_FN(GLOS_AREA_FS, 4)        /* struct glos_fs_sectors: a disk's sectors read or written */
 
 /* An entry: a file or a folder. They lie one after another in the buffer, each `size` bytes (a multiple of 4). */
@@ -970,11 +973,31 @@ struct glos_fs_sectors {
     unsigned count;             /* how many: 0 (only the disk's size is asked) to 32. They go to the BIOS in
                                    runs: all of them at one call where it has the LBA calls, else to the end of
                                    their track (a floppy's track is read in one turn of the disk). A floppy's
-                                   tracks are counted as its drive's largest disk has them */
+                                   tracks are counted as its drive's largest disk has them, or as `spt` says */
     unsigned buffer;            /* count sectors' bytes */
     unsigned bytes;             /* -> a sector's size (512) */
     unsigned total_lo, total_hi;        /* -> how many sectors the disk has */
     unsigned error;             /* -> the BIOS's error code when it refused (GLOS_E_REFUSED) */
+    /* (2.14) A floppy's disk laid out otherwise than its drive's largest (a 720 KB disk in a 1.44 MB drive): its
+       cylinders, sides and sectors a track, from its first sector's BPB or as it was formatted (the first
+       sector is where it is on any). 0 (spt): the drive's, as INT 13h 08h says it. Not for hard disks. */
+    unsigned cylinders, heads, spt;
+};
+
+/* (2.14) FORMAT: a track of a floppy formatted (its sectors made anew, of 512 bytes, numbered 1 up; what was there
+   gone), the BIOS's way: the media type set for the disk's cylinders and sectors a track first (INT 13h 18h),
+   then the track (05h). The disk's sectors are read and written by SECTORS after. GLOS_E_REFUSED (error: the
+   BIOS's code) when the drive says no: no disk, write-protected, a size it can't do. Drives 0 and 1 only. */
+struct glos_fs_format {
+    unsigned size;
+    unsigned disk;              /* 0 or 1 */
+    unsigned cylinder, head;    /* the track */
+    unsigned cylinders;         /* the disk's: 40 (a 360 KB disk) or 80 */
+    unsigned sectors;           /* a track's: 9 (360 KB, 720 KB), 15 (1.2 MB), 18 (1.44 MB), 36 (2.88 MB) */
+    unsigned verify;            /* 1: the track read back after (its sectors that can't be read: bad) */
+    unsigned bad_lo, bad_hi;    /* -> verify: the sectors that could not be read back (bit 0 sector 1, bit 32 of
+                                   bad_lo/bad_hi sector 33); 0 0 all read */
+    unsigned error;             /* -> the BIOS's error code when it refused */
 };
 
 /* FS's events. */
@@ -1735,6 +1758,13 @@ struct glos_ev_saver {
 #define GLOS_SHELL_ENTRY    GLOS_FN(GLOS_AREA_SHELL, 7) /* struct glos_entry: the Start menu's entries, their tasks */
 #define GLOS_SHELL_RECENT   GLOS_FN(GLOS_AREA_SHELL, 8) /* struct glos_recent: the documents opened lately */
 #define GLOS_SHELL_SCHEDULE GLOS_FN(GLOS_AREA_SHELL, 9) /* struct glos_schedule: commands GLOS runs at times */
+#define GLOS_SHELL_SHOW     GLOS_FN(GLOS_AREA_SHELL, 10) /* (2.14) struct glos_shell_show: a part of the shell shown */
+/* (2.14) SHOW: the shell (the desktop's app) told to show a part of itself as the user's key or press would:
+   GLOS_SHELL_LAUNCH, the launcher (the Start menu), as the Start button does. GLOS_E_NOT_FOUND: no shell. */
+struct glos_shell_show {
+    unsigned size;
+    unsigned what;              /* GLOS_SHELL_LAUNCH */
+};
 
 struct glos_shell_desktop {
     unsigned size;

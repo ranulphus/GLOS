@@ -863,6 +863,8 @@ struct gui_tour_step {
     const char *title, *text;
     int point;                          /* GLOS_POINT_, or 0 */
     struct gui_widget *at;              /* (point 0) a widget, or NULL */
+    void (*show)(int step);             /* (2026-11-23) or NULL: a "Show Me" button on the step, which calls it (the
+                                           real thing opened: Help's opens the Start menu); the tour goes on */
 };
 void gui_tour(struct gui_window *owner, const struct gui_tour_step *steps, int n, void (*done)(int step, int finished));
 void gui_tour_end(void);

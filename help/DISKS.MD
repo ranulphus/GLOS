@@ -22,8 +22,11 @@ not finished is removed.
 
 ## Floppies
 
-- **Disk, Format** makes an empty DOS disk of the floppy, with a label if you give one. The floppy must have
-  been formatted once before, at its drive's own size: a brand new or damaged disk wants DOS's FORMAT.
+- **Disk, Format** makes an empty DOS disk of the floppy, with a label if you give one, at any size its drive
+  makes (a 1.44 MB drive: 1.44 MB or 720 KB). A quick format only makes the file system anew; **Full format**
+  makes every track anew and reads it back, and keeps bad sectors out of use. A brand new disk, a damaged one
+  or one of another size needs a full format (Disk Tools chooses it then). A full format of a 1.44 MB floppy
+  takes two or three minutes.
 - **Disk, Look Inside** (Enter) shows the floppy's folders and files without DOS.
 
 ## Inside an image

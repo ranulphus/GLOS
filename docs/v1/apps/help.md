@@ -59,4 +59,4 @@ docs.
 ## As built (2026-11-22)
 
 The guide and Help's program (2026-11-21), and the tour and the tip of the day (2026-11-22):
-`docs/v1/phase-f.md`. Not yet: pictures in pages, a dialog's own Help button, the "show me" of a tour's step.
+`docs/v1/phase-f.md`. Not yet: pictures in pages, a dialog's own Help button. (A tour step's Show Me: built 2026-11-23.)

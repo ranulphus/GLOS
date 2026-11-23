@@ -320,6 +320,16 @@ static int point(struct trapframe *tf)
     return a2_wr(tf, &q, sizeof q, size) != 0 ? a2_fail(tf, GLOS_E_ARGUMENT) : a2_ok(tf, 0);
 }
 
+/* (2.14) SHOW: a part of the shell shown, as the user's press would */
+static int show(struct trapframe *tf)
+{
+    struct glos_shell_show q;
+    u32 size;
+    if (a2_rd(tf, &q, sizeof q, &size) != 0 || q.what != GLOS_SHELL_LAUNCH)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    return desk_launcher() ? a2_ok(tf, 0) : a2_fail(tf, GLOS_E_NOT_FOUND);
+}
+
 /* ---- OPEN and HELP */
 
 static int start(const char *command, u32 *job)        /* 0, or GLOS_E_ */
@@ -531,6 +541,8 @@ int api2_shell(struct app *a, struct trapframe *tf, u32 n)
         return notify(a, tf);
     case GLOS_SHELL_POINT:
         return point(tf);
+    case GLOS_SHELL_SHOW:
+        return show(tf);
     case GLOS_SHELL_HELP:
         return help(a, tf);
     case GLOS_SHELL_OPEN:

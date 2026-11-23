@@ -222,7 +222,8 @@ host-test-run: build/host/libpdfbr32.a
 	  apps/shared/fatimg.c kernel/disk/fatfmt.c kernel/disk/fdboot.S \
 	  && tests/host/fatimg_test.sh build/host/fatimg_test build/host/fatimg
 	@mkdir -p build/host/diskjob && $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/diskjob_test \
-	  tests/host/diskjob_test.c apps/shared/diskjob.c && build/host/diskjob_test build/host/diskjob
+	  tests/host/diskjob_test.c apps/shared/diskjob.c kernel/disk/fatfmt.c kernel/disk/fdboot.S \
+	  && build/host/diskjob_test build/host/diskjob
 	@$(HOST_CC) -m32 -O2 -g -Wall -Wextra -Werror -o build/host/ski_test tests/host/ski_test.c apps/shared/skimount.c \
 	  apps/shared/skirun.c apps/shared/skitable.c && build/host/ski_test
 	@$(HOST_CC) -m32 -O2 -g -Wall -Wextra -Werror -o build/host/hv_test tests/host/hv_test.c apps/shared/hvarena.c \

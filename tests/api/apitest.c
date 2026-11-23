@@ -129,7 +129,8 @@ static void before(void)
           && v.functions[GLOS_AREA_CORE][0] == 0x1FFFu && GLOS_HAS(&v, GLOS_CORE_RANDOM)
           && GLOS_HAS(&v, GLOS_WIN_CREATE) && GLOS_HAS(&v, GLOS_DRAW_SCREEN) && GLOS_HAS(&v, GLOS_WIN_EMBED)
           && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_WIN, 7))
-          && GLOS_HAS(&v, GLOS_SHELL_SCHEDULE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_SHELL, 10))
+          && GLOS_HAS(&v, GLOS_SHELL_SCHEDULE) && GLOS_HAS(&v, GLOS_SHELL_SHOW) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_SHELL, 11))
+          && GLOS_HAS(&v, GLOS_FS_SECTORS) && GLOS_HAS(&v, GLOS_FS_FORMAT) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_FS, 6))
           && GLOS_HAS(&v, GLOS_JOB_STATUS) && GLOS_HAS(&v, GLOS_JOB_SIZE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_JOB, 6))
           && GLOS_HAS(&v, GLOS_SYS_PROGRAMS) && GLOS_HAS(&v, GLOS_SYS_TERMINAL) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_SYS, 5))
           && GLOS_HAS(&v, GLOS_AUDIO_IN) && GLOS_HAS(&v, GLOS_AUDIO_MIDI_OUT) && GLOS_HAS(&v, GLOS_AUDIO_DEVICES)
@@ -1045,6 +1046,35 @@ static void files(unsigned many)
         check(c ? "fs-sectors-floppy" : "fs-sectors-run", r == 0 && x == 0 && !memcmp(run, one, sizeof run),
               "r=%d singles failed=%u same=%d bytes set=%u total=%u", r, x, !memcmp(run, one, sizeof run), n, q.total_lo);
         /* (the two were filled with other bytes: the same now, both were read) */
+    }
+    /* (2.14) FORMAT's and SHOW's refusals of what they can't be asked (no floppy is formatted here: the suite's
+       PC may have a disk in the drive that is not the suite's); and a floppy's sectors read by a layout given,
+       the drive's own: the same bytes as without (if a disk is in). */
+    {
+        struct glos_fs_format f;
+        unsigned bad = 0;
+        memset(&f, 0, sizeof f);
+        f.disk = 2, f.cylinders = 80, f.sectors = 18;
+        bad += glos_fs_format(&f) != GLOS_E_ARGUMENT;
+        f.disk = 0, f.cylinder = 80;
+        bad += glos_fs_format(&f) != GLOS_E_ARGUMENT;
+        f.cylinder = 0, f.sectors = 0;
+        bad += glos_fs_format(&f) != GLOS_E_ARGUMENT;
+        f.sectors = 37;
+        bad += glos_fs_format(&f) != GLOS_E_ARGUMENT;
+        bad += glos_shell_show(99) != GLOS_E_ARGUMENT;
+        memset(&q, 0, sizeof q);
+        q.disk = 0x80, q.count = 1, q.buffer = (unsigned)sec, q.spt = 18, q.heads = 2, q.cylinders = 80;
+        bad += glos_fs_sectors(&q) != GLOS_E_ARGUMENT;  /* (a layout is a floppy's only) */
+        memset(&q, 0, sizeof q);
+        q.disk = 0, q.lba_lo = 20, q.count = 1, q.buffer = (unsigned)one;
+        r = glos_fs_sectors(&q);
+        if (r == 0) {
+            q.spt = 18, q.heads = 2, q.cylinders = 80, q.buffer = (unsigned)(one + 512);
+            r = glos_fs_sectors(&q);
+            bad += r != 0 || memcmp(one, one + 512, 512) != 0 || q.total_lo != 2880;
+        }
+        check("fs-format", bad == 0, "bad=%u floppy=%d total=%u", bad, r, q.total_lo);
     }
     c = 0;
     memset(&q, 0, sizeof q);

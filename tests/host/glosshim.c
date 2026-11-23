@@ -224,19 +224,35 @@ int glos_keys(struct glos_keys *k)
     return 0;
 }
 
-/* (Disks: a floppy drive with a 1.44 MB disk of the shim's own memory in it, never formatted when the program
-   starts; and a first hard disk of 64 MB, GLOS's own and so never written, with its partition table and
-   nothing else.) */
+/* (Disks: a 1.44 MB floppy drive with a disk of the shim's own memory in it, never formatted when the program
+   starts (its tracks of 18 sectors, zeros); and a first hard disk of 64 MB, GLOS's own and so never written,
+   with its partition table and nothing else. The floppy's sectors are kept by where they are on the disk:
+   its 160 tracks, each with as many sectors as it was formatted with (2.14: a 720 KB disk's 9), read by the
+   layout the call says or the drive's own.) */
+#define FL_TRACKS 168                   /* (84 cylinders, two sides) */
+static unsigned char *floppy, fl_track_spt[FL_TRACKS];
+
+static int floppy_get(void)
+{
+    if (!floppy) {
+        if (!(floppy = calloc(FL_TRACKS * 36, 512)))
+            return 0;
+        memset(fl_track_spt, 18, 160);
+    }
+    return 1;
+}
+
 int glos_fs_sectors(struct glos_fs_sectors *s)
 {
-    static unsigned char *floppy;
     unsigned char *data = (unsigned char *)(size_t)s->buffer;
-    unsigned total = s->disk == 0 ? 2880 : 131072, i;
+    unsigned cyls = 80, heads = 2, spt = 18, total, i;
     s->size = sizeof *s;
     s->bytes = 512;
     s->error = 0;
     s->total_lo = s->total_hi = 0;
     if (s->count > 32 || s->write > 1 || s->disk > 0xFF || (s->disk >= 4 && s->disk < 0x80))
+        return last_error = GLOS_E_ARGUMENT;
+    if (s->spt && (s->disk >= 0x80 || s->spt > 63 || !s->heads || s->heads > 2 || !s->cylinders || s->cylinders > 255))
         return last_error = GLOS_E_ARGUMENT;
     if (s->write && s->count && s->disk == 0x80)
         return last_error = GLOS_E_REFUSED;
@@ -244,19 +260,29 @@ int glos_fs_sectors(struct glos_fs_sectors *s)
         s->error = s->disk < 0x80 ? 0x80 : 0x01;        /* (no such drive, as a BIOS says it) */
         return last_error = GLOS_E_REFUSED;
     }
+    if (s->spt)
+        cyls = s->cylinders, heads = s->heads, spt = s->spt;
+    total = s->disk == 0 ? cyls * heads * spt : 131072;
     s->total_lo = total;
     if (s->lba_hi || s->lba_lo >= total || s->count > total - s->lba_lo) {
         s->error = 4;
         return last_error = GLOS_E_REFUSED;
     }
-    if (!floppy && !(floppy = calloc(2880, 512)))
+    if (!floppy_get())
         return last_error = GLOS_E_MEMORY;
     for (i = 0; i < s->count; i++) {
         unsigned lba = s->lba_lo + i;
-        if (s->disk == 0 && s->write) {
-            memcpy(floppy + lba * 512, data + i * 512, 512);
-        } else if (s->disk == 0) {
-            memcpy(data + i * 512, floppy + lba * 512, 512);
+        if (s->disk == 0) {             /* (by its place: track, sector) */
+            unsigned t = lba / spt / heads * 2 + lba / spt % heads, sec = lba % spt;
+            unsigned char *at = floppy + ((size_t)t * 36 + sec) * 512;
+            if (t >= FL_TRACKS || sec >= fl_track_spt[t]) {
+                s->error = 4;           /* (no such sector on the disk: it was formatted otherwise) */
+                return last_error = GLOS_E_REFUSED;
+            }
+            if (s->write)
+                memcpy(at, data + i * 512, 512);
+            else
+                memcpy(data + i * 512, at, 512);
         } else {
             memset(data + i * 512, 0, 512);
             if (lba == 0) {                             /* one partition, FAT16, the one the PC starts from */
@@ -266,6 +292,41 @@ int glos_fs_sectors(struct glos_fs_sectors *s)
             }
         }
     }
+    return 0;
+}
+
+/* (2.14) A track formatted: the 1.44 MB drive makes 720 KB and 1.44 MB disks (9 and 18 sectors a track, 80
+   cylinders); its sectors filled as a BIOS fills them (F6h). The drive's a hard disk's: refused. */
+int glos_fs_format(struct glos_fs_format *f)
+{
+    unsigned t;
+    f->size = sizeof *f;
+    f->error = 0;
+    f->bad_lo = f->bad_hi = 0;
+    if (f->disk > 1 || f->head > 1 || !f->cylinders || f->cylinders > 84 || f->cylinder >= f->cylinders || !f->sectors
+        || f->sectors > 36 || f->verify > 1)
+        return last_error = GLOS_E_ARGUMENT;
+    if (f->disk != 0) {
+        f->error = 0x80;
+        return last_error = GLOS_E_REFUSED;
+    }
+    if (f->cylinders != 80 || (f->sectors != 9 && f->sectors != 18)) {
+        f->error = 0x0C;                /* (a size this drive doesn't make) */
+        return last_error = GLOS_E_REFUSED;
+    }
+    if (!floppy_get())
+        return last_error = GLOS_E_MEMORY;
+    t = f->cylinder * 2 + f->head;
+    fl_track_spt[t] = (unsigned char)f->sectors;
+    memset(floppy + (size_t)t * 36 * 512, 0xF6, 36 * 512);
+    return 0;
+}
+
+/* (2.14) Shown: there is no shell beside the host's player; said, so that a script sees it was asked. */
+__attribute__((weak)) int glos_shell_show(unsigned what)
+{
+    printf("SHIM shell show %u\n", what);
+    fflush(stdout);
     return 0;
 }
 

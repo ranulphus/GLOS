@@ -149,6 +149,7 @@ void desk_tray_remove(struct app *a, u32 id);           /* gone (id 0: every one
 u32 desk_notify_add(struct app *a, const struct note *n);       /* a notification of a's: its id, 0 if too many wait */
 void desk_notify_remove(struct app *a, u32 id);         /* taken away, shown or waiting (id 0: every one of a's) */
 int desk_point(int what, struct gfx_rect *r);           /* where a part of the task bar is (wm.h's WB_): 1, or 0 */
+int desk_launcher(void);                                /* (2.14) the shell's launcher shown: 1, or 0 (no shell) */
 struct app *desk_shell_app(void);       /* the desktop's shell, or NULL */
 int desk_shell_set(struct app *a, int on);      /* a is the shell (0), or no longer; -1: another app is */
 /* kernel/app/api2shell.c: what the desktop tells apps (the desktop's thread). what: 1 a press, 2 the second of two,

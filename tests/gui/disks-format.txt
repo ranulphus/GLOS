@@ -1,0 +1,66 @@
+#host-only (the host's floppy drive is made up: a 1.44 MB drive, its disk never formatted; Loop A's drive takes
+# only its own size of disk image)
+# Disk Tools' full format (apps/disks; phase F, 2026-11-23, API 2.14's GLOS_FS_FORMAT): the floppy formatted in
+# full at 720 KB (each track made anew with 9 sectors, then the volume on it), looked at by its own layout (its
+# first sector's) and inside; the 720 KB image of a folder written to it (the size it is now); then a full format
+# at 1.44 MB again, its size by default the disk's own.
+run DISKS.EXE
+wait "Disk Tools"
+said DISKS disks 2
+key alt+d
+key f
+wait "Format"
+key alt+s
+key down
+key alt+l
+type small
+key alt+u
+shot format "Format"
+key enter
+said DISKS formatted disk=00 fat=12 label=SMALL full sectors=1440 bad=0
+wait "The Disk Formatted"
+shot formatted "The Disk Formatted"
+key enter
+gone "The Disk Formatted"
+said DISKS disk 00 sectors=1440 looked=1 fat=12 label=SMALL parts=-1
+key ctrl+n
+wait "New Image from a Folder"
+key ctrl+a
+type C:\\WEB
+key alt+s
+key up
+key up
+key enter
+wait "The New Image: Save As"
+key alt+n
+type C:\\OUT\\SMALL.IMG\n
+said DISKS made SMALL.IMG files=7 bytes=4911 left=0 sectors=1440
+wait "The New Image"
+key enter
+gone "The New Image"
+key ctrl+w
+wait "The Image to Write"
+key alt+n
+type C:\\OUT\\SMALL.IMG\n
+wait "Write an Image"
+key alt+y
+said DISKS wrote disk=00 sectors=1440 bad=0 verified=1
+wait "The Image Written"
+key enter
+gone "The Image Written"
+key alt+d
+key f
+wait "Format"
+shot again "Format"
+key alt+s
+key up
+key alt+u
+key enter
+said DISKS formatted disk=00 fat=12 label=- full sectors=2880 bad=0
+wait "The Disk Formatted"
+key enter
+gone "The Disk Formatted"
+said DISKS disk 00 sectors=2880 looked=1 fat=12 label=- parts=-1
+key alt+f4
+gone "Disk Tools"
+expect DISKS end

@@ -153,6 +153,7 @@ int glos_fs_drives(unsigned drive, struct glos_fs_drive *out, unsigned room, uns
 glos_handle glos_fs_watch(const char *path);            /* GLOS_EV_FS when the folder or the file changes; 0 if
                                                            refused */
 int glos_fs_sectors(struct glos_fs_sectors *s);         /* (size set here) */
+int glos_fs_format(struct glos_fs_format *f);           /* (2.14) a floppy's track formatted (size set here) */
 
 /* SHELL */
 int glos_shell(int on);                                 /* the app is the shell (GLOS_EV_SHELL), or no longer */
@@ -164,6 +165,7 @@ glos_handle glos_notify(const char *title, const char *text, const char *action1
                         const unsigned *icon, unsigned seconds);
 int glos_point(unsigned what, struct glos_point *out);  /* where a part of the shell is (GLOS_POINT_) */
 int glos_help(const char *page);                        /* Help at a page (0: the app's own) */
+int glos_shell_show(unsigned what);                     /* (2.14) a part of the shell shown (GLOS_SHELL_LAUNCH) */
 /* A file or a link opened: with (a program) and verb (a verb's label of that program's) may be 0. The job's
    number, or -1 (glos_error()). */
 int glos_open(const char *path, const char *with, const char *verb);

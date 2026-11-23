@@ -449,6 +449,20 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
   before. It comes as GLOS_EV_POST. Help's first use: a second HELP.EXE (F1 in another program) hands its
   page to the Help already open, and ends (`glos_post_to`). An older GLOS reads the struct without `to`, and
   posts to the caller. Tests: APITEST's `post-to-self`, `post-to-none`; the Help F1 script on Loop A.
+- **2.14 (2026-11-23): a floppy's track formatted; a part of the shell shown.** FS's FORMAT (5) formats one
+  track of a floppy (drives 0 and 1, never the one GLOS started from) the BIOS's way: the media type for the
+  disk's cylinders and sectors a track (INT 13h 18h, its table put at INT 1Eh for the format and DOS's put
+  back after; 17h's types on a BIOS without 18h), the track's address fields (05h), and with `verify` the
+  track read back, its sectors that can't be read said in `bad_lo`/`bad_hi`. A floppy's errors come and go:
+  each step is tried three times, the drive reset between. SECTORS takes a floppy's layout (`cylinders`,
+  `heads`, `spt`): a disk smaller than its drive's largest (720 KB in a 1.44 MB drive) is read and written by
+  its own tracks; the drive's own when 0 (INT 13h 08h tells the drive, not the disk). SHELL's SHOW (10) tells
+  the shell to show a part of itself as a press would: GLOS_SHELL_LAUNCH, the Start menu (GLOS_E_NOT_FOUND:
+  no shell). Disk Tools' full format and the tour's Show Me are their first uses. An older GLOS answers
+  GLOS_E_FUNCTION for both, and reads SECTORS' struct without the layout (the drive's). The disk cache forgets
+  a drive's blocks on 05h already (native-dos's cache drops what a format overwrites). Tests: APITEST's
+  `fs-format` (refusals; a floppy read by a layout given); the host's `diskjob_test` (a full format, bad
+  clusters marked) and Disk Tools' `disks-format`; Help's `help-showme`.
 - **2.11 (2026-11-21): a write-combining page of a video card's own**, asked for by DOS-GL's Rage 128 layer,
   whose command words were each an uncached write. DRAW's CACHE, until now for the program's conventional
   memory alone, also takes memory of a video card's that the program has mapped (DPMI 0800h): 4 to 64 KB, a

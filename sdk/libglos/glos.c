@@ -617,6 +617,12 @@ int glos_fs_sectors(struct glos_fs_sectors *s)
     return raw(GLOS_FS_SECTORS, s, 0);
 }
 
+int glos_fs_format(struct glos_fs_format *f)
+{
+    f->size = sizeof *f;
+    return raw(GLOS_FS_FORMAT, f, 0);
+}
+
 /* ---- settings, the screen's modes, idle time */
 
 int glos_setting_get(const char *section, const char *key, char *value, unsigned room, int *set)
@@ -790,6 +796,12 @@ int glos_point(unsigned what, struct glos_point *out)
     out->size = sizeof *out;
     out->what = what;
     return raw(GLOS_SHELL_POINT, out, 0);
+}
+
+int glos_shell_show(unsigned what)
+{
+    struct glos_shell_show q = { sizeof q, what };
+    return raw(GLOS_SHELL_SHOW, &q, 0);
 }
 
 int glos_help(const char *page)

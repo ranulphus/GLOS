@@ -6,7 +6,8 @@
  *   - an image written to a disk, and read back to see that it is there (a hard disk: asked twice; the disk
  *     GLOS runs from: never, by the kernel's own rule);
  *   - a disk checked: every sector read;
- *   - a floppy formatted (its file system made new: the disk as its drive formats it);
+ *   - a floppy formatted: quickly (its file system made new) or in full (2026-11-23, API 2.14's GLOS_FS_FORMAT:
+ *     every track made anew and read back, bad sectors kept out of use), at any size its drive makes;
  *   - a hard disk's partitions listed;
  *   - an image (or a floppy) looked inside: its folders and files, which can be copied out;
  *   - a new image made of a folder's files;
@@ -19,9 +20,10 @@
  * The volume code is apps/shared/fatimg.c (FAT12 and FAT16), the sector jobs apps/shared/diskjob.c, new volumes
  * the kernel's own kernel/disk/fatfmt.c: all three are tested on the host against mtools and fsck.fat.
  *
- * Not yet (docs/v1/phase-f.md): a full format and floppies of another size than their drive's (both need the
- * BIOS's track format, which GLOS_FS_SECTORS has not got), images in parts for disks over 2 GB, backups as
- * ZIPs. (Images are opened as folders in Files too: apps/shared/arc.c's IMG kind.)
+ * Floppies of another size than their drive's largest (a 720 KB disk in a 1.44 MB drive) are read and written by
+ * their own layout (2.14: GLOS_FS_SECTORS' cylinders, heads and spt, from the disk's first sector).
+ *
+ * Not yet (docs/v1/phase-f.md): images in parts for disks over 2 GB, backups as ZIPs. (Images are opened as folders in Files too: apps/shared/arc.c's IMG kind.)
  *
  * The suite's lines (tests/gui/disks.txt, disks-floppy.txt): "DISKS ..." on the output. */
 #include <stdarg.h>
@@ -82,6 +84,23 @@ static void say(const char *fmt, ...)
 
 /* ---- sectors: a disk's by GLOS_FS_SECTORS, an image file's by the C library */
 
+/* (2.14) A floppy drive's disk as it is laid out, when that is not as the drive's largest disk is (a 720 KB disk
+   in a 1.44 MB drive): its cylinders, sides and sectors a track, from its first sector (look) or as it was just
+   formatted. fl_spt 0: the drive's own. */
+static unsigned fl_cyls[2], fl_heads[2], fl_spt[2];
+
+static void fl_layout(unsigned bios, unsigned long sectors, unsigned heads, unsigned spt)
+{
+    if (bios > 1)
+        return;
+    fl_spt[bios] = 0;
+    if (heads >= 1 && heads <= 2 && spt >= 8 && spt <= 36 && sectors % (heads * spt) == 0
+        && sectors / (heads * spt) >= 39 && sectors / (heads * spt) <= 84)
+        fl_cyls[bios] = (unsigned)(sectors / (heads * spt)), fl_heads[bios] = heads, fl_spt[bios] = spt;
+}
+
+static int sizes_of(unsigned long drive, unsigned long out[3]);
+
 static int dev_io(void *ctx, unsigned long lba, unsigned char *data, unsigned count, int write)
 {
     unsigned done = 0;
@@ -94,6 +113,8 @@ static int dev_io(void *ctx, unsigned long lba, unsigned char *data, unsigned co
         q.lba_lo = (unsigned)(lba + done);
         q.count = n;
         q.buffer = (unsigned)(size_t)(data + done * 512);
+        if (q.disk < 2 && fl_spt[q.disk])
+            q.cylinders = fl_cyls[q.disk], q.heads = fl_heads[q.disk], q.spt = fl_spt[q.disk];
         if (glos_fs_sectors(&q) != 0)
             return q.error ? (int)q.error : E_OWN;
         done += n;
@@ -212,6 +233,8 @@ static void look(struct disk *d)
     d->label[0] = 0;
     d->fat = 0;
     d->parts = -1;
+    if (is_floppy(d))                   /* (the first sector is where it is on any disk: read as the drive's own) */
+        fl_layout(d->bios, 0, 0, 0);
     if (dev_io(&d->bios, 0, sec, 1, 0) != 0)
         return;
     if (!is_floppy(d)) {
@@ -224,9 +247,12 @@ static void look(struct disk *d)
         struct fatimg *v;
         char why[96];
         d->sectors = bpb_sectors(sec);
-        if (d->sectors != d->total) {   /* (its tracks are not laid out as the kernel's call counts them) */
-            d->looked = L_OTHER;
-            return;
+        if (d->sectors != d->total) {   /* (2.14: a disk of another size, read by its own layout) */
+            fl_layout(d->bios, d->sectors, (unsigned)(sec[26] | sec[27] << 8), (unsigned)(sec[24] | sec[25] << 8));
+            if (!fl_spt[d->bios] || d->sectors > d->total) {
+                d->looked = L_OTHER;    /* (a layout no floppy has) */
+                return;
+            }
         }
         if ((v = fatimg_open(dev_io, &d->bios, why, sizeof why)) != NULL) {
             struct fatimg_info in;
@@ -280,7 +306,7 @@ static void disk_about(const struct disk *d, char *out, size_t room)
         case L_NONE: snprintf(out, room, "%s", GUI_T("Not a DOS disk")); break;
         case L_OTHER:
             size_text(d->sectors, size, sizeof size);
-            snprintf(out, room, GUI_T("A %s disk: not of this drive's own size"), size);
+            snprintf(out, room, GUI_T("A %s disk laid out as no floppy is"), size);
             break;
         default:
             size_text(d->free_kb * 2, size, sizeof size);
@@ -389,6 +415,9 @@ struct job {
     struct bk_job bk;
     int keep, thin_rc;                  /* (a backup) the newest sets kept, 0 all; how thinning the rest went */
     unsigned thinned, removed, held;
+    /* (2026-11-23) A floppy's full format: every track made anew (GLOS_FS_FORMAT), the disk's layout: */
+    int full, ferr;
+    unsigned cyls, heads, spt;
 };
 static struct job *running;             /* one job at a time */
 
@@ -603,6 +632,63 @@ static int tick(void *arg, unsigned long done, unsigned long total)
 static unsigned spt_of(unsigned long sectors)   /* a floppy's sectors a track, by its size; 0: not a floppy's size */
 {
     return sectors == 720 || sectors == 1440 ? 9 : sectors == 2400 ? 15 : sectors == 2880 ? 18 : sectors == 5760 ? 36 : 0;
+}
+
+static int make_volume(struct job *j, fat_write_fn write, void *ctx);
+
+/* (2026-11-23) A track of a full format: formatted and read back by the kernel's call. */
+static int track_format(void *ctx, unsigned cyl, unsigned head, unsigned long long *bad)
+{
+    struct job *j = ctx;
+    struct glos_fs_format q;
+    memset(&q, 0, sizeof q);
+    q.disk = j->bios;
+    q.cylinder = cyl, q.head = head;
+    q.cylinders = j->cyls, q.sectors = j->spt;
+    q.verify = 1;
+    if (glos_fs_format(&q) != 0)
+        return q.error ? (int)q.error : E_OWN;
+    *bad = (unsigned long long)q.bad_hi << 32 | q.bad_lo;
+    return 0;
+}
+
+static const char *floppy_error(int e)  /* what INT 13h's error means, for a floppy being formatted */
+{
+    switch (e) {
+    case 0x03: return GUI_T("The disk is write-protected (its tab is open).");
+    case 0x0C: return GUI_T("The drive can't make a disk of that size.");
+    case 0x80: return GUI_T("There is no disk in the drive (or it doesn't turn).");
+    case 0x06: return GUI_T("The disk was changed: try again.");
+    }
+    return GUI_T("The drive could not format it.");
+}
+
+static int full_format(struct job *j)
+{
+    unsigned n;
+    if (diskjob_format(track_format, j, j->cyls, j->heads, j->spt, tick, j, &j->r, &j->ferr) != 0) {
+        if (!j->r.stopped)
+            snprintf(j->why, sizeof j->why, "%s", j->ferr == E_OWN ? GUI_T("GLOS itself runs from that disk.") : floppy_error(j->ferr));
+        else
+            snprintf(j->why, sizeof j->why, "%s", GUI_T("It was stopped: the disk is not usable as it is."));
+        return -1;
+    }
+    fl_layout(j->bios, j->sectors, j->heads, j->spt);   /* (the disk's sectors read and written by its new layout) */
+    if (make_volume(j, dev_format, &j->bios) != 0)
+        return -1;
+    n = j->r.bad < 16 ? (unsigned)j->r.bad : 16;
+    if (j->r.bad > 16) {
+        snprintf(j->why, sizeof j->why, GUI_T("It has %lu bad sectors: too many to trust it."), j->r.bad);
+        return -1;
+    }
+    switch (diskjob_mark_bad(dev_io, &j->bios, j->r.bad_list, n)) {
+    case 0: return 0;
+    case -1:
+        snprintf(j->why, sizeof j->why, "%s", GUI_T("It has bad sectors where its file system must be: it can't hold one."));
+        return -1;
+    }
+    snprintf(j->why, sizeof j->why, "%s", GUI_T("The disk could not be written."));
+    return -1;
 }
 
 static int make_volume(struct job *j, fat_write_fn write, void *ctx)
@@ -901,7 +987,7 @@ static void work(struct gui_task *t, void *arg)
     case J_READ: j->rc = diskjob_to_file(dev_io, &j->bios, j->sectors, j->run, j->f, tick, j, &j->r); break;
     case J_WRITE: j->rc = diskjob_from_file(dev_io, &j->bios, j->sectors, j->run, j->f, 1, tick, j, &j->r); break;
     case J_CHECK: j->rc = diskjob_check(dev_io, &j->bios, j->sectors, j->run, tick, j, &j->r); break;
-    case J_FORMAT: j->rc = make_volume(j, dev_format, &j->bios); break;
+    case J_FORMAT: j->rc = j->full ? full_format(j) : make_volume(j, dev_format, &j->bios); break;
     case J_NEW: j->rc = new_image(j); break;
     case J_EXTRACT:
         for (i = 0, j->rc = 0; i < j->nitems && j->rc == 0; i++)
@@ -1005,11 +1091,25 @@ static void job_done(struct gui_window *owner, void *arg, int cancelled)
         say("checked disk=%02X sectors=%lu bad=%lu", j->bios, j->sectors, j->r.bad);
         gui_message(win, GUI_T("The Disk Checked"), text, GUI_MB_OK);
     } else if (j->kind == J_FORMAT) {
-        if (j->rc == 0)
+        if (j->rc == 0 && j->full)
+            say("formatted disk=%02X fat=%d label=%s full sectors=%lu bad=%lu", j->bios, j->fat, j->label[0] ? j->label : "-",
+                j->sectors, j->r.bad);
+        else if (j->rc == 0)
             say("formatted disk=%02X fat=%d label=%s", j->bios, j->fat, j->label[0] ? j->label : "-");
         else
             say("failed format %s", j->why);
-        snprintf(text, sizeof text, j->rc == 0 ? GUI_T("%s is formatted: an empty disk.") : GUI_T("%s was not formatted. %s"), name, j->why);
+        if (j->rc == 0 && j->r.bad) {
+            char size[24];
+            size_text(j->sectors, size, sizeof size);
+            snprintf(text, sizeof text, GUI_T("%s is formatted: an empty %s disk. %lu of its sectors are bad: they are kept out "
+                                              "of use."), name, size, j->r.bad);
+        } else if (j->rc == 0) {
+            char size[24];
+            size_text(j->sectors, size, sizeof size);
+            snprintf(text, sizeof text, GUI_T("%s is formatted: an empty %s disk."), name, size);
+        } else {
+            snprintf(text, sizeof text, GUI_T("%s was not formatted. %s"), name, j->why);
+        }
         gui_message(win, GUI_T("The Disk Formatted"), text, GUI_MB_OK);
     } else if (j->kind == J_BACKUP || j->kind == J_RESTORE || j->kind == J_SETS) {
         bk_say(j);
@@ -1110,15 +1210,15 @@ static int floppy_ready(struct disk *d, int row)
     if (d->looked == L_UNREAD) {
         say("no disk %02X", d->bios);
         gui_message(win, GUI_T("The Disk in the Drive"), GUI_T("The disk can't be read: is there one in the drive?\n\nA disk never formatted "
-                                                    "needs a full format first, which Disk Tools does not do yet (DOS's FORMAT does)."),
+                                                    "needs a full format first (Disk, Format, Full format)."),
                     GUI_MB_OK);
         return 0;
     }
     if (d->looked == L_OTHER) {
         size_text(d->sectors, size, sizeof size);
         size_text(d->total, drive, sizeof drive);
-        snprintf(text, sizeof text, GUI_T("This is a %s disk in a %s drive. Disk Tools works on disks of their drive's own size "
-                                          "only, so far."), size, drive);
+        snprintf(text, sizeof text, GUI_T("This %s disk is laid out in a way no floppy of a %s drive is: Disk Tools can't "
+                                          "read it (a full format makes it anew)."), size, drive);
         say("other size %02X sectors=%lu", d->bios, d->sectors);
         gui_message(win, GUI_T("The Disk in the Drive"), text, GUI_MB_OK);
         return 0;
@@ -1155,8 +1255,10 @@ static struct job *job_new(int kind, struct disk *d)
         j->d = d;
         j->bios = d ? d->bios : 0;
         j->sectors = d ? d->sectors : 0;
-        if (d && is_floppy(d))          /* a track at a call (2.88 MB: half of one, a call's most being 32) */
-            j->run = spt_of(d->total) > 32 ? spt_of(d->total) / 2 : spt_of(d->total);
+        if (d && is_floppy(d)) {        /* a track at a call (2.88 MB: half of one, a call's most being 32) */
+            unsigned spt = fl_spt[d->bios] ? fl_spt[d->bios] : spt_of(d->total);
+            j->run = spt > 32 ? spt / 2 : spt;
+        }
     }
     return j;
 }
@@ -1191,8 +1293,13 @@ static void from_image(struct disk *d, int row)
     struct job *j;
     FILE *f;
     long bytes;
+    unsigned long holds;
+    unsigned long sizes[3];
+    int nsizes, k, makes = 0;
     if (!floppy_ready(d, row) || !choose_image(win, GUI_T("The Image to Write"), 0, path, sizeof path))
         return;
+    /* (a floppy: the size of the disk in the drive, which may be smaller than its drive's largest) */
+    holds = is_floppy(d) && fl_spt[d->bios] ? d->sectors : d->total;
     disk_name(d, name, sizeof name);
     if (!(f = gui_fopen(path, "rb"))) {
         gui_message(win, GUI_T("No File"), GUI_T("The image can't be read."), GUI_MB_OK);
@@ -1200,16 +1307,23 @@ static void from_image(struct disk *d, int row)
     }
     fseek(f, 0, SEEK_END);
     bytes = ftell(f);
-    if (bytes <= 0 || bytes % 512 || (unsigned long)bytes / 512 != d->total) {
+    if (bytes <= 0 || bytes % 512 || (unsigned long)bytes / 512 != holds) {
         fclose(f);
         size_text(bytes > 0 ? (unsigned long)bytes / 512 : 0, size, sizeof size);
-        size_text(d->total, other, sizeof other);
-        snprintf(text, sizeof text, GUI_T("The image is of %s and %s holds %s: they must be the same."), size, name, other);
+        size_text(holds, other, sizeof other);
+        nsizes = is_floppy(d) ? sizes_of(d->total, sizes) : 0;
+        for (k = 0; k < nsizes; k++)
+            makes |= bytes > 0 && sizes[k] == (unsigned long)bytes / 512;
+        if (makes)                      /* (the drive makes disks of the image's size: say how) */
+            snprintf(text, sizeof text, GUI_T("The image is of %s and the disk in %s holds %s: they must be the same. A full "
+                                              "format at %s makes the disk the image's size."), size, name, other, size);
+        else
+            snprintf(text, sizeof text, GUI_T("The image is of %s and %s holds %s: they must be the same."), size, name, other);
         say("refused image bytes=%ld disk=%02X", bytes, d->bios);
         gui_message(win, GUI_T("The Image's Size"), text, GUI_MB_OK);
         return;
     }
-    size_text(d->total, size, sizeof size);
+    size_text(holds, size, sizeof size);
     snprintf(text, sizeof text, GUI_T("Everything on %s (%s) will be replaced by the image %s.\n\nGo on?"), name, size, path);
     if (gui_message(win, GUI_T("Write an Image"), text, GUI_MB_YESNO) != GUI_YES) {
         fclose(f);
@@ -1228,54 +1342,98 @@ static void from_image(struct disk *d, int row)
         fclose(f);
         return;
     }
-    j->sectors = d->total;
+    j->sectors = holds;
     j->f = f;
     snprintf(j->path, sizeof j->path, "%s", path);
     job_start(j, GUI_T("Writing the Image"));
 }
 
-static struct gui_widget *f_label;
+static struct gui_widget *f_label, *f_size, *f_full;
 static char f_got[12];
+static int f_size_got, f_full_got;
 
 static void format_done(struct gui_widget *b, int what)
 {
     (void)what;                         /* (the button's own number is b->id) */
-    if (b->id == 1)                        /* (read while the dialog is there) */
+    if (b->id == 1) {                   /* (read while the dialog is there) */
         snprintf(f_got, sizeof f_got, "%s", gui_get_text(f_label));
+        f_size_got = gui_value(f_size);
+        f_full_got = gui_checked(f_full);
+    }
     gui_end_modal(b->win, b->id == 1 ? GUI_OK : GUI_CANCEL_R);
+}
+
+/* The sizes of disk a floppy drive formats (by its largest), its own first. */
+static int sizes_of(unsigned long drive, unsigned long out[3])
+{
+    int n = 0;
+    if (drive == 5760)
+        out[n++] = 5760;
+    if (drive == 5760 || drive == 2880)
+        out[n++] = 2880;
+    if (drive == 2400)
+        out[n++] = 2400, out[n++] = 720;
+    if (drive == 5760 || drive == 2880 || drive == 1440)
+        out[n++] = 1440;
+    if (drive == 720)
+        out[n++] = 720;
+    if (!n)
+        out[n++] = drive;
+    return n;
 }
 
 static void format(struct disk *d, int row)
 {
     struct gui_window *dlg;
-    struct gui_widget *box, *line;
+    struct gui_widget *box, *line, *form;
     struct job *j;
     char name[40], text[200], size[24];
+    unsigned long sizes[3];
+    int nsizes, k, now = 0, readable, full;
     unsigned i;
-    look(d);                            /* (a disk that can't be read is not one a quick format helps) */
+    look(d);                            /* (a disk that can't be read needs a full format: its tracks made anew) */
     fill(row);
-    if (d->looked == L_UNREAD || d->looked == L_OTHER) {
-        floppy_ready(d, row);
-        return;
-    }
+    readable = d->looked == L_VOLUME || d->looked == L_NONE;
+    nsizes = sizes_of(d->total, sizes);
+    for (k = 0; k < nsizes; k++)        /* (the disk's own size first chosen, if the drive makes it) */
+        if (readable && sizes[k] == d->sectors)
+            now = k;
     disk_name(d, name, sizeof name);
-    size_text(d->total, size, sizeof size);
-    dlg = gui_window(GUI_T("Format"), 380, 0, GUI_W_DIALOG);
+    dlg = gui_window(GUI_T("Format"), 400, 0, GUI_W_DIALOG);
     dlg->owner = win;
     box = gui_vbox(dlg->root, 6, 8);
-    snprintf(text, sizeof text, GUI_T("%s: an empty %s disk is made of the one in the drive."), name, size);
+    snprintf(text, sizeof text, GUI_T("An empty disk is made of the one in the drive (%s)."), name);
     gui_label(box, text);
     gui_label(box, GUI_T("Everything on it will be lost."));
-    f_label = gui_field(gui_row(gui_form(box), GUI_T("&Label:"), NULL), 12);
+    form = gui_form(box);
+    f_size = gui_choice(gui_row(form, GUI_T("&Size:"), NULL), 12);
+    for (k = 0; k < nsizes; k++) {
+        size_text(sizes[k], size, sizeof size);
+        gui_choice_add(f_size, size);
+    }
+    gui_set_value(f_size, now);
+    f_label = gui_field(gui_row(form, GUI_T("&Label:"), NULL), 12);
     gui_set_text(f_label, d->label);
+    f_full = gui_check(box, GUI_T("F&ull format: every track made anew and checked"), !readable);
+    gui_label(box, GUI_T("(Slower. A disk never formatted, or made another size, needs it.)"));
     line = gui_hbox(box, 6, 0);
     gui_space(line, 0, 0);
     gui_button(line, GUI_T("&Format"), format_done, 1)->flags |= GUI_DEFAULT;
     gui_button(line, GUI_T("Cancel"), format_done, 2)->flags |= GUI_CANCEL;
     gui_focus(f_label);
-    if (gui_modal(dlg) != GUI_OK || !can_write(d) || !(j = job_new(J_FORMAT, d)))
+    if (gui_modal(dlg) != GUI_OK)
         return;
-    j->sectors = d->total;
+    k = f_size_got >= 0 && f_size_got < nsizes ? f_size_got : 0;
+    /* A quick format keeps the disk's tracks: only a disk that reads, made of the size it is already. */
+    full = f_full_got || !readable || sizes[k] != d->sectors;
+    if ((!full && !can_write(d)) || !(j = job_new(J_FORMAT, d)))
+        return;
+    j->sectors = sizes[k];
+    j->full = full;
+    j->heads = 2;
+    j->spt = spt_of(sizes[k]);
+    j->cyls = (unsigned)(sizes[k] / (2u * j->spt));
+    j->run = j->spt > 32 ? j->spt / 2 : j->spt;
     for (i = 0; f_got[i] && i < 11; i++)        /* DOS's label: capitals, and none of the signs a name can't have */
         j->label[i] = (char)(f_got[i] >= 'a' && f_got[i] <= 'z' ? f_got[i] - 32 : strchr("\"*+,./:;<=>?[\\]|", f_got[i]) ? '_' : f_got[i]);
     job_start(j, GUI_T("Formatting"));

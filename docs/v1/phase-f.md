@@ -1013,9 +1013,20 @@ BIOS has them, images of them, and what is inside an image.
     script's `said` waits two minutes; `within N` before it (new) makes the next one wait N seconds.
   - APITEST: 32 sectors in one call are the same bytes as 32 calls, on the hard disk and the floppy; a run
     written to the second disk and read back in two.
-- **Not yet** (the plan's rest): a full format and floppies of another size than their drive's (both want
-  the BIOS's track format and the disk's own geometry in GLOS_FS_SECTORS: an API step); the system put on a
-  formatted disk; images in parts for disks over 2 GB; logical drives in an extended partition; an image
+- **Full format and other sizes** (2026-11-23, API 2.14): Format's dialog chooses the size (those the drive
+  makes: a 1.44 MB drive 1.44 MB and 720 KB; 2.88 MB drives all three; 1.2 MB drives 1.2 MB and 360 KB) and
+  Full format (FS FORMAT each track, read back; then the volume; the bad sectors' clusters marked FF7h in
+  both FATs, `diskjob_mark_bad`; more than sixteen bad, or one in the system area, refuses the disk). Full is
+  chosen anyway for a disk that can't be read, or for another size than the disk's. A floppy smaller than
+  its drive's largest is read by its own layout (SECTORS' cylinders, heads, spt from its BPB): looked at,
+  inside, its image read and written (an image the disk's size; another size the drive makes: "a full format
+  at 720 KB makes the disk the image's size"). The host's floppy is now kept by track (each track's sectors
+  as formatted; a sector past them "not found"), its drive a 1.44 MB one. Tests: `diskjob_test` (160 tracks,
+  three bad sectors marked, a refused one, a stopped format, a failing track's error); `disks-format` (host:
+  720 KB full, looked at, a 720 KB image written and verified, 1.44 MB again); APITEST `fs-format`. **Owed:**
+  a real floppy drive (bench) for a full format; 86Box's BIOS for 18h/05h on Loop A (the API suite doesn't
+  format the suite's floppy).
+- **Not yet** (the plan's rest): the system put on a formatted disk; images in parts for disks over 2 GB; logical drives in an extended partition; an image
   opened as a folder in Files; long names written; backups over SFTP and their schedule.
 
 ## Help (2026-11-21): the first part
@@ -1294,7 +1305,12 @@ The rest of Help's plan's first item (`docs/v1/apps/help.md`): the tour on GLOS'
   menu, closed at the third) and `help-tip` (the first two tips, the box turned on and written), on the host
   and the emulated desktops; the desk suite's `tour` case (`DESK_ONLY=tour`): a GLOS.CFG as the installer
   writes it, the desktop on, Help's tour started and the setting turned off; on again, the tip instead.
-- **Not yet:** a "show me" that opens the part (the Start menu itself); pictures in the tour's steps.
+- **Show Me** (2026-11-23, API 2.14's SHELL SHOW): the toolkit's tour step takes a `show` call, which gives
+  its bubble a Show Me button (its own row; the tour stays at its step, Enter goes on). Help's: the Start
+  button's step opens the Start menu (SHOW), the notification area's starts the Mixer, the clock's the time
+  settings (`CONTROL.EXE time`). `help-showme` (host-only: the menu opened over the desktop would take the
+  script's keys on Loop A).
+- **Not yet:** pictures in the tour's steps.
 
 ## The two games: pads, and the mouse on the slope (2026-11-22)
 

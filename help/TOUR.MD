@@ -7,7 +7,8 @@ points at a part of the screen says which.
 ## Welcome to GLOS
 
 GLOS is a desktop for DOS: windows, programs of its own, and your DOS programs and games as they always
-were. This tour shows where things are. Enter goes on to the next step, Esc ends the tour.
+were. This tour shows where things are. Enter goes on to the next step, Esc ends the tour. Where a step has
+**Show Me**, it opens the thing itself.
 
 ## The Start button
 

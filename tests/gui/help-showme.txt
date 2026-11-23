@@ -1,0 +1,25 @@
+#host-only (the Start menu opened over the desktop would take the keys the script gives the tour)
+# The tour's Show Me (apps/help; phase F, 2026-11-23, API 2.14's SHELL SHOW): the Start button's step has a Show
+# Me button, which opens the Start menu (the host's player has no shell: it says it was asked); the task bar's
+# has none; the notification area's starts the Mixer, the clock's the time settings.
+run HELP.EXE /TOUR
+wait "The tour - Help"
+said HELP tour steps=7
+wait "Tour"
+key enter
+shot start "Tour"
+key alt+s
+said HELP tour shown launcher ok
+key enter
+key alt+s
+key enter
+key alt+s
+said HELP tour shown MIXER.EXE ok
+key enter
+key alt+s
+said HELP tour shown CONTROL.EXE time ok
+key esc
+gone "Tour"
+said HELP tour ended step=5 finished=0
+key alt+f4
+gone "Welcome to GLOS - Help"

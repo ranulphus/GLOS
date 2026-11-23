@@ -833,6 +833,15 @@ int desk_dnd_begin(struct app *a, u32 win_id, const u32 *picture, u32 pw, u32 ph
     return 0;
 }
 
+/* (2.14, SHELL's SHOW) The launcher shown as the Start button shows it: 1, or 0 (no shell). */
+int desk_launcher(void)
+{
+    struct wm *m = desk_lock();
+    int ok = to_shell(m, KEV_LAUNCH);
+    desk_unlock();
+    return ok;
+}
+
 void desk_dnd_stop(void)
 {
     struct wm *m = desk_lock();

@@ -374,6 +374,22 @@ static void words_of(const char *p, const char *end, char *out, size_t room)
         out[--k] = 0;
 }
 
+/* (2026-11-23) A step's Show Me: the part it is about opened (2.14's SHOW for the Start menu). */
+static void show_me(int step)
+{
+    int point = steps[step].point, rc = 0;
+    const char *what = "?";
+    if (point == GLOS_POINT_START) {
+        what = "launcher";
+        rc = glos_shell_show(GLOS_SHELL_LAUNCH);
+    } else if (point == GLOS_POINT_TRAY || point == GLOS_POINT_CLOCK) {
+        what = point == GLOS_POINT_TRAY ? "MIXER.EXE" : "CONTROL.EXE time";
+        glos_job_run(what, NULL, 0, GLOS_RUN_HIDDEN, GLOS_RUNF_DETACH, 0);
+        rc = glos_error();
+    }
+    say("tour shown %s %s", what, rc == 0 ? "ok" : "refused");
+}
+
 static int tour_steps(void)
 {
     static const struct { const char *at; int point; } places[] = {
@@ -406,6 +422,8 @@ static int tour_steps(void)
             }
         }
         words_of(body + 1, tail, step_text[n], sizeof step_text[n]);
+        steps[n].show = steps[n].point == GLOS_POINT_START || steps[n].point == GLOS_POINT_TRAY
+                        || steps[n].point == GLOS_POINT_CLOCK ? show_me : NULL;
         steps[n].title = step_title[n];
         steps[n].text = step_text[n];
         n++;

@@ -1,6 +1,8 @@
 /* Disk Tools' long jobs (diskjob.h). Sectors go a run at a time (32, GLOS_FS_SECTORS' most; or what the caller
  * says: a floppy's track, so that each call is one turn of the disk); a run that fails is gone through again a
  * sector at a time, each tried three times. */
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "diskjob.h"
@@ -137,4 +139,94 @@ int diskjob_check(diskjob_io io, void *ctx, unsigned long total, unsigned run, d
     if (tick)
         tick(arg, total, total);
     return r->bad ? -1 : 0;
+}
+
+/* ---- a floppy's full format (2026-11-23) */
+
+int diskjob_format(diskjob_track fmt, void *ctx, unsigned cyls, unsigned heads, unsigned spt, diskjob_tick tick, void *arg,
+                   struct diskjob_report *r, int *err)
+{
+    unsigned long total = (unsigned long)cyls * heads * spt;
+    unsigned c, h, s;
+    memset(r, 0, sizeof *r);
+    *err = 0;
+    for (c = 0; c < cyls; c++)
+        for (h = 0; h < heads; h++) {
+            unsigned long first = ((unsigned long)c * heads + h) * spt;
+            unsigned long long bad = 0;
+            int e;
+            if (tick && tick(arg, first, total)) {
+                r->stopped = 1;
+                return -1;
+            }
+            if ((e = fmt(ctx, c, h, &bad)) != 0) {
+                *err = e;
+                snprintf(r->why, sizeof r->why, "error %02Xh at cylinder %u, side %u", (unsigned)e & 0xFF, c, h);
+                return -1;
+            }
+            for (s = 0; s < spt && s < 64; s++)
+                if (bad >> s & 1) {
+                    if (r->bad < sizeof r->bad_list / sizeof r->bad_list[0])
+                        r->bad_list[r->bad] = first + s;
+                    if (!r->bad++)
+                        r->first_bad = first + s;
+                }
+            r->done = first + spt;
+        }
+    if (tick)
+        tick(arg, total, total);
+    return 0;
+}
+
+static unsigned le16(const unsigned char *p) { return (unsigned)p[0] | (unsigned)p[1] << 8; }
+
+int diskjob_mark_bad(diskjob_io io, void *ctx, const unsigned long *bad, unsigned nbad)
+{
+    unsigned char boot[512], *fat;
+    unsigned long total, data, clusters, cl;
+    unsigned spc, reserved, nfats, fatsz, rootsecs, i, k;
+    int fat12, rc = 0;
+    if (!nbad)
+        return 0;
+    if (io(ctx, 0, boot, 1, 0) != 0 || le16(boot + 11) != 512 || !(spc = boot[13]) || !(reserved = le16(boot + 14))
+        || !(nfats = boot[16]) || !(fatsz = le16(boot + 22)))
+        return -2;
+    total = le16(boot + 19) ? le16(boot + 19)
+                            : (unsigned long)le16(boot + 32) | (unsigned long)le16(boot + 34) << 16;
+    rootsecs = (le16(boot + 17) * 32 + 511) / 512;
+    data = reserved + (unsigned long)nfats * fatsz + rootsecs;
+    if (total <= data)
+        return -2;
+    clusters = (total - data) / spc;
+    if (clusters >= 65525)
+        return -2;                      /* (FAT32: not a floppy's) */
+    fat12 = clusters < 4085;
+    for (i = 0; i < nbad; i++)
+        if (bad[i] < data)
+            return -1;
+    if (!(fat = malloc((size_t)fatsz * 512)))
+        return -2;
+    if (io(ctx, reserved, fat, fatsz, 0) != 0) {
+        free(fat);
+        return -2;
+    }
+    for (i = 0; i < nbad; i++) {
+        cl = 2 + (bad[i] - data) / spc;
+        if (cl >= clusters + 2)
+            continue;                   /* (past the last cluster: no file is ever there) */
+        if (fat12) {
+            unsigned long o = cl * 3 / 2;
+            if (cl & 1)
+                fat[o] = (unsigned char)((fat[o] & 0x0F) | 0x70), fat[o + 1] = 0xFF;
+            else
+                fat[o] = 0xF7, fat[o + 1] = (unsigned char)((fat[o + 1] & 0xF0) | 0x0F);
+        } else {
+            fat[cl * 2] = 0xF7, fat[cl * 2 + 1] = 0xFF;
+        }
+    }
+    for (k = 0; k < nfats && rc == 0; k++)
+        if (io(ctx, reserved + (unsigned long)k * fatsz, fat, fatsz, 1) != 0)
+            rc = -2;
+    free(fat);
+    return rc;
 }

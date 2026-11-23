@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "../../apps/shared/diskjob.h"
+#include "../../kernel/disk/disk.h"
 
 static int fails, checks;
 #define CHECK(c) do { checks++; if (!(c)) { fails++; printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); } } while (0)
@@ -50,6 +51,105 @@ static int disk_io(void *ctx, unsigned long lba, unsigned char *data, unsigned c
         d->reads += count;
     }
     return 0;
+}
+
+/* (2026-11-23) A floppy's full format: a disk of 2880 sectors whose tracks are formatted by a call that notes
+   them, some of their sectors failing the read back; and a volume made on it, its bad sectors' clusters marked. */
+#define FL_SECTORS 2880u
+static unsigned char fl[FL_SECTORS * 512];
+static unsigned fl_tracks, fl_order_bad, fl_fail_at = 999;
+static unsigned long long fl_bad[160];
+
+static int fl_track(void *ctx, unsigned cyl, unsigned head, unsigned long long *bad)
+{
+    unsigned t = cyl * 2 + head;
+    (void)ctx;
+    if (t != fl_tracks)
+        fl_order_bad = 1;
+    if (t == fl_fail_at)
+        return 3;                       /* (write-protected, as INT 13h says it) */
+    memset(fl + t * 18 * 512, 0xF6, 18 * 512);
+    *bad = fl_bad[t];
+    fl_tracks++;
+    return 0;
+}
+
+static int fl_io(void *ctx, unsigned long lba, unsigned char *data, unsigned count, int write)
+{
+    (void)ctx;
+    if (lba >= FL_SECTORS || count > FL_SECTORS - lba)
+        return 4;
+    if (write)
+        memcpy(fl + lba * 512, data, (size_t)count * 512);
+    else
+        memcpy(data, fl + lba * 512, (size_t)count * 512);
+    return 0;
+}
+
+static int fl_write(void *ctx, unsigned long lba, const unsigned char *data, unsigned count)
+{
+    return fl_io(ctx, lba, (unsigned char *)(size_t)data, count, 1);
+}
+
+static unsigned fat12_get(unsigned long fat_lba, unsigned cl)
+{
+    const unsigned char *f = fl + fat_lba * 512 + cl * 3 / 2;
+    unsigned v = (unsigned)f[0] | (unsigned)f[1] << 8;
+    return cl & 1 ? v >> 4 : v & 0xFFF;
+}
+
+static int fl_stop(void *arg, unsigned long done, unsigned long total)
+{
+    (void)arg, (void)total;
+    return done >= 360;
+}
+
+static void full_format(void)
+{
+    struct diskjob_report r;
+    struct fat_geo g;
+    struct fat_made made;
+    int err, rc;
+    unsigned long bad[3];
+    unsigned cl, marked = 0, k;
+    memset(fl_bad, 0, sizeof fl_bad);
+    fl_bad[0] = 0;
+    fl_bad[10] = 1ull << 4;             /* track 10's fifth sector: 10 * 18 + 4 = 184 */
+    fl_bad[159] = 1ull << 17 | 1ull;    /* the last track's first and last: 2862 and 2879 */
+    fl_tracks = 0, fl_order_bad = 0, fl_fail_at = 999;
+    rc = diskjob_format(fl_track, NULL, 80, 2, 18, NULL, NULL, &r, &err);
+    CHECK(rc == 0 && err == 0 && fl_tracks == 160 && !fl_order_bad && r.done == FL_SECTORS);
+    CHECK(r.bad == 3 && r.first_bad == 184 && r.bad_list[0] == 184 && r.bad_list[1] == 2862 && r.bad_list[2] == 2879);
+    memset(&g, 0, sizeof g);
+    g.sectors = FL_SECTORS, g.heads = 2, g.spt = 18;
+    CHECK(fat_format(&g, fl_write, NULL, &made) == 0 && made.fat == 12);
+    rc = diskjob_mark_bad(fl_io, NULL, r.bad_list, (unsigned)r.bad);
+    CHECK(rc == 0);
+    for (k = 0; k < 2; k++) {           /* both FATs: the three clusters bad, every other one as it was */
+        unsigned long at = 1 + k * made.fat_sectors;
+        for (cl = 2, marked = 0; cl < made.clusters + 2; cl++) {
+            unsigned v = fat12_get(at, cl);
+            unsigned long first = made.data_start + (cl - 2) * made.cluster_sectors;
+            int want = (184 >= first && 184 < first + made.cluster_sectors) || (2862 >= first && 2862 < first + made.cluster_sectors)
+                       || (2879 >= first && 2879 < first + made.cluster_sectors);
+            if (want)
+                marked++;
+            CHECK(v == (want ? 0xFF7u : 0));
+        }
+        CHECK(marked == 3);
+        CHECK(fat12_get(at, 0) == 0xFF0 && fat12_get(at, 1) == 0xFFF);   /* (the media byte's entries kept) */
+    }
+    /* a bad sector where the file system is: refused, nothing written */
+    bad[0] = 3;
+    CHECK(diskjob_mark_bad(fl_io, NULL, bad, 1) == -1);
+    /* a track that can't be formatted: stopped there, its error said */
+    fl_tracks = 0, fl_fail_at = 7;
+    rc = diskjob_format(fl_track, NULL, 80, 2, 18, NULL, NULL, &r, &err);
+    CHECK(rc == -1 && err == 3 && fl_tracks == 7 && strstr(r.why, "error 03h at cylinder 3, side 1"));
+    /* stopped by the tick (at sector 360: the twenty-first track's start) */
+    fl_tracks = 0, fl_fail_at = 999;
+    rc = diskjob_format(fl_track, NULL, 80, 2, 18, fl_stop, NULL, &r, &err);
+    CHECK(rc == -1 && r.stopped && fl_tracks == 20 && err == 0);
 }
 
 static unsigned long seed = 12345;
@@ -289,6 +389,7 @@ int main(int argc, char **argv)
     free(d);
     remove(name);
     remove(other);
+    full_format();
     printf("diskjob_test: %d failures (%d checks)\n", fails, checks);
     return fails != 0;
 }

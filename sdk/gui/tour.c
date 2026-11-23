@@ -5,7 +5,8 @@
  * Each step is a bubble beside its place (under it if there is room, else over it, else beside it), with a tab on
  * its edge towards the place, a title, a few lines of text, "2 of 5", and Back, Next (Done on the last) and Close;
  * the place itself is framed in the accent colour. A step with no place has its bubble in the middle of the screen.
- * Enter is Next, Esc closes. The app hears how it ended (all of it, or closed at a step). */
+ * Enter is Next, Esc closes. The app hears how it ended (all of it, or closed at a step). A step may have a "Show
+ * Me" button (2026-11-23: its `show`, the app's, opens the real thing; the tour stays where it is). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -198,6 +199,10 @@ static void show_step(void)
     }
     box = gui_vbox(frame, 8, 0);
     gui_new(box, &head_class, sizeof(struct gui_widget));
+    if (st->show) {                             /* (its own row: the buttons' row is full) */
+        row = gui_hbox(box, 4, 0);
+        gui_button(row, GUI_T("&Show Me"), step_on, 2);
+    }
     row = gui_hbox(box, 4, 0);
     snprintf(count, sizeof count, GUI_T("%d of %d"), T.at + 1, T.n);
     T.count = gui_label(row, count);
@@ -249,7 +254,12 @@ static void show_step(void)
 static void step_on(struct gui_widget *b, int what)
 {
     (void)what;
-    if (b->id == 0) {
+    if (b->id == 2) {                           /* Show Me: the app's, the bubble left as it is */
+        if (T.steps && T.steps[T.at].show)
+            T.steps[T.at].show(T.at);
+        if (T.next)                             /* (Enter goes on with the tour again) */
+            gui_focus(T.next);
+    } else if (b->id == 0) {
         finish(0);
     } else if (b->id > 0 && T.at + 1 >= T.n) {
         finish(1);

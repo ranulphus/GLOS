@@ -463,13 +463,13 @@ static int version(struct trapframe *tf)
     v.functions[GLOS_AREA_WIN][0] = 0x7F;               /* CREATE, SHOW, PLACE, FOCUS, ENUM, EMBED, DRAG */
     v.functions[GLOS_AREA_DRAW][0] = 0x7FF;             /* PIXELS, PRESENT, SCREEN, the GPU's five, BLIT, MODES, CACHE */
     v.functions[GLOS_AREA_INPUT][0] = 0x1F;             /* KEYS, CAPTURE, PADS, GAMEPORT, MODE */
-    v.functions[GLOS_AREA_SHELL][0] = 0x3FF;            /* DESKTOP, TRAY, NOTIFY, POINT, HELP, OPEN, ASSOC, ENTRY,
-                                                           RECENT, SCHEDULE */
+    v.functions[GLOS_AREA_SHELL][0] = 0x7FF;            /* DESKTOP, TRAY, NOTIFY, POINT, HELP, OPEN, ASSOC, ENTRY,
+                                                           RECENT, SCHEDULE, SHOW (2.14) */
     v.functions[GLOS_AREA_CLIP][0] = 0x1F;              /* OPEN, PUT, GET, FORMATS, FORMAT */
     v.functions[GLOS_AREA_DND][0] = 0x07;               /* DRAG, TARGET, ANSWER */
     v.functions[GLOS_AREA_THREAD][0] = 0x3FF;           /* CREATE to SELF */
     v.functions[GLOS_AREA_JOB][0] = 0x3F;               /* RUN, READ, WRITE, SIGNAL, STATUS, SIZE */
-    v.functions[GLOS_AREA_FS][0] = 0x1F;                /* LIST, INFO, DRIVES, WATCH, SECTORS */
+    v.functions[GLOS_AREA_FS][0] = 0x3F;                /* LIST, INFO, DRIVES, WATCH, SECTORS, FORMAT (2.14) */
     v.functions[GLOS_AREA_AUDIO][0] = 0x7F;             /* OUT, IN, MIXER, LEVELS, MIDI_OUT, MIDI_IN, DEVICES */
     v.functions[GLOS_AREA_CAPTURE][0] = 0x07;           /* PIXELS, KEYS, MOUSE */
     v.functions[GLOS_AREA_DEBUG][0] = 0x07;             /* ATTACH, READ, WRITE */

@@ -776,6 +776,7 @@ static int watch(struct app *a, struct trapframe *tf)
 struct sect_job {
     u32 disk, write, count;
     u32 lba_lo, lba_hi;
+    u32 cyls, heads, spt;               /* (2.14) a floppy's disk's layout as the app says it (spt 0: the drive's) */
     u8 *data;
     u32 bytes, total_lo, total_hi;
     u32 bios;                           /* the BIOS's error (AH), 0 none */
@@ -833,7 +834,11 @@ static void sect_batch(struct app *a, void *arg)
                 j->bytes = vm_rd16(lin + 0x18);
         }
     }
-    if (!ext || e > 0) {                /* its size by cylinders, heads and sectors */
+    if (j->disk < 0x80 && j->spt) {     /* (2.14) a floppy laid out as the app says (not its drive's largest) */
+        cyls = j->cyls, heads = j->heads, spt = j->spt;
+        j->total_lo = cyls * heads * spt;
+        j->total_hi = 0;
+    } else if (!ext || e > 0) {         /* its size by cylinders, heads and sectors */
         memset(&r, 0, sizeof r);
         r.eax = 0x0800;
         r.edx = j->disk;
@@ -934,6 +939,11 @@ static int sectors(struct app *a, struct trapframe *tf)
     j.count = q.count;
     j.lba_lo = q.lba_lo;
     j.lba_hi = q.lba_hi;
+    if (q.spt) {                        /* (2.14) a floppy's layout */
+        if (q.disk >= 0x80 || q.spt > 63 || !q.heads || q.heads > 2 || !q.cylinders || q.cylinders > 255)
+            return a2_fail(tf, GLOS_E_ARGUMENT);
+        j.cyls = q.cylinders, j.heads = q.heads, j.spt = q.spt;
+    }
     if (!(j.data = kmalloc(q.count ? q.count * 512 : 1)))
         return a2_fail(tf, GLOS_E_MEMORY);
     if (q.write && q.count && user_rd((u16)tf->ds, q.buffer, j.data, q.count * 512) != 0) {
@@ -952,6 +962,150 @@ static int sectors(struct app *a, struct trapframe *tf)
         bad = user_wr((u16)tf->ds, q.buffer, j.data, q.count * 512) != 0;
     kfree(j.data);
     if (bad || a2_wr(tf, &q, sizeof q, size) != 0)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    return j.bios ? a2_fail(tf, GLOS_E_REFUSED) : a2_ok(tf, 0);
+}
+
+/* (2.14) A floppy's track formatted, the BIOS's way (struct glos_fs_format): the media type for the disk's size
+   (INT 13h 18h, its table of the drive's timings put at INT 1Eh while the track is formatted; or 17h's type, on
+   a BIOS older than 18h), then the track (05h: an address field of four bytes a sector, the cylinder, the side,
+   the sector's number and its size code 2, 512 bytes), then (verify) read back. A floppy's errors come and go
+   (the motor not up yet, the disk just changed): each step is tried three times, the drive reset between. */
+struct format_job {
+    u32 disk, cyl, head, cyls, spt, verify;
+    u32 bios, bad_lo, bad_hi;
+    int error;
+};
+
+static int floppy_try(struct rmregs *in, struct rmregs *out, u32 *bios)       /* 0 done, 1 refused, -1 gone */
+{
+    int e = 1, tries;
+    for (tries = 0; tries < 3; tries++) {
+        struct rmregs reset;
+        *out = *in;
+        if ((e = bios13(out)) <= 0)
+            break;
+        *bios = (out->eax >> 8) & 0xFF ? (out->eax >> 8) & 0xFF : 1;
+        memset(&reset, 0, sizeof reset);
+        reset.edx = in->edx & 0xFF;
+        if (bios13(&reset) < 0)
+            return -1;
+    }
+    if (e == 0)
+        *bios = 0;
+    return e;
+}
+
+static void format_batch(struct app *a, void *arg)
+{
+    struct format_job *j = arg;
+    struct rmregs r, o;
+    u32 seg, lin, buf, s, n, old1e, set1e = 0, room = SECT_MAX;
+    int e;
+    (void)a;
+    if (!(seg = low_get(SECT_PARAS(room)))) {
+        j->error = GLOS_E_MEMORY;
+        return;
+    }
+    lin = seg << 4;
+    buf = lin + 0x100;                  /* (the read back's sectors: as sect_batch's, inside a 64 KB line) */
+    if ((buf & 0xFFFF) + room * 512 > 0x10000)
+        buf = (buf + 0xFFFF) & ~0xFFFFu;
+    old1e = vm_rd32(0x1E * 4);
+    memset(&r, 0, sizeof r);            /* the media type */
+    r.eax = 0x1800;
+    r.ecx = (((j->cyls - 1) & 0xFF) << 8) | (((j->cyls - 1) >> 2) & 0xC0) | j->spt;
+    r.edx = j->disk;
+    e = floppy_try(&r, &o, &j->bios);
+    if (e == 0) {                       /* its timings, where the BIOS looks for them while it formats */
+        u32 t = ((u32)(u16)o.es << 16) | (o.edi & 0xFFFF);
+        memcpy(vm_ptr(0x1E * 4), &t, 4);
+        set1e = 1;
+    } else if (e > 0 && (j->bios == 0x01 || j->bios == 0x86)) {        /* (no 18h: 17h's type, by the drive's) */
+        u32 type = 0, kind;
+        memset(&r, 0, sizeof r);
+        r.eax = 0x0800;
+        r.edx = j->disk;
+        kind = bios13(&r) == 0 ? r.ebx & 0xFF : 0;
+        if (j->cyls == 40 && j->spt == 9)
+            type = kind == 1 ? 1 : 2;
+        else if (j->cyls == 80 && j->spt == 15)
+            type = 3;
+        else if (j->cyls == 80 && j->spt == 9)
+            type = 4;
+        if (type) {
+            memset(&r, 0, sizeof r);
+            r.eax = 0x1700 | type;
+            r.edx = j->disk;
+            e = floppy_try(&r, &o, &j->bios);
+        }
+    }
+    if (e == 0) {                       /* the track: its address fields, then 05h */
+        for (s = 0; s < j->spt; s++) {
+            vm_wr8(lin + s * 4, (u8)j->cyl);
+            vm_wr8(lin + s * 4 + 1, (u8)j->head);
+            vm_wr8(lin + s * 4 + 2, (u8)(s + 1));
+            vm_wr8(lin + s * 4 + 3, 2);
+        }
+        memset(&r, 0, sizeof r);
+        r.eax = 0x0500 | j->spt;
+        r.ecx = ((j->cyl & 0xFF) << 8) | ((j->cyl >> 2) & 0xC0);
+        r.edx = (j->head << 8) | j->disk;
+        r.es = (u16)seg;
+        r.ebx = 0;
+        e = floppy_try(&r, &o, &j->bios);
+    }
+    if (set1e)                          /* (DOS's own timings back) */
+        memcpy(vm_ptr(0x1E * 4), &old1e, 4);
+    /* Read back: the track in runs (sect_batch's room), a run that fails sector by sector. */
+    for (s = 0; e == 0 && j->verify && s < j->spt; s += n) {
+        n = j->spt - s < room ? j->spt - s : room;
+        memset(&r, 0, sizeof r);
+        r.eax = 0x0200 | n;
+        r.ecx = ((j->cyl & 0xFF) << 8) | ((j->cyl >> 2) & 0xC0) | (s + 1);
+        r.edx = (j->head << 8) | j->disk;
+        r.es = (u16)(buf >> 4);
+        r.ebx = buf & 0xF;
+        if ((e = floppy_try(&r, &o, &j->bios)) > 0) {
+            u32 k;
+            for (k = s, e = 0; e >= 0 && k < s + n; k++) {
+                r.eax = 0x0201;
+                r.ecx = ((j->cyl & 0xFF) << 8) | ((j->cyl >> 2) & 0xC0) | (k + 1);
+                if ((e = floppy_try(&r, &o, &j->bios)) > 0) {
+                    if (k < 32)
+                        j->bad_lo |= 1u << k;
+                    else
+                        j->bad_hi |= 1u << (k - 32);
+                    e = 0;
+                }
+            }
+            j->bios = 0;                /* (the track is formatted: its bad sectors are said) */
+        }
+    }
+    if (e >= 0)
+        low_put(seg);
+    else
+        j->error = -1;
+}
+
+static int format(struct app *a, struct trapframe *tf)
+{
+    struct glos_fs_format q;
+    struct format_job j;
+    u32 size;
+    if (a2_rd(tf, &q, sizeof q, &size) != 0 || q.disk > 1 || q.head > 1 || !q.cylinders || q.cylinders > 84
+        || q.cylinder >= q.cylinders || !q.sectors || q.sectors > 36 || q.verify > 1)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    if (own_disk(q.disk))
+        return a2_fail(tf, GLOS_E_REFUSED);
+    memset(&j, 0, sizeof j);
+    j.disk = q.disk, j.cyl = q.cylinder, j.head = q.head, j.cyls = q.cylinders, j.spt = q.sectors;
+    j.verify = q.verify;
+    if (app_batch(a, format_batch, &j, 1) != 0 || j.error)
+        return a2_fail(tf, j.error > 0 ? (u32)j.error : GLOS_E_MEMORY);
+    q.error = j.bios;
+    q.bad_lo = j.bad_lo, q.bad_hi = j.bad_hi;
+    if (a2_wr(tf, &q, sizeof q, size) != 0)
         return a2_fail(tf, GLOS_E_ARGUMENT);
     return j.bios ? a2_fail(tf, GLOS_E_REFUSED) : a2_ok(tf, 0);
 }
@@ -980,6 +1134,7 @@ int api2_fs(struct app *a, struct trapframe *tf, u32 n)
     case GLOS_FS_DRIVES & 0xFF: return drives(a, tf);
     case GLOS_FS_WATCH & 0xFF: return watch(a, tf);
     case GLOS_FS_SECTORS & 0xFF: return sectors(a, tf);
+    case GLOS_FS_FORMAT & 0xFF: return format(a, tf);
     }
     return a2_fail(tf, GLOS_E_FUNCTION);
 }
