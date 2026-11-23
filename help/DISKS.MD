@@ -42,7 +42,9 @@ Disk Tools can keep copies of a folder on another computer, over SSH (SFTP), and
 - **Backup, Back Up a Folder** (Ctrl+B): the **Folder** here; the **Computer**, by the name of a session
   saved in the Terminal's Sessions (its address, user and key) or as `user@computer:port`; the **Folder
   there** that keeps this folder's backups; and **What**: every file, or what changed since the last backup
-  (by size and date). Each backup is a folder there named by its date and time. **Again** makes GLOS do the
+  (by size and date). Each backup is a folder there named by its date and time. **Keep** thins out the older
+  backups after each new one, keeping the newest 5, 10 or 30 (files a newer backup still needs stay where they
+  are, so every backup kept can still be restored whole). **Again** makes GLOS do the
   same backup by itself each time it starts, every day, or every week, at the **Time** (and **On day**) given:
   **Backup, Scheduled Backups** lists those, and **Remove** stops one.
 - **Backup, Restore a Backup** (Ctrl+R): the computer and the folder there; then choose one of the backups
@@ -54,7 +56,7 @@ are. A backup that was stopped or failed is not listed.
 The computer must have been met before (Disk Tools asks the first time, as SSH does). From a batch file or a
 schedule, without a window:
 
-    DISKS -backup C:\DATA Box glos-backups/DATA -changes
+    DISKS -backup C:\DATA Box glos-backups/DATA -changes -keep 10
     DISKS -restore Box glos-backups/DATA newest C:\DATA
 
 ## Not yet

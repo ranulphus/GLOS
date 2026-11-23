@@ -10625,6 +10625,20 @@ def backup_case(profile, vcard, card, bits):
             and agent.ssh("type C:\\BACK2\\SUB\\B.TXT")[0] == 0 and agent.ssh("type C:\\BACK2\\NEW.TXT")[0] != 0
         rc, o, _ = agent.ssh(disks + "-backup C:\\DATA glos@10.0.2.2:%d glos-backups/OTHER" % p2)
         checks["unknown-host"] = rc == 1 and line(o, "DISKS backup failed").startswith("DISKS backup failed -2 ")
+        # Thinned to the newest two (-keep 2, after a fourth set with nothing changed): the first set's A.TXT and
+        # B.TXT go, its C.BIN stays (the later sets hold it by the first), the second's files stay (held by it);
+        # two sets listed, the newest restored whole
+        rc, o, _ = agent.ssh(disks + "-backup C:\\DATA Box glos-backups/DATA -changes -keep 2")
+        checks["thin"] = rc == 0 and line(o, "DISKS thinned ") == "DISKS thinned keep=2 sets=2 removed=2 held=3"
+        left = srv.run("cd glos-backups/DATA && find . -type f | sort")
+        checks["thin-there"] = ("./%s/SUB/DEEP/C.BIN" % first) in left and ("./%s/A.TXT" % first) not in left \
+            and ("./%s/MANIFEST.TXT" % first) not in left and left.count("MANIFEST.TXT") == 2
+        if not checks["thin"] or not checks["thin-there"]:
+            notes.append("thin: %r; left there: %r" % (line(o, "DISKS thinned"), left))
+        rc, o, _ = agent.ssh(disks + "-restore Box glos-backups/DATA newest C:\\BACK4")
+        checks["thin-sets"] = line(o, "DISKS sets ").startswith("DISKS sets 2 newest=")
+        checks["thin-restore"] = rc == 0 and " files=3 copied=3 failed=0 " in line(o, "DISKS restored set=") + " " \
+            and fetch("C:\\BACK4\\SUB\\DEEP\\C.BIN", os.path.join(out, "c4.got")) == big
         # The window: Back Up a Folder, then Restore a Backup
         checks["on"] = agent.ssh("glos display on 640x480x%d" % bits)[0] == 0
         t0 = time.time()

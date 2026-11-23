@@ -162,8 +162,15 @@ static int st_list(void *ctx, const char *dir, int (*each)(void *arg, const char
     return remote_list(ctx, p, st_one, &c) == REMOTE_OK ? 0 : -1;
 }
 
+static int st_remove(void *ctx, const char *path, int dir)
+{
+    char p[400];
+    full(ctx, path, p, sizeof p);
+    return remote_remove(ctx, p, dir) == REMOTE_OK ? 0 : -1;
+}
+
 void bknet_store(struct bk_store *st, struct remote *r)
 {
     st->ctx = r;
-    st->mkdir = st_mkdir, st->put = st_put, st->get = st_get, st->list = st_list;
+    st->mkdir = st_mkdir, st->put = st_put, st->get = st_get, st->list = st_list, st->remove = st_remove;
 }

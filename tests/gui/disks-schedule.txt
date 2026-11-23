@@ -1,4 +1,4 @@
-# Disk Tools' scheduled backups (apps/disks; phase F): Back Up a Folder with Again every week, a time that is no
+# Disk Tools' scheduled backups (apps/disks; phase F): Back Up a Folder keeping the newest 10, Again every week, a time that is no
 # time refused with the dialog kept, then Friday at 07:45: GLOS's schedule has "backup-WEB" with DISKS's command
 # (the backup itself fails at once: nobody answers at 127.0.0.1's port 1); Backup, Scheduled Backups lists it;
 # Remove takes it off the schedule.
@@ -14,6 +14,7 @@ type glos@127.0.0.1:1
 key alt+t
 key ctrl+a
 type glos-backups/WEB
+quick alt+k home down down
 quick alt+a home down down down
 key alt+m
 key ctrl+a
@@ -30,6 +31,7 @@ quick alt+d home down down down down down
 shot week "Back Up a Folder"
 key enter
 said DISKS scheduled backup-WEB weekly fri 07:45
+said DISKS scheduled keep 10
 wait "Backups"
 key enter
 gone "Backups"

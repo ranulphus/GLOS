@@ -30,6 +30,7 @@ struct bk_store {
     int (*get)(void *ctx, const char *path, const char *local);
     /* A folder's entries ("." and ".." left out): each(arg, name, dir), 0 to go on; 0, or < 0 (no such folder). */
     int (*list)(void *ctx, const char *dir, int (*each)(void *arg, const char *name, int dir), void *arg);
+    int (*remove)(void *ctx, const char *path, int dir);       /* (bk_thin's) a file, or an empty folder: 0, or < 0 */
 };
 
 #define BK_SET 24                       /* a set's name: YYYYMMDD-HHMMSS, and -2 ... if two came in one second */
@@ -47,6 +48,8 @@ struct bk_job {
     unsigned files, copied, kept, failed, folders;      /* the folder's files; those copied; those an older set
                                                            holds; those that could not be read or written; folders */
     unsigned long long bytes;           /* bytes copied */
+    unsigned thinned, removed;          /* (bk_thin) sets thinned away; their files removed (j->kept: those of
+                                           theirs still kept, which a newer set holds by them) */
     char why[200];                      /* a failure's words */
 };
 
@@ -56,6 +59,12 @@ int bk_backup(struct bk_job *j, const char *folder);
 int bk_sets(const struct bk_store *st, const char *where, char (*sets)[BK_SET], int room);
 /* A set restored into the folder `to` (made if need be; its files written over): BK_OK or a BK_E_. */
 int bk_restore(struct bk_job *j, const char *set, const char *to);
+
+/* The sets there thinned to the newest `keep` (1 or more): each older one stops being a backup (its manifest goes
+   first), and its files go, but for those a kept set still holds by it (a set of what changed holds what did not
+   change by the set that copied it); folders left empty go too. BK_OK (j->thinned, j->removed, j->kept), or a
+   BK_E_. Stopped by progress (path: the set's name) between sets. */
+int bk_thin(struct bk_job *j, int keep);
 
 /* (The tests'.) A set's name for a time: YYYYMMDD-HHMMSS. */
 void bk_set_name(char *out, unsigned room, int year, int month, int day, int hour, int min, int sec);

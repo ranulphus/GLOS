@@ -539,3 +539,163 @@ int bk_restore(struct bk_job *j, const char *set, const char *to)
     list_free(&l);
     return r;
 }
+
+/* ---- the older sets thinned away */
+
+#define THIN_SETS 512                   /* (the sets looked at: years of daily runs) */
+
+static int by_text(const void *a, const void *b)
+{
+    return strcmp(*(char *const *)a, *(char *const *)b);
+}
+
+static int by_depth(const void *a, const void *b)       /* (folders: the deepest first) */
+{
+    const char *x = *(char *const *)a, *y = *(char *const *)b;
+    int dx = 0, dy = 0;
+    for (; *x; x++)
+        dx += *x == '/';
+    for (; *y; y++)
+        dy += *y == '/';
+    return dy != dx ? dy - dx : strcmp(*(char *const *)a, *(char *const *)b);
+}
+
+struct dir_list { char **d; int n, room; };
+
+static void dir_add(struct dir_list *dl, const char *path, size_t len)  /* path's first len bytes, once */
+{
+    int i;
+    for (i = 0; i < dl->n; i++)
+        if (!strncmp(dl->d[i], path, len) && !dl->d[i][len])
+            return;
+    if (dl->n == dl->room) {
+        char **m = realloc(dl->d, (size_t)(dl->room = dl->room ? dl->room * 2 : 16) * sizeof *m);
+        if (!m)
+            return;
+        dl->d = m;
+    }
+    if ((dl->d[dl->n] = malloc(len + 1)) != NULL) {
+        memcpy(dl->d[dl->n], path, len);
+        dl->d[dl->n++][len] = 0;
+    }
+}
+
+static void dirs_of(struct dir_list *dl, const char *rel)     /* "SET/a/b/file": SET/a/b, SET/a and SET */
+{
+    const char *p;
+    for (p = strchr(rel, '/'); p; p = strchr(p + 1, '/'))
+        dir_add(dl, rel, (size_t)(p - rel));
+}
+
+int bk_thin(struct bk_job *j, int keep)
+{
+    const struct bk_store *st = j->store;
+    char (*sets)[BK_SET], remote[PATH_ROOM * 2], **need = NULL;
+    int n, i, k, nneed = 0, rneed = 0, r = BK_OK;
+    j->thinned = j->removed = j->kept = j->failed = 0, j->why[0] = 0;
+    if (keep < 1 || !st->remove)
+        return BK_OK;
+    if (!(sets = malloc(THIN_SETS * BK_SET)))
+        return BK_E_MEMORY;
+    if ((n = bk_sets(st, j->where, sets, THIN_SETS)) <= keep) {
+        free(sets);
+        if (n < 0)
+            snprintf(j->why, sizeof j->why, "the backups' folder couldn't be listed");
+        return n < 0 ? BK_E_STORE : BK_OK;
+    }
+    /* what the kept sets hold by the older ones: "SET/path", sorted */
+    for (i = 0; i < keep && r == BK_OK; i++) {
+        struct bk_list l = { 0 };
+        join3(remote, sizeof remote, j->where, sets[i], "MANIFEST.TXT");
+        if (st->get(st->ctx, remote, j->temp) != 0 || manifest_read(j->temp, &l) != 0) {
+            snprintf(j->why, sizeof j->why, "set %s's list of files couldn't be read", sets[i]);
+            r = BK_E_STORE;
+        }
+        for (k = 0; r == BK_OK && k < l.n; k++) {
+            char *e;
+            if (l.f[k].dir || !l.f[k].set || strcmp(l.f[k].set, sets[keep - 1]) >= 0)
+                continue;               /* (held by a kept set: nothing of a thinned one) */
+            if (nneed == rneed) {
+                char **m = realloc(need, (size_t)(rneed = rneed ? rneed * 2 : 256) * sizeof *m);
+                if (!m) {
+                    r = BK_E_MEMORY;
+                    break;
+                }
+                need = m;
+            }
+            if (!(e = malloc(strlen(l.f[k].set) + strlen(l.f[k].path) + 2))) {
+                r = BK_E_MEMORY;
+                break;
+            }
+            sprintf(e, "%s/%s", l.f[k].set, l.f[k].path);
+            need[nneed++] = e;
+        }
+        list_free(&l);
+        remove(j->temp);
+    }
+    if (nneed)
+        qsort(need, (size_t)nneed, sizeof *need, by_text);
+    /* the older sets, the oldest first. Each one's own files go, and those it held by a set thinned before it
+       (which stayed while any set held them: that set is no longer listed); none that a kept set holds */
+    for (i = n - 1; i >= keep && r == BK_OK; i--) {
+        struct bk_list l = { 0 };
+        struct dir_list dl = { 0 };
+        char held[PATH_ROOM * 2], *key = held;
+        int d;
+        if (j->progress && j->progress(j->ctx, sets[i], 0, 0)) {
+            r = BK_E_STOPPED;
+            break;
+        }
+        join3(remote, sizeof remote, j->where, sets[i], "MANIFEST.TXT");
+        if (st->get(st->ctx, remote, j->temp) != 0 || manifest_read(j->temp, &l) != 0) {
+            snprintf(j->why, sizeof j->why, "set %s's list of files couldn't be read", sets[i]);
+            r = BK_E_STORE;
+            remove(j->temp);
+            break;
+        }
+        remove(j->temp);
+        if (st->remove(st->ctx, remote, 0) != 0) {     /* no backup any more, from here on */
+            snprintf(j->why, sizeof j->why, "set %s's list of files couldn't be removed", sets[i]);
+            r = BK_E_STORE;
+            list_free(&l);
+            break;
+        }
+        dir_add(&dl, sets[i], strlen(sets[i]));
+        for (k = 0; k < l.n; k++) {
+            int own, listed;
+            if (l.f[k].dir || !l.f[k].set)
+                continue;
+            own = !strcmp(l.f[k].set, sets[i]);
+            for (listed = 0, d = 0; !own && d < n && !listed; d++)
+                listed = !strcmp(sets[d], l.f[k].set);
+            if (!own && listed)
+                continue;               /* (held by a set still listed: that set's to thin, or kept) */
+            snprintf(held, sizeof held, "%s/%s", l.f[k].set, l.f[k].path);
+            if (nneed && bsearch(&key, need, (size_t)nneed, sizeof *need, by_text)) {
+                j->kept += own;         /* (a kept set holds it by this one, or by the one before) */
+                continue;
+            }
+            join(remote, sizeof remote, j->where, held);
+            if (st->remove(st->ctx, remote, 0) == 0)
+                j->removed++;
+            else if (own)
+                j->failed++;            /* (one of a set thinned before may be gone already: by another) */
+            dirs_of(&dl, held);
+        }
+        qsort(dl.d, (size_t)dl.n, sizeof *dl.d, by_depth);     /* the folders left empty: the deepest first */
+        for (d = 0; d < dl.n; d++) {
+            join(remote, sizeof remote, j->where, dl.d[d]);
+            st->remove(st->ctx, remote, 1);             /* (one with files still kept in it stays) */
+            free(dl.d[d]);
+        }
+        free(dl.d);
+        list_free(&l);
+        j->thinned++;
+    }
+    for (i = 0; i < nneed; i++)
+        free(need[i]);
+    free(need);
+    free(sets);
+    return r;
+}
+

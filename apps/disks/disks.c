@@ -12,7 +12,7 @@
  *   - a new image made of a folder's files;
  *   - a folder backed up to another computer over SFTP (everything, or what changed since the last), and a
  *     backup restored (apps/shared/backup.c's sets; bknet.c: a saved session's or an address's computer). The
- *     same from the command line, for the schedule: DISKS -backup FOLDER COMPUTER WHERE [-changes] and
+ *     same from the command line, for the schedule: DISKS -backup FOLDER COMPUTER WHERE [-changes] [-keep N] and
  *     DISKS -restore COMPUTER WHERE SET|newest FOLDER (no window; the lines below, and the exit code).
  * The long ones run as the toolkit's tasks, with their progress shown and a Cancel that stops them cleanly.
  *
@@ -387,6 +387,8 @@ struct job {
     int changes, nsets, err;
     char (*sets)[BK_SET];
     struct bk_job bk;
+    int keep, thin_rc;                  /* (a backup) the newest sets kept, 0 all; how thinning the rest went */
+    unsigned thinned, removed, held;
 };
 static struct job *running;             /* one job at a time */
 
@@ -860,8 +862,16 @@ static void bk_work(struct job *j)
     memset(&j->bk, 0, sizeof j->bk);
     j->bk.store = &st, j->bk.where = j->where, j->bk.temp = temp, j->bk.changes = j->changes;
     j->bk.progress = bk_tick, j->bk.ctx = j;
-    if (j->kind == J_BACKUP)
+    if (j->kind == J_BACKUP) {
         j->rc = bk_backup(&j->bk, j->from);
+        if (j->rc == BK_OK && j->keep > 0) {    /* the older sets thinned away (the backup's own counts kept) */
+            struct bk_job t = j->bk;
+            j->thin_rc = bk_thin(&t, j->keep);
+            j->thinned = t.thinned, j->removed = t.removed, j->held = t.kept;
+            if (j->thin_rc != BK_OK)
+                say("thin failed %d %s", j->thin_rc, t.why);
+        }
+    }
     else if (j->kind == J_RESTORE)
         j->rc = bk_restore(&j->bk, j->set, j->path);
     else {
@@ -918,9 +928,12 @@ static struct { char computer[100], where[200]; char (*sets)[BK_SET]; int n; } l
 
 static void bk_say(const struct job *j)         /* (headless too) what a backup's job came to */
 {
-    if (j->kind == J_BACKUP && j->rc == BK_OK)
+    if (j->kind == J_BACKUP && j->rc == BK_OK) {
         say("backup set=%s files=%u copied=%u kept=%u failed=%u folders=%u bytes=%llu", j->bk.set, j->bk.files,
             j->bk.copied, j->bk.kept, j->bk.failed, j->bk.folders, j->bk.bytes);
+        if (j->keep > 0 && j->thin_rc == BK_OK)
+            say("thinned keep=%d sets=%u removed=%u held=%u", j->keep, j->thinned, j->removed, j->held);
+    }
     else if (j->kind == J_RESTORE && j->rc == BK_OK)
         say("restored set=%s files=%u copied=%u failed=%u folders=%u to %s", j->bk.set, j->bk.files, j->bk.copied,
             j->bk.failed, j->bk.folders, j->path);
@@ -1012,10 +1025,17 @@ static void job_done(struct gui_window *owner, void *arg, int cancelled)
                      : GUI_T("The backups could not be listed. %s."), j->why);
             gui_message(win, GUI_T("Backups"), text, GUI_MB_OK);
         } else if (j->kind == J_BACKUP) {
-            snprintf(text, sizeof text, GUI_T("The folder %s is backed up to %s, as %s: %u files copied (%lu KB)%s%s."),
+            char thin[120] = "";
+            if (j->keep > 0 && j->thin_rc != BK_OK)
+                snprintf(thin, sizeof thin, "%s", GUI_T(" The older backups could not be thinned out."));
+            else if (j->thinned == 1)
+                snprintf(thin, sizeof thin, "%s", GUI_T(" One older backup was thinned out."));
+            else if (j->thinned > 1)
+                snprintf(thin, sizeof thin, GUI_T(" %u older backups were thinned out."), j->thinned);
+            snprintf(text, sizeof text, GUI_T("The folder %s is backed up to %s, as %s: %u files copied (%lu KB)%s%s.%s"),
                      j->from, j->computer, j->bk.set, j->bk.copied, (unsigned long)(j->bk.bytes >> 10),
                      j->bk.kept ? GUI_T(", the rest unchanged since the last") : "",
-                     j->bk.failed ? GUI_T("; some files could not be read") : "");
+                     j->bk.failed ? GUI_T("; some files could not be read") : "", thin);
             gui_message(win, GUI_T("Backed Up"), text, GUI_MB_OK);
         } else {
             snprintf(text, sizeof text, GUI_T("The backup %s is in %s: %u files%s."), j->bk.set, j->path, j->bk.copied,
@@ -1373,8 +1393,9 @@ static void new_from_folder(void)
 
 /* ---- backups: the dialogs */
 
-static struct gui_widget *b_folder, *b_computer, *b_where, *b_what, *b_sets, *b_to, *b_again, *b_at, *b_day;
-static struct { char folder[260], computer[100], where[200], to[260], at[8]; int what, set, again, day; } b_got;
+static struct gui_widget *b_folder, *b_computer, *b_where, *b_what, *b_sets, *b_to, *b_again, *b_at, *b_day, *b_keep;
+static struct { char folder[260], computer[100], where[200], to[260], at[8]; int what, set, again, day, keep; } b_got;
+static const int keeps[4] = { 0, 5, 10, 30 };   /* (the Keep choice's: every set, or the newest so many) */
 static const char *const day_names[7] = { "sun", "mon", "tue", "wed", "thu", "fri", "sat" };
 
 /* The time typed: HH:MM (or H:MM), into minutes of the day; -1 not one. */
@@ -1426,6 +1447,7 @@ static void backup_done(struct gui_widget *b, int what)
         snprintf(b_got.where, sizeof b_got.where, "%s", gui_get_text(b_where));
         b_got.what = b_what ? gui_value(b_what) : 0;
         b_got.again = b_again ? gui_value(b_again) : 0;
+        b_got.keep = b_keep && gui_value(b_keep) >= 0 && gui_value(b_keep) < 4 ? keeps[gui_value(b_keep)] : 0;
         b_got.day = b_day ? gui_value(b_day) : 1;
         snprintf(b_got.at, sizeof b_got.at, "%s", b_at ? gui_get_text(b_at) : "");
         if (b_got.again >= 2 && at_minutes(b_got.at) < 0) {
@@ -1476,8 +1498,11 @@ static int schedule_backup(void)
     {
         char exe[260];
         gui_path_join(exe, sizeof exe, glos_home(), "DISKS.EXE");
-        r = snprintf(command, sizeof command, "%s -backup %s %s %s%s", exe, b_got.folder, b_got.computer, b_got.where,
-                     b_got.what == 1 ? " -changes" : "");
+        char keep[16] = "";
+        if (b_got.keep > 0)
+            snprintf(keep, sizeof keep, " -keep %d", b_got.keep);
+        r = snprintf(command, sizeof command, "%s -backup %s %s %s%s%s", exe, b_got.folder, b_got.computer, b_got.where,
+                     b_got.what == 1 ? " -changes" : "", keep);
     }
     if (r > 160) {
         say("schedule too long %d", r);
@@ -1493,6 +1518,8 @@ static int schedule_backup(void)
         return -1;
     }
     say("scheduled %s %s", name, when);
+    if (b_got.keep > 0)
+        say("scheduled keep %d", b_got.keep);           /* (its command has -keep N) */
     return 0;
 }
 
@@ -1605,6 +1632,13 @@ static void backup_ask(void)
     gui_choice_add(b_what, GUI_T("Every file"));
     gui_choice_add(b_what, GUI_T("What changed since the last"));
     gui_set_value(b_what, b_got.what);
+    b_keep = gui_choice(gui_row(form, GUI_T("&Keep:"), NULL), 24);
+    gui_choice_add(b_keep, GUI_T("Every backup"));
+    gui_choice_add(b_keep, GUI_T("The newest 5"));
+    gui_choice_add(b_keep, GUI_T("The newest 10"));
+    gui_choice_add(b_keep, GUI_T("The newest 30"));
+    gui_set_value(b_keep, b_got.keep == 5 ? 1 : b_got.keep == 10 ? 2 : b_got.keep == 30 ? 3 : 0);
+    gui_tip(b_keep, GUI_T("After each backup, the older ones are thinned out: what a newer one still needs stays"));
     b_again = gui_choice(gui_row(form, GUI_T("&Again:"), NULL), 24);
     gui_choice_add(b_again, GUI_T("No: this once"));
     gui_choice_add(b_again, GUI_T("Each time GLOS starts"));
@@ -1631,11 +1665,11 @@ static void backup_ask(void)
     gui_button(line, GUI_T("Cancel"), backup_done, 2)->flags |= GUI_CANCEL;
     gui_focus(b_folder);
     if (gui_modal(dlg) != GUI_OK) {
-        b_folder = b_what = b_again = b_at = b_day = NULL;
+        b_folder = b_what = b_again = b_at = b_day = b_keep = NULL;
         say("backup left");
         return;
     }
-    b_folder = b_what = b_again = b_at = b_day = NULL;
+    b_folder = b_what = b_again = b_at = b_day = b_keep = NULL;
     if (b_got.again && schedule_backup() != 0)
         return;
     if (!(j = job_new(J_BACKUP, NULL)))
@@ -1644,6 +1678,7 @@ static void backup_ask(void)
     snprintf(j->computer, sizeof j->computer, "%s", b_got.computer);
     snprintf(j->where, sizeof j->where, "%s", b_got.where);
     j->changes = b_got.what == 1;
+    j->keep = b_got.keep;
     job_start(j, GUI_T("Backing Up"));
 }
 
@@ -1886,19 +1921,23 @@ static void build(void)
     gui_set_text(status, GUI_T("The disk GLOS runs from is never written"));
 }
 
-/* DISKS -backup FOLDER COMPUTER WHERE [-changes] / DISKS -restore COMPUTER WHERE SET|newest FOLDER: no window (a
+/* DISKS -backup FOLDER COMPUTER WHERE [-changes] [-keep N] / DISKS -restore COMPUTER WHERE SET|newest FOLDER: no window (a
    computer not met before is not believed: Disk Tools' window, or SSH.EXE, meets it first). 0 done, 1 not. */
 static int headless(int argc, char **argv)
 {
     struct job j;
-    int restore = !strcmp(argv[1], "-restore");
+    int restore = !strcmp(argv[1], "-restore"), a;
     memset(&j, 0, sizeof j);
     if (!restore && argc >= 5) {
         j.kind = J_BACKUP;
         snprintf(j.from, sizeof j.from, "%s", argv[2]);
         snprintf(j.computer, sizeof j.computer, "%s", argv[3]);
         snprintf(j.where, sizeof j.where, "%s", argv[4]);
-        j.changes = argc > 5 && !strcmp(argv[5], "-changes");
+        for (a = 5; a < argc; a++)              /* -changes, -keep N */
+            if (!strcmp(argv[a], "-changes"))
+                j.changes = 1;
+            else if (!strcmp(argv[a], "-keep") && a + 1 < argc)
+                j.keep = atoi(argv[++a]) > 0 ? atoi(argv[a]) : 0;
     } else if (restore && argc >= 6) {
         j.kind = J_SETS;
         snprintf(j.computer, sizeof j.computer, "%s", argv[2]);
@@ -1916,7 +1955,7 @@ static int headless(int argc, char **argv)
         free(j.sets), j.sets = NULL;
         j.kind = J_RESTORE;
     } else {
-        printf("DISKS -backup FOLDER COMPUTER WHERE [-changes]\nDISKS -restore COMPUTER WHERE SET|newest FOLDER\n");
+        printf("DISKS -backup FOLDER COMPUTER WHERE [-changes] [-keep N]\nDISKS -restore COMPUTER WHERE SET|newest FOLDER\n");
         return 2;
     }
     bk_work(&j);

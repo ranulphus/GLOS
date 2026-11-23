@@ -1497,7 +1497,7 @@ The plan's "folders backed up to an SFTP server: full, or only what changed sinc
 - **Tests (the schedule):** `disks-schedule` (host and the emulated desktops): a time that is none refused,
   weekly Friday 07:45 set, listed, removed; the sshc suite's backup part schedules daily 03:00 in the window,
   moves the guest's clock a day on (`glos time set`), and GLOS's own run of DISKS makes a set there.
-- **Not yet:** backups as ZIPs; sets thinned out; a set browsed file by file (Files' remote folders show a
+- **Not yet:** backups as ZIPs; sets thinned out (since built, 2026-11-23: below); a set browsed file by file (Files' remote folders show a
   set's files).
 
 ## The PDF Viewer: a cache of pages, the next drawn ahead (2026-11-22)
@@ -1750,3 +1750,27 @@ none unless they give it.
   The notification is not driven by a script (the window would have to lose the focus as a line comes).
 - **Not yet:** more than one network at a time; a search over the logs; IRCv3's chat history, account-notify
   and message tags beyond the time.
+
+## Disk Tools: the older backups thinned out (2026-11-23)
+
+A schedule that runs every day fills the other computer, so a backup can keep only the newest sets:
+**Keep** in Back Up a Folder (every backup, or the newest 5, 10 or 30), `-keep N` on the command line and so in
+the schedule's command. After a backup that succeeded, `bk_thin` (`apps/shared/backup.c`) thins the older sets:
+
+- A set of what changed holds what did not change by the set that copied it, so an older set cannot simply be
+  deleted. The kept sets' manifests are read first: every file they hold by an older set is kept. Then each
+  older set, the oldest first, stops being a backup (its manifest is removed before anything else, so a thinning
+  cut short leaves sets passed over, never a listed one with files missing), and its own files go but for those
+  kept; folders left empty go, deepest first, and the set's folder when nothing is left in it.
+- A thinned set's kept files stay in its folder, held by newer sets. When those sets are thinned in turn, the
+  files they held by it go then too (unless a kept set still holds them), so nothing is left behind for good.
+- The backup's own report is as it was; thinning says `thinned keep=N sets=S removed=R held=H` beside it, and
+  the Backed Up message adds how many older backups were thinned out (or that they could not be).
+- The store gains `remove` (a file, or an empty folder): `remote_remove` over SFTP; the host test's, the
+  file system's.
+- **Tests:** `backup_test` (three sets thinned to two: the first's A.TXT and B.TXT gone, its C.BIN kept for the
+  second, the second restored whole; thinned again, nothing; to one: the second's own files kept for the third,
+  the first's C.BIN gone now and the first's folders with it, the third restored whole); the sshc suite's
+  backup part over real SFTP (a fourth set with `-keep 2`: `thinned keep=2 sets=2 removed=2 held=3`, the
+  server's files as said, two manifests, the newest restored whole with its C.BIN from the first);
+  `disks-schedule` keeps the newest 10 (`scheduled keep 10`).

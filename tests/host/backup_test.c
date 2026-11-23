@@ -2,7 +2,9 @@
  * store that is a folder here; everything, then what changed (a file grown, one new, one gone, one only re-dated):
  * only those copied, the rest held by the set before; every set complete and newest first; the newest and the
  * first restored, each the folder as it was then, dates and an empty folder too; a run stopped leaves no set; a
- * store that fails ends the run; a set with no manifest is none. Argument: a fresh folder to work in. */
+ * store that fails ends the run; a set with no manifest is none; the sets thinned (the oldest's files gone but
+ * the one a kept set holds by it; then that one too, once no set holds it, and the oldest's folders with it),
+ * every kept set still restored whole. Argument: a fresh folder to work in. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +12,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <utime.h>
+#include <unistd.h>
 
 #include "../../apps/shared/backup.h"
 
@@ -91,7 +94,15 @@ static int s_list(void *ctx, const char *dir, int (*each)(void *arg, const char 
     return 0;
 }
 
-static const struct bk_store store = { NULL, s_mkdir, s_put, s_get, s_list };
+static int s_remove(void *ctx, const char *path, int dir)
+{
+    char p[400];
+    (void)ctx;
+    there(p, sizeof p, path);
+    return dir ? rmdir(p) : remove(p);
+}
+
+static const struct bk_store store = { NULL, s_mkdir, s_put, s_get, s_list, s_remove };
 
 /* ---- the folder here */
 
@@ -240,6 +251,48 @@ int main(int argc, char **argv)
     CHECK(r == BK_E_NONE, "no such set: r=%d", r);
     r = bk_backup(&j, "/no/such/folder");
     CHECK(r == BK_E_LOCAL, "no such folder: r=%d", r);
+
+    /* thinned to two: the first set's A.TXT and B.TXT go; its C.BIN stays (the second holds it by the first) */
+    n = bk_sets(&store, "backups/DATA", sets, 16);
+    CHECK(n == 3, "before thinning: %d sets", n);
+    {
+        char s1[BK_SET], s2[BK_SET], s3[BK_SET], rel[200];
+        snprintf(s1, sizeof s1, "%s", sets[2]), snprintf(s2, sizeof s2, "%s", sets[1]), snprintf(s3, sizeof s3, "%s", sets[0]);
+        r = bk_thin(&j, 2);
+        CHECK(r == BK_OK && j.thinned == 1 && j.removed == 2 && j.kept == 1 && j.failed == 0,
+              "thin to 2: r=%d thinned=%u removed=%u kept=%u failed=%u (%s)", r, j.thinned, j.removed, j.kept, j.failed, j.why);
+        n = bk_sets(&store, "backups/DATA", sets, 16);
+        CHECK(n == 2 && !strcmp(sets[0], s3) && !strcmp(sets[1], s2), "after thinning to 2: %d sets", n);
+        snprintf(rel, sizeof rel, "there/backups/DATA/%s/A.TXT", s1);
+        CHECK(!exists(rel), "thin to 2: %s still there", rel);
+        snprintf(rel, sizeof rel, "there/backups/DATA/%s/SUB/DEEP/C.BIN", s1);
+        CHECK(exists(rel), "thin to 2: %s gone", rel);
+        snprintf(to, sizeof to, "%s/back3", base);      /* the second: whole, its C.BIN from the first */
+        r = bk_restore(&j, s2, to);
+        CHECK(r == BK_OK && j.copied == 3 && j.failed == 0, "restore the second after thinning: r=%d copied=%u failed=%u (%s)",
+              r, j.copied, j.failed, j.why);
+        same("back1/A.TXT", "back3/A.TXT", "second after thinning");
+        CHECK(exists("back3/SUB/DEEP/C.BIN") && exists("back3/NEW.TXT"), "second after thinning: C.BIN or NEW.TXT missing");
+        r = bk_thin(&j, 2);                             /* (again: nothing to do) */
+        CHECK(r == BK_OK && j.thinned == 0 && j.removed == 0, "thin to 2 again: r=%d thinned=%u", r, j.thinned);
+
+        /* to one: the second's own files stay (the third holds A.TXT and NEW.TXT by it); the first's C.BIN goes
+           now (the third has its own), and the first's folders with it */
+        r = bk_thin(&j, 1);
+        CHECK(r == BK_OK && j.thinned == 1 && j.removed == 1 && j.kept == 2 && j.failed == 0,
+              "thin to 1: r=%d thinned=%u removed=%u kept=%u failed=%u (%s)", r, j.thinned, j.removed, j.kept, j.failed, j.why);
+        snprintf(rel, sizeof rel, "there/backups/DATA/%s", s1);
+        CHECK(!exists(rel), "thin to 1: the first set's folder %s still there", rel);
+        snprintf(rel, sizeof rel, "there/backups/DATA/%s/NEW.TXT", s2);
+        CHECK(exists(rel), "thin to 1: %s gone", rel);
+        CHECK(bk_sets(&store, "backups/DATA", sets, 16) == 1, "after thinning to 1: not one set");
+        snprintf(to, sizeof to, "%s/back4", base);
+        r = bk_restore(&j, s3, to);
+        CHECK(r == BK_OK && j.copied == 3 && j.failed == 0, "restore the third after thinning: r=%d copied=%u (%s)", r, j.copied, j.why);
+        same("back1/A.TXT", "back4/A.TXT", "third after thinning");
+        same("back1/NEW.TXT", "back4/NEW.TXT", "third after thinning");
+        same("back1/SUB/DEEP/C.BIN", "back4/SUB/DEEP/C.BIN", "third after thinning");
+    }
     if (!fails)
         printf("backup_test: ok\n");
     return fails != 0;
