@@ -84,6 +84,36 @@ int main(void)
     CHECK(gui_richview_tint(v, "apple", 0) == 4 && gui_richview_tint(v, "Apple", GUI_FIND_CASE) == 2
           && gui_richview_tint(v, "a(", GUI_FIND_REGEX) == -1 && gui_richview_tint(v, "Line [0-9]+ ", GUI_FIND_REGEX) == 30
           && gui_richview_tint(v, "pear", 0) == 0 && gui_richview_tint(v, "", 0) == 0, "tints");
+    /* (2026-11-23, the toolkit's spin box beside it) digits typed are kept as typed, the value held to the
+       limits: 90 in 20 to 400 (the "9" alone is 20); past the far limit typing starts again; Backspace; minus */
+    {
+        struct gui_widget *sp = gui_spin(w->root, 20, 400, 120), *neg = gui_spin(w->root, -50, 50, 0);
+        const char *keys = "90";
+        struct gui_ev e;
+        int k;
+        memset(&e, 0, sizeof e);
+        e.type = GUI_EV_KEY;
+        for (k = 0; keys[k]; k++) {
+            e.ch = (unsigned)keys[k], e.key = 0;
+            sp->cls->event(sp, &e);
+            CHECK(gui_value(sp) == (k == 0 ? 20 : 90), "spin: after \"%.*s\" %d", k + 1, keys, gui_value(sp));
+        }
+        e.ch = '0';                             /* 900: past 400, starts again at 0, held to 20 */
+        sp->cls->event(sp, &e);
+        CHECK(gui_value(sp) == 20, "spin: 900 typed is %d", gui_value(sp));
+        e.ch = '3', sp->cls->event(sp, &e);     /* (0 then 3: 3, held to 20) */
+        e.ch = '5', sp->cls->event(sp, &e);     /* 35 */
+        CHECK(gui_value(sp) == 35, "spin: 035 typed is %d", gui_value(sp));
+        e.ch = 0, e.key = GUI_K_BACK, sp->cls->event(sp, &e);  /* 3: held to 20 */
+        e.key = 0, e.ch = '8', sp->cls->event(sp, &e);          /* 38 */
+        CHECK(gui_value(sp) == 38, "spin: 35, Backspace, 8 is %d", gui_value(sp));
+        e.ch = '-', neg->cls->event(neg, &e);
+        e.ch = '4', neg->cls->event(neg, &e);
+        e.ch = '2', neg->cls->event(neg, &e);
+        CHECK(gui_value(neg) == -42, "spin: -42 typed in -50 to 50 is %d", gui_value(neg));
+        e.ch = '7', neg->cls->event(neg, &e);   /* -427: past -50, starts again: -7 */
+        CHECK(gui_value(neg) == -7, "spin: -427 typed is %d", gui_value(neg));
+    }
     if (!fails)
         printf("rich_test: ok\n");
     return fails != 0;
