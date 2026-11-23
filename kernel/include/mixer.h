@@ -64,7 +64,9 @@ int mixer_wants(struct app *a, u32 *id);                        /* a stream of a
 const char *mixer_card(void);                                   /* the card the mixer plays through, or NULL */
 int mixer_chan(int chan, int set, u8 *left, u8 *right, u8 *mute);
 int mixer_input(int set, int *input);
-extern const struct sound_card sb16_card, crystal_card, cmi8738_card, es1371_card, ich97_card;
+extern const struct sound_card sb16_card, crystal_card, cmi8738_card, es1371_card, ich97_card, via686_card;
+int via686_init(void);                          /* (phase H) VIA's VT82C686 AC'97 found and its codec ready: 0 */
+void via686_leave(void);
 int ich97_init(void);                           /* (phase H) Intel's ICH AC'97 found and its codec ready: 0 */
 void ich97_leave(void);
 int es1371_init(void);                          /* (phase H) a PCI ES1371, ES1373 or CT5880 found and set up: 0 */

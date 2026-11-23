@@ -597,6 +597,7 @@ static void vm_leave(u32 code)
     cmi8738_leave();                            /* (a bus master's channels stopped before DOS has its memory back) */
     es1371_leave();
     ich97_leave();
+    via686_leave();
     usb_leave();                                /* (its controllers stopped, reset, given back) */
     cache_end();
     if (vm.bi->flags & BI_F_SELFTEST)

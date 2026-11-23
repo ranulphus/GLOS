@@ -149,6 +149,8 @@ static void late(void)
         mx.card = &es1371_card;
     else if (ich97_init() == 0)                 /* (... Intel's ICH AC'97, ich97.c) */
         mx.card = &ich97_card;
+    else if (via686_init() == 0)                /* (... VIA's VT82C686 AC'97, via686.c) */
+        mx.card = &via686_card;
     else
         return;
     if (mx.bi->sound_flags & BI_SOUND_OFF)
