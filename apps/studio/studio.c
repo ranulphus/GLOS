@@ -29,7 +29,7 @@
 
 enum { C_NEW = 1, C_OPEN, C_SAVE, C_SAVEAS, C_EXIT, C_UNDO, C_REDO, C_DELETE, C_SELALL, C_TRACK, C_DRUMS, C_UNTRACK, C_INSTR,
        C_MUTE, C_SOLO, C_PLAY, C_STOP, C_TEMPO, C_ZOOMIN, C_ZOOMOUT, C_RECORD, C_CLICK, C_COUNTIN, C_STEP, C_STEPLEN,
-       C_QUANT = C_STEPLEN + 4, C_UP, C_DOWN, C_OCTUP, C_OCTDOWN, C_METER, C_VELOCITY, C_ARRANGE, C_BCOPY, C_BPASTE };
+       C_QUANT = C_STEPLEN + 4, C_UP, C_DOWN, C_OCTUP, C_OCTDOWN, C_METER, C_VELOCITY, C_ARRANGE, C_BCOPY, C_BPASTE, C_LOOP };
                                         /* (C_STEPLEN + n: a sixteenth, an eighth, a quarter, a half) */
 
 #define ROW 8                           /* a key's row on the roll: pixels */
@@ -72,6 +72,9 @@ static struct midiplay mp;
 static glos_handle lock, thread;
 static int playing, quit, over;         /* over: the thread saw it play out */
 static unsigned long demo_ms;
+/* (2026-11-23) A loop: the bars chosen in the arrangement played over and over (from, to: the song's ms) */
+static int loop_on, loops;
+static unsigned long loop_from, loop_to;
 static long line = -1;                  /* the tick the playing is at (-1: it isn't) */
 /* (phase F) Step entry: a note at the cursor for each key played, the cursor on by the step's length after it. */
 static int stepping;                    /* on (Edit, Step Entry: F8) */
@@ -564,6 +567,15 @@ static void play(void)
         return;
     }
     say("playing %lu", smf_count(heard));
+    if (loop_on) {                              /* (a loop: from its start) */
+        take();
+        if (demo)
+            demo_ms = loop_from;
+        else
+            mp_seek(&mp, loop_from);
+        give();
+        loops = 0;
+    }
 }
 
 static void feeder(void *arg)
@@ -596,6 +608,16 @@ static void tick(void *arg)             /* the line along the roll; the end seen
         return;
     take();
     ms = demo ? demo_ms : mp_where(&mp);
+    if (loop_on && playing && ms >= loop_to && loop_to > loop_from) {   /* (the loop's end: its start again) */
+        unsigned long past = (ms - loop_to) % (loop_to - loop_from);
+        if (demo)
+            demo_ms = loop_from + past;
+        else
+            mp_seek(&mp, loop_from + past);
+        ms = loop_from + past;
+        loops++;
+        say("looped %d", loops);
+    }
     if (demo && playing && demo_ms >= mp.length)
         playing = 0, over = 1;
     ended = over;
@@ -1333,6 +1355,16 @@ static void command(struct gui_window *w, int id)
     case C_REDO:
         gui_redo(history);
         break;
+    case C_LOOP:                                /* (2026-11-23) the bars chosen played over and over, or not */
+        if (!loop_on && (asel_t < 0 || !arrange)) {
+            gui_set_text(status, GUI_T("Choose the bars to loop in the arrangement (View, Arrangement) first."));
+            break;
+        }
+        loop_on = !loop_on;
+        if (loop_on)
+            loop_from = song_ms(song, asel_a * bar_ticks()), loop_to = song_ms(song, (asel_b + 1) * bar_ticks());
+        say("loop %s from=%lu to=%lu", loop_on ? "on" : "off", loop_from, loop_to);
+        break;
     case C_ARRANGE:                             /* (2026-11-23) the arrangement, or the roll */
         arrange = !arrange;
         size_roll();
@@ -1532,6 +1564,7 @@ static void update(struct gui_window *w)
     gui_command_enable(w, C_DELETE, arrange ? asel_t >= 0 : chosen > 0);
     gui_command_enable(w, C_SELALL, t->nnotes > 0 && !arrange);
     gui_command_check(w, C_ARRANGE, arrange);
+    gui_command_check(w, C_LOOP, loop_on);
     gui_command_enable(w, C_BCOPY, arrange && asel_t >= 0);
     gui_command_enable(w, C_BPASTE, arrange && asel_t >= 0 && bclip_bars > 0);
     gui_command_enable(w, C_UNTRACK, song->ntracks > 1);
@@ -1676,6 +1709,7 @@ static void build(void)
     gui_command(win, C_TEMPO, GUI_T("&Tempo..."), NULL, NULL, NULL);
     gui_command(win, C_METER, GUI_T("Time Si&gnature..."), NULL, NULL, NULL);
     gui_command(win, C_ARRANGE, GUI_T("&Arrangement"), "F4", NULL, GUI_T("Every track as a row of bars, or the notes of one"));
+    gui_command(win, C_LOOP, GUI_T("L&oop the Chosen Bars"), "Ctrl+R", NULL, GUI_T("Play the bars chosen in the arrangement over and over"));
     gui_command(win, C_BCOPY, GUI_T("&Copy Bars"), "Ctrl+C", NULL, GUI_T("(The arrangement) the bars chosen"));
     gui_command(win, C_BPASTE, GUI_T("Paste &Bars"), "Ctrl+V", NULL, GUI_T("(The arrangement) onto the bar chosen"));
     gui_command(win, C_ZOOMIN, GUI_T("Zoom &In"), "Ctrl++", gui_glyph("zoom-in"), GUI_T("Zoom in"));
@@ -1705,7 +1739,7 @@ static void build(void)
     gui_menu_sep(m);
     gui_menu_command(m, C_INSTR), gui_menu_command(m, C_MUTE), gui_menu_command(m, C_SOLO);
     m = gui_menu(bar, GUI_T("Tra&nsport"));
-    gui_menu_command(m, C_PLAY), gui_menu_command(m, C_STOP), gui_menu_command(m, C_RECORD);
+    gui_menu_command(m, C_PLAY), gui_menu_command(m, C_STOP), gui_menu_command(m, C_RECORD), gui_menu_command(m, C_LOOP);
     gui_menu_sep(m);
     gui_menu_command(m, C_CLICK), gui_menu_command(m, C_COUNTIN);
     gui_menu_sep(m);

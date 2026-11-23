@@ -1977,4 +1977,8 @@ takes the notes of the bars chosen away (each one step of the history). F4 again
 
 - **Tests:** `studio-arrange` (new: WALTZ.MID arranged, bar 1 copied, pasted at bar 3, bars 1 and 2 deleted by
   a drag, Undo, back to the roll; pictures).
-- **Not yet:** regions moved by dragging; loops; controller lanes.
+- **Loops** (later the same afternoon): Transport, **Loop the Chosen Bars** (Ctrl+R): the bars chosen in the
+  arrangement (their times by the tempo's changes) played over and over: Play starts at the loop's start, and the
+  loop's end seeks back to it (as far past it as playing had got), said `looped N`. `studio-arrange` loops bar 3
+  of WALTZ.MID (4.5 s to 7.5 s) and hears it go round once.
+- **Not yet:** regions moved by dragging; controller lanes.
