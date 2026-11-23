@@ -87,8 +87,9 @@ Each driver's head names its source and its SHA-256.
 - **Owed:**
   - each chip on its bench;
   - the CMI8738's FM on bench B's chip (an OPL3 on most);
-  - the ES1371's codec writes on silicon: FreeBSD waits for a window of the converter's before each write,
-    which is not done here yet.
+  - the ES1371's codec accesses on silicon. They now wait for the converter's safe window, as FreeBSD's es137x
+    does (its source read as a BSD-licensed reference). In 86Box the window's bits always read 0, so the wait runs
+    out its 4,096 reads each time; a real chip is the judge.
 
 ## Tier 2: write-combining for the Rage 128 Pro (2026-11-23)
 

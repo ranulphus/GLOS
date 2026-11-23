@@ -177,12 +177,38 @@ static int codec_idle(void)
     return 0;
 }
 
+/* A codec access in the converter's safe window, as FreeBSD's es137x makes it (its es1371_wrcd and _rdcd, BSD
+   licence; the source read 2026-11-23, sha256 0e8da270...d698): the SRC's state put on its mux (bit 16, the
+   disables kept), a wait until bits 16-18 and 23 say 0, then until they say 1 (0x00010000), the access, and the
+   SRC's disables put back once it is ready again. An access outside that window can be lost on some of the
+   chips. In 86Box those bits always read 0 (its model drops them): the second wait runs its 4096 reads out. */
+static u32 codec_window(void)
+{
+    u32 orig, i;
+    src_ready();
+    orig = rd32(SRC);
+    wr32(SRC, (orig & SRC_KEEP) | 0x00010000u);
+    for (i = 0; i < 4096 && (rd32(SRC) & 0x00870000u) != 0; i++)
+        ;
+    for (i = 0; i < 4096 && (rd32(SRC) & 0x00870000u) != 0x00010000u; i++)
+        ;
+    return orig;
+}
+
+static void codec_window_end(u32 orig)
+{
+    src_ready();
+    wr32(SRC, orig & SRC_KEEP);
+}
+
 static u16 codec_rd(void *ctx, u8 reg)
 {
-    u32 i, v = 0;
+    u32 i, v = 0, orig;
     (void)ctx;
     codec_idle();
+    orig = codec_window();
     wr32(CODEC, CODEC_RD | ((u32)(reg & 0x7F) << 16));
+    codec_window_end(orig);
     for (i = 0; i < 4096; i++) {
         v = rd32(CODEC);
         if ((v & CODEC_RDY) && ((v >> 16) & 0x7F) == (reg & 0x7Fu))
@@ -194,9 +220,12 @@ static u16 codec_rd(void *ctx, u8 reg)
 
 static void codec_wr(void *ctx, u8 reg, u16 v)
 {
+    u32 orig;
     (void)ctx;
     codec_idle();
+    orig = codec_window();
     wr32(CODEC, ((u32)(reg & 0x7F) << 16) | v);
+    codec_window_end(orig);
 }
 
 static void codec_pause(void *ctx, u32 ms)
