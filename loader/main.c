@@ -88,6 +88,21 @@ static void put(char c)
     outp(0x3F8, c);
 }
 
+#ifdef NATIVE
+/* GLOSLDR.SYS has no DOS to print through, and a PC it is first tried on has no serial cable as a rule: its lines
+   go to the screen too, by the BIOS's teletype, so that a start that stops says where (the owner's PCChips M925G,
+   2026-11-24: a USB stick that didn't start, and nothing to tell how far it came). */
+static void screen(char c)
+{
+    union REGS r;
+    r.h.ah = 0x0E, r.h.al = (unsigned char)c;
+    r.x.bx = 0x0007;
+    int86(0x10, &r, &r);
+}
+#else
+#define screen(c) ((void)0)
+#endif
+
 static void say(const char *fmt, ...)
 {
     char b[160];
@@ -96,8 +111,9 @@ static void say(const char *fmt, ...)
     va_start(ap, fmt);
     vsprintf(b, fmt, ap);
     va_end(ap);
-    for (p = b; *p; p++) put(*p);
+    for (p = b; *p; p++) put(*p), screen(*p);
     put('\r'); put('\n');
+    screen('\r'); screen('\n');
 }
 
 static int refuse(const char *why)

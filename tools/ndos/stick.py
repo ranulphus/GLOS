@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """stick.py OUT.img: a USB stick's image that starts GLOS with no DOS (docs/v1/native-dos.md, the BIOS's disks).
 
-The whole system as tools/floppy/install.py puts it on a hard disk (GLOS's kernel, its own COMMAND.COM, the
-programs, the savers, the data files, the package key), GLOSLDR.SYS in the root, a GLOS.CFG with the PC's name,
+The whole system as tools/floppy/install.py puts it on a hard disk (GLOS.EXE and GLOS's kernel, its own
+COMMAND.COM, the programs, the savers, the data files, the package key), GLOSLDR.SYS in the root, a GLOS.CFG with the PC's name,
 and KEYS\\ (a host key of the stick's own; AUTHKEYS: who may log in). One FAT volume in a disk of 255 heads by 63,
 as a BIOS shows a USB stick, with GLOS's MBR and a disk signature of its own.
 
@@ -38,8 +38,8 @@ def main():
     ap.add_argument("--quiet", action="store_true", help="no /VERBOSE: the kernel's log lines not on the screen")
     ap.add_argument("--flags", default="", help="the loader's command line (GLOS.EXE's flags)")
     a = ap.parse_args()
-    files = install.glos_files(a)
-    files = [(src, dst) for src, dst in files if dst != "GLOS.EXE"]     # (GLOSLDR.SYS is its loader here)
+    files = install.glos_files(a)               # (GLOS.EXE too: the folder copied to a DOS's disk runs there, by
+                                                # GLOS.EXE from plain DOS; the stick itself starts by GLOSLDR.SYS)
     with tempfile.TemporaryDirectory() as tmp:
         cfg = os.path.join(tmp, "GLOS.CFG")
         lines = ["; GLOS on a USB stick (tools/ndos/stick.py)"]
