@@ -1639,8 +1639,19 @@ client asks by GET alone.
   whether chosen); the dialog has a check box for each, a choice for each group of radio buttons (by name, its
   values) and for each list (its choices' words). What is sent: a checked box's value, the radio button's and
   the list's choice. html_test's lists and boxes; `web-form`'s first form has a list, a box and a pair.
-- **Not yet:** fields typed in the page itself; a radio button's or a box's own words (the page's text beside
-  it) as its label.
+- **Fields typed in the page** (2026-11-23): a field's words link to `about:form?N.F` (the reader counts the
+  form's fields as it tells of them, options and hidden ones too: the Web Reader's own count). A field one types
+  in opens a box over its words (a bare pop-up at the place the rich view gives, `gui_richview_link_place`, at
+  least 200 pixels wide, inside the page): Enter keeps what is typed and, in a form with no other field to type
+  in, sends it; Tab or a press elsewhere keeps it; Esc leaves it. The page's words show what was typed
+  (`gui_richview_set_link_words`; the words as they were if it is emptied). A button's words send the form as
+  it is; a list's, a box's, a radio button's open the dialog, which starts from the form's values and writes
+  its own back. One `form_send` makes what is sent from the form's values (a list with nothing chosen: its first
+  choice; radio buttons with none checked: nothing, as browsers do). `web-form` (host and the emulated
+  desktops): the dialog by the list's word; the text field typed in the page (Esc, Tab, Enter sending); the POST
+  form typed in the page; the button's word. `html_test`'s field links.
+- **Not yet:** a radio button's or a box's own words (the page's text beside it) as its label; the fields
+  drawn as boxes in the page.
 
 ## MIDI Studio: the click and the count-in (2026-11-22)
 

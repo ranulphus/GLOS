@@ -33,7 +33,10 @@ Bookmark** gives the page shown a name of your choosing.
 - Pictures inside a page are shown in it (PNG, JPEG, GIF and BMP), made smaller where they are wider than
   the page; those from the web come once the page is there, a moment later. A picture that can't be had is
   shown by its words in brackets. A link that leads to a picture shows it alone.
-- A form's fields are shown as words in brackets, links: Enter on one opens the form, to type in and **Send**.
+- A form's fields are shown as words in brackets, links. Click one you type in (or reach it by Tab and press
+  Enter) and a box opens over it: type, then Enter (a search box's form is sent then), Tab to keep what you
+  typed, or Esc. A button's words send the form; a list's, a check box's or a radio button's open the whole form,
+  to fill in and **Send**.
 - Files are not saved from here: use `FETCH address` at the
   [command line](COMMAND.MD) to fetch a file.
 - Connections to https sites are checked as a browser checks them. The PC's clock must be right for that: see

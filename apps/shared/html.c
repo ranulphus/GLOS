@@ -91,6 +91,8 @@ struct reader {
     unsigned nbuf;
     int field_skip;                     /* in a <textarea> or <select>: what is in it is the field's, not the page's */
     int forms, in_form;                 /* forms begun so far; the one fields are in now (-1: none) */
+    int form_fields;                    /* (2026-11-23) the fields told of in the form so far (its words' links name
+                                           the field: about:form?FORM.FIELD) */
     /* (a sink of forms) a list's choices: the list's name; the choice whose words are being gathered */
     int in_select, opt_open, opt_on, opt_valued;
     char sel_name[48], opt_value[120], opt_text[120];
@@ -105,8 +107,10 @@ static void option_end(struct reader *r)       /* the choice gathered told of */
     while (r->nopt && r->opt_text[r->nopt - 1] == ' ')
         r->nopt--;
     r->opt_text[r->nopt] = 0;
-    if (r->s->field)
+    if (r->s->field) {
         r->s->field(r->s->ctx, "option", r->sel_name, r->opt_valued ? r->opt_value : r->opt_text, r->opt_text, r->opt_on);
+        r->form_fields++;
+    }
 }
 
 static int lower(int c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
@@ -601,6 +605,7 @@ static void start_tag(struct reader *r, int tag, const struct attr *a, int na, i
             m[how ? k : 0] = 0;
             r->s->form(r->s->ctx, url, m[0] ? m : "get");
             r->in_form = r->forms++;
+            r->form_fields = 0;
         }
         break;
     case K_HEAD:
@@ -701,14 +706,17 @@ static void start_tag(struct reader *r, int tag, const struct attr *a, int na, i
         const char *kind = t->arg == 0 && type ? type : kinds[t->arg], *ph = attr_of(a, na, "placeholder");
         int forming = r->s->form && r->in_form >= 0;
         if (!strcmp(kind, "hidden")) {
-            if (r->s->field && forming)         /* (a form's hidden field is sent with it) */
+            if (r->s->field && forming) {       /* (a form's hidden field is sent with it) */
                 r->s->field(r->s->ctx, kind, name ? name : "", value ? value : "", "", 0);
+                r->form_fields++;
+            }
             break;
         }
         if (r->s->field && (!r->s->form || forming)) {  /* (a sink of forms: a form's fields alone) */
             int box = !strcmp(kind, "checkbox") || !strcmp(kind, "radio");
             r->s->field(r->s->ctx, kind, name ? name : "", value && value[0] ? value : box ? "on" : "", "",
                         box && attr_of(a, na, "checked") != NULL);
+            r->form_fields++;
         }
         if (t->arg == 2 && forming) {           /* (a list: its choices told of as they come) */
             r->in_select = 1;
@@ -726,7 +734,7 @@ static void start_tag(struct reader *r, int tag, const struct attr *a, int na, i
             if (forming) {                      /* (phase F) the word a link to the form's dialog */
                 flush(r);
                 memcpy(keep, r->link, sizeof keep);
-                snprintf(r->link, sizeof r->link, "about:form?%d", r->in_form);
+                snprintf(r->link, sizeof r->link, "about:form?%d.%d", r->in_form, r->form_fields - 1);
                 r->in_link = 1;
                 put(r, word, (unsigned)strlen(word));
                 flush(r);

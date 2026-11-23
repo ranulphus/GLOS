@@ -889,14 +889,15 @@ static void add_pair(char *pairs, size_t room, const char *name, const char *val
     strcat(pairs, esc);
 }
 
+static void form_send(int k);
+
 static void form_fill(int k)
 {
     struct wform *f;
     struct gui_window *dlg;
     struct gui_widget *box, *form, *row;
-    char url[1600], label[120], pairs[900];
-    int i, c, sent_button = 0, last_select = -1;
-    size_t at;
+    char label[120];
+    int i, c, last_select = -1;
     if (k < 0 || k >= nforms || k >= FORMS) {
         say("form none %d", k);
         return;
@@ -978,31 +979,57 @@ static void form_fill(int k)
         say("form left");
         return;
     }
+    for (c = 0; c < nctl; c++) {                /* what was typed and chosen, the form's (the page's words show it) */
+        struct control *x = &ctl[c];
+        if (x->kind == W_TEXT) {
+            snprintf(f->f[x->field].value, sizeof f->f[0].value, "%s", x->got);
+        } else if (x->kind == W_CHECK) {
+            f->f[x->field].on = x->got_on;
+        } else {
+            for (i = 0; i < x->n; i++)
+                f->f[x->idx[i]].on = i == x->got_choice;
+        }
+    }
+    form_send(k);
+}
+
+/* A form sent as it is now (its fields' values, as the page gave them and as typed and chosen since): by GET
+   (the pairs the query of its address) or POST (the pairs the body). The hidden fields, the first button's,
+   what is typed, a checked box's or radio button's value, a list's choice (its first if none is). */
+static void form_send(int k)
+{
+    struct wform *f = &forms[k];
+    char url[1600], pairs[900];
+    int i, j, sent_button = 0;
+    size_t at;
+    if (strcmp(f->method, "get") && strcmp(f->method, "post")) {
+        say("form %d %s refused", k, f->method);
+        gui_message(win, GUI_T("Form Not Sent"), GUI_T("This form is sent in a way the Web Reader does not know."), GUI_MB_OK);
+        return;
+    }
     pairs[0] = 0;                               /* what is sent, in the form's order */
     for (i = 0; i < f->n; i++) {
         const char *kind = f->f[i].kind, *name = f->f[i].name;
-        int pressed = !strcmp(kind, "submit") || !strcmp(kind, "image");
         if (!name[0])
             continue;
-        if (!strcmp(kind, "hidden")) {
+        if (!strcmp(kind, "hidden") || typed_kind(kind)) {
             add_pair(pairs, sizeof pairs, name, f->f[i].value);
-            continue;
-        }
-        if (pressed) {
+        } else if (!strcmp(kind, "submit") || !strcmp(kind, "image")) {
             if (!sent_button++)                 /* (the first button is the one pressed) */
                 add_pair(pairs, sizeof pairs, name, f->f[i].value);
-            continue;
-        }
-        for (c = 0; c < nctl && ctl[c].field != i; c++)
-            ;
-        if (c == nctl)
-            continue;                           /* (an option, a radio button after its group's first) */
-        if (ctl[c].kind == W_TEXT)
-            add_pair(pairs, sizeof pairs, name, ctl[c].got);
-        else if (ctl[c].kind == W_CHECK && ctl[c].got_on)
+        } else if ((!strcmp(kind, "checkbox") || !strcmp(kind, "radio")) && f->f[i].on) {
             add_pair(pairs, sizeof pairs, name, f->f[i].value);
-        else if (ctl[c].kind == W_GROUP && ctl[c].n && ctl[c].got_choice >= 0 && ctl[c].got_choice < ctl[c].n)
-            add_pair(pairs, sizeof pairs, name, f->f[ctl[c].idx[ctl[c].got_choice]].value);
+        } else if (!strcmp(kind, "select")) {
+            int pick = -1, first = -1;
+            for (j = i + 1; j < f->n && !strcmp(f->f[j].kind, "option"); j++) {
+                if (first < 0)
+                    first = j;
+                if (f->f[j].on && pick < 0)
+                    pick = j;
+            }
+            if ((pick = pick >= 0 ? pick : first) >= 0)
+                add_pair(pairs, sizeof pairs, name, f->f[pick].value);
+        }
     }
     if (!strcmp(f->method, "post")) {           /* POST: the pairs are the body, sent to the form's address */
         say("form %d sent post %s body %s", k, f->action, pairs);
@@ -1013,6 +1040,127 @@ static void form_fill(int k)
     snprintf(url, sizeof url, "%.*s?%s", (int)(at < 600 ? at : 600), f->action, pairs);
     say("form %d sent %s", k, url);
     go(url, 1);
+}
+
+/* ---- (2026-11-23) A field typed in the page itself: a box over its words (about:form?N.F, a field one types in).
+   Enter keeps what is typed (the page's words show it) and, in a form with no other field to type in, sends the
+   form; Tab, or a press elsewhere, keeps it; Esc leaves it as it was. A button's words send the form as it is;
+   the other fields' (a list, a box, a radio button) open the form's dialog, which has what was typed. */
+static struct {
+    struct gui_window *pop;
+    struct gui_widget *box;
+    int form, idx;
+    char words[140];                    /* the field's words in the page before (shown again if it is left empty) */
+} inp;
+
+static int typed_fields(const struct wform *f)
+{
+    int i, n = 0;
+    for (i = 0; i < f->n; i++)
+        n += typed_kind(f->f[i].kind);
+    return n;
+}
+
+static void inpage_end(int keep, int send, int refocus)
+{
+    struct gui_window *p = inp.pop;
+    int k = inp.form;
+    if (!p)
+        return;
+    inp.pop = NULL;
+    if (keep && k >= 0 && k < nforms && k < FORMS && inp.idx < forms[k].n) {
+        struct wform *f = &forms[k];
+        char shown[140];
+        snprintf(f->f[inp.idx].value, sizeof f->f[0].value, "%s", gui_get_text(inp.box));
+        if (f->f[inp.idx].value[0])
+            snprintf(shown, sizeof shown, "[%.120s]", f->f[inp.idx].value);
+        else
+            snprintf(shown, sizeof shown, "%s", inp.words);
+        gui_richview_set_link_words(view, shown);
+        say("field %d.%d typed %s", k, inp.idx, f->f[inp.idx].value);
+    } else {
+        say("field %d.%d left", k, inp.idx);
+        send = 0;
+    }
+    gui_close_later(p);
+    if (refocus) {                              /* (a key ended it: the page has the keyboard again) */
+        if (win->id)
+            glos_focus(win->id);
+        gui_focus(view);
+    }
+    if (send && typed_fields(&forms[k]) == 1)
+        form_send(k);
+}
+
+static void inpage_popdown(struct gui_window *w)
+{
+    (void)w;
+    inpage_end(1, 0, 0);
+}
+
+static int inpage_keys(struct gui_widget *w, struct gui_ev *e)
+{
+    (void)w;
+    if (e->type != GUI_EV_KEY || e->mods & (GLOS_MOD_CTRL | GLOS_MOD_ALT))
+        return 0;
+    if (e->key == GUI_K_ENTER)
+        inpage_end(1, 1, 1);
+    else if (e->key == GUI_K_ESC)
+        inpage_end(0, 0, 1);
+    else if (e->key == GUI_K_TAB)
+        inpage_end(1, 0, 1);
+    else
+        return 0;
+    return 1;
+}
+
+static void inpage_open(int k, int i)
+{
+    struct gfx_rect r;
+    int ox, oy, w, mh, right;
+    inpage_end(1, 0, 0);
+    if (!gui_richview_link_place(view, &r) || gui_origin(win, &ox, &oy) != 0) {
+        form_fill(k);                           /* (its words not shown: the dialog) */
+        return;
+    }
+    gui_richview_link_words(view, inp.words, sizeof inp.words);
+    right = view->r.x + view->r.w - GUI_SB;
+    w = r.w < 200 ? 200 : r.w;
+    if (w > right - view->r.x)
+        w = right - view->r.x;
+    if (r.x + w > right)
+        r.x = right - w;
+    inp.pop = gui_window_at("", ox + r.x, oy + r.y, w, r.h + 6, GUI_W_POPUP | GUI_W_BARE);
+    inp.pop->owner = win;
+    inp.pop->on_popdown = inpage_popdown;
+    inp.box = gui_field(inp.pop->root, 20);
+    gui_grow(inp.box, 1);
+    gui_set_text(inp.box, forms[k].f[i].value);
+    gui_keys(inp.box, inpage_keys);
+    mh = gui_font->height + 6;                  /* (as tall as a field, over the words' line) */
+    gui_resize(inp.pop, w, mh);
+    inp.pop->gw.x = ox + r.x, inp.pop->gw.y = oy + r.y + (r.h - mh) / 2;
+    inp.form = k, inp.idx = i;
+    inp.pop->focus = inp.box;
+    gui_show(inp.pop, 1);
+    say("field %d.%d typing", k, i);
+}
+
+/* A form's field's words activated (about:form?N.F): typed in the page, sent, or the form's dialog. */
+static void form_field(int k, int i)
+{
+    const char *kind;
+    if (k < 0 || k >= nforms || k >= FORMS || i < 0 || i >= forms[k].n) {
+        form_fill(k);
+        return;
+    }
+    kind = forms[k].f[i].kind;
+    if (typed_kind(kind))
+        inpage_open(k, i);
+    else if (!strcmp(kind, "submit") || !strcmp(kind, "image"))
+        form_send(k);
+    else
+        form_fill(k);
 }
 
 static int reloading;                   /* (Reload: the page read again, though it is the one shown) */
@@ -1064,8 +1212,9 @@ static void go(const char *url, int push)
     stop();
     if (starts(url, "about:bookmarks")) {
         show_marks(push);
-    } else if (starts(url, "about:form?")) {
-        form_fill(atoi(url + 11));              /* (a form's field pressed: its dialog, over the page shown) */
+    } else if (starts(url, "about:form?")) {    /* (a form's field pressed: typed in the page, or its dialog) */
+        const char *dot = strchr(url + 11, '.');
+        form_field(atoi(url + 11), dot ? atoi(dot + 1) : -1);
     } else if (starts(url, "about:unmark?")) {
         marks_load();
         unmark(atoi(url + 13));

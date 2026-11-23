@@ -915,6 +915,11 @@ void gui_richview_follow(struct gui_widget *w, int on);        /* kept at the en
 void gui_richview_tight(struct gui_widget *w, int on);         /* (phase F) its blocks a pixel apart, not a
                                            paragraph's gap: the lines of a log or of a chat */
 const char *gui_richview_link(struct gui_widget *w);
+/* (2026-11-23) The link last activated (GUI_ON_ACTIVATE): where its words are, in the window (scrolled into
+   view): 1; 0 none. And its words replaced (a form's field showing what was typed in it). */
+int gui_richview_link_place(struct gui_widget *w, struct gfx_rect *r);
+void gui_richview_set_link_words(struct gui_widget *w, const char *text);
+int gui_richview_link_words(struct gui_widget *w, char *out, int room);        /* its words now: their length */
 char *gui_richview_text(struct gui_widget *w, int chosen);     /* the text (all, or what is chosen): malloc'd */
 int gui_richview_show(struct gui_widget *w, int block);        /* (phase F) scrolled to put block i at the top (a
                                            closed block round it opened): 0; -1 no such block */

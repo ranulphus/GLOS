@@ -173,14 +173,14 @@ int main(void)
     html_read("<input name=out><form action=\"s?old=1\" method=GET><input type=hidden name=h value=1>"
               "<input name=q placeholder=Words> <input type=submit value=Go></form><form method=post><textarea name=t>x</textarea></form>",
               206, "", "http://h/d/p.html", &form_sink);
-    CHECK(!strcmp(got, "P0:[input]FORM(http://h/d/s?old=1,get)FIELD(hidden,h,1)FIELD(input,q,)\nP0:<about:form?0|[Words]>"
-                       "FIELD(submit,,Go) <about:form?0|[Go]>FORM(http://h/d/p.html,post)FIELD(textarea,t,)\nP0:<about:form?1|[t]>"),
+    CHECK(!strcmp(got, "P0:[input]FORM(http://h/d/s?old=1,get)FIELD(hidden,h,1)FIELD(input,q,)\nP0:<about:form?0.1|[Words]>"
+                       "FIELD(submit,,Go) <about:form?0.2|[Go]>FORM(http://h/d/p.html,post)FIELD(textarea,t,)\nP0:<about:form?1.0|[t]>"),
           "forms:\n  got  %s", got);
     ngot = 0, got[0] = 0;
     html_read("<form><select name=s><option value=a>A<option selected> B  b </select><input type=checkbox name=c checked>"
               "<input type=radio name=r value=1></form>", 146, "", "http://h/d/p.html", &form_sink);
-    CHECK(!strcmp(got, "FORM(http://h/d/p.html,get)FIELD(select,s,)\nP0:<about:form?0|[s]>FIELD(option,s,a,A)"
-                       "FIELD(option,s,B b,B b,on)FIELD(checkbox,c,on,,on)<about:form?0|[c]>FIELD(radio,r,1)<about:form?0|[r]>"),
+    CHECK(!strcmp(got, "FORM(http://h/d/p.html,get)FIELD(select,s,)\nP0:<about:form?0.0|[s]>FIELD(option,s,a,A)"
+                       "FIELD(option,s,B b,B b,on)FIELD(checkbox,c,on,,on)<about:form?0.3|[c]>FIELD(radio,r,1)<about:form?0.4|[r]>"),
           "lists and boxes:\n  got  %s", got);
     is("a form's fields",
        "<form action=/s><input type=text name=q value=\"hi\"><input type=submit value=\"Go\"> <select name=s><option>One<option>Two</select>"

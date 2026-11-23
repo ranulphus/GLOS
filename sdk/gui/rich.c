@@ -279,6 +279,7 @@ struct rview {
     int sa_block, sa_at, sb_block, sb_at;       /* the choice: from (block, byte), to */
     int link;                           /* the piece of the link reached by Tab (-1: none) */
     char *link_text;                    /* the link GUI_ON_ACTIVATE told of */
+    int act_block, act_run;             /* (2026-11-23) ... its run (gui_richview_link_place); -1: none */
     int follow;                         /* (the app's: gui_richview_follow) kept at the end as the document grows ... */
     int at_end;                         /* ... while it is scrolled to the end */
     int limit;                          /* (a chat view) the blocks kept at most (0: no limit) */
@@ -781,6 +782,7 @@ static void activate(struct rview *v, int k)
         return;
     free(v->link_text);
     v->link_text = strdup(r->link);
+    v->act_block = v->p[k].block, v->act_run = v->p[k].run;
     gui_send(&v->w, GUI_ON_ACTIVATE);
 }
 
@@ -931,6 +933,7 @@ struct gui_widget *gui_richview(struct gui_widget *parent)
 {
     struct rview *v = (struct rview *)gui_new(parent, &rv_class, sizeof *v);
     v->link = -1;
+    v->act_block = v->act_run = -1;
     return &v->w;
 }
 
@@ -941,6 +944,7 @@ void gui_richview_set(struct gui_widget *w, struct gui_rdoc *doc)
         gui_rdoc_free(v->doc);
     v->doc = doc;
     v->laid_w = 0, v->sel_on = 0, v->link = -1, v->sb.pos = 0;
+    v->act_block = v->act_run = -1;
     free(v->tint), v->tint = NULL, v->ntint = 0;
     gui_damage(w);
 }
@@ -971,6 +975,58 @@ void gui_richview_follow(struct gui_widget *w, int on)  /* kept at the end as th
 }
 
 const char *gui_richview_link(struct gui_widget *w) { return RV(w)->link_text ? RV(w)->link_text : ""; }
+
+/* (2026-11-23) The link last activated: where its words are in the window (its first piece shown, scrolled
+   into the view if it was out of it). */
+int gui_richview_link_place(struct gui_widget *w, struct gfx_rect *r)
+{
+    struct rview *v = RV(w);
+    int i, k;
+    if (!v->doc || v->act_block < 0 || v->act_block >= v->doc->n)
+        return 0;
+    place(v);
+    for (i = 0; i < v->nl; i++)
+        for (k = v->l[i].first; k < v->l[i].first + v->l[i].n; k++)
+            if (v->p[k].kind == P_TEXT && v->p[k].block == v->act_block && v->p[k].run == v->act_run) {
+                scroll_to_piece(v, k);
+                r->x = v->w.r.x + v->p[k].x, r->y = v->w.r.y + v->l[i].y - v->sb.pos;
+                r->w = v->p[k].w, r->h = v->l[i].h;
+                gui_damage(w);
+                return 1;
+            }
+    return 0;
+}
+
+/* ... its words (out: room bytes at most, with the 0): their length, 0 if none */
+int gui_richview_link_words(struct gui_widget *w, char *out, int room)
+{
+    struct rview *v = RV(w);
+    struct rrun *r;
+    if (room <= 0)
+        return 0;
+    out[0] = 0;
+    if (!v->doc || v->act_block < 0 || v->act_block >= v->doc->n || v->act_run < 0 || v->act_run >= v->doc->b[v->act_block].nrun)
+        return 0;
+    r = &v->doc->b[v->act_block].run[v->act_run];
+    snprintf(out, (size_t)room, "%.*s", r->len, r->text ? r->text : "");
+    return (int)strlen(out);
+}
+
+/* ... and its words replaced (a form's field showing what was typed in it): laid out again. */
+void gui_richview_set_link_words(struct gui_widget *w, const char *text)
+{
+    struct rview *v = RV(w);
+    struct rrun *r;
+    char *t;
+    if (!v->doc || v->act_block < 0 || v->act_block >= v->doc->n || v->act_run < 0
+        || v->act_run >= v->doc->b[v->act_block].nrun || !(t = strdup(text ? text : "")))
+        return;
+    r = &v->doc->b[v->act_block].run[v->act_run];
+    free(r->text);
+    r->text = t, r->len = (int)strlen(t);
+    v->laid_w = 0, v->sel_on = 0;
+    gui_damage(w);
+}
 
 /* ---- (phase F) a place shown: a block (a link's #name), or what is found */
 

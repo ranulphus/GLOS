@@ -1,11 +1,15 @@
-# The Web Reader's forms (apps/web; phase F): a page of two forms, their fields' words links to their dialogs.
-# The first, sent by GET: its text field's word (its placeholder) followed, the dialog (a box to type in, a list,
-# a check box, a pair of radio buttons) filled in and sent: the address the form names, its query its hidden
-# field, the words typed, the list's choice, the box checked and the radio button chosen, as the page set them. The second, sent by POST: its
-# body made of its field (a file's address is read as it is: the POST itself is the https suite's, by WEB -dump).
+# The Web Reader's forms (apps/web; phase F): a page of two forms, their fields' words links (about:form?N.F).
+# The first, sent by GET: the list's word opens the form's dialog (a box to type in, a list, a check box, a pair
+# of radio buttons), filled in and sent: the address the form names, its query its hidden field, the words
+# typed, the list's choice, the box checked and the radio button chosen, as the page set them. Then (2026-11-23)
+# its text field typed in the page itself: a box over its words; Esc leaves it as it was; Tab keeps what was
+# typed (the page's words show it); Enter keeps it and sends the form (its only field to type in). The second,
+# sent by POST, typed in the page: its body made of its field (a file's address is read as it is: the POST
+# itself is the https suite's, by WEB -dump). Last, the first form's button's word: the form sent as it is.
 run WEB.EXE C:\WEB\FORM.HTM
 wait "A Form - Web Reader"
 said WEB loaded file:///C:/WEB/FORM.HTM title=A Form blocks=4 links=8
+key tab
 key tab
 key enter
 said WEB form 0 fields=4
@@ -18,6 +22,26 @@ said WEB loaded file:///C:/WEB/RESULT.HTM?src=glos&q=hello+there&in=pics&safe=on
 key alt+left
 said WEB loaded file:///C:/WEB/FORM.HTM title=A Form blocks=4 links=8
 key tab
+key enter
+said WEB field 0.1 typing
+type gone
+key esc
+said WEB field 0.1 left
+key enter
+said WEB field 0.1 typing
+type in page
+key tab
+said WEB field 0.1 typed in page
+shot typed "A Form - Web Reader"
+key enter
+said WEB field 0.1 typing
+key enter
+said WEB field 0.1 typed in page
+said WEB form 0 sent file:///C:/WEB/RESULT.HTM?src=glos&q=in+page&in=pics&safe=on&size=l
+said WEB loaded file:///C:/WEB/RESULT.HTM?src=glos&q=in+page&in=pics&safe=on&size=l title=Found blocks=1 links=0
+key alt+left
+said WEB loaded file:///C:/WEB/FORM.HTM title=A Form blocks=4 links=8
+key tab
 key tab
 key tab
 key tab
@@ -25,12 +49,22 @@ key tab
 key tab
 key tab
 key enter
-said WEB form 1 fields=1
-wait "Fill In the Form"
+said WEB field 1.0 typing
 type y z
 key enter
 said WEB form 1 sent post file:///C:/WEB/RESULT.HTM body x=y+z
 said WEB loaded file:///C:/WEB/RESULT.HTM title=Found blocks=1 links=0
+key alt+left
+said WEB loaded file:///C:/WEB/FORM.HTM title=A Form blocks=4 links=8
+key tab
+key tab
+key tab
+key tab
+key tab
+key tab
+key enter
+said WEB form 0 sent file:///C:/WEB/RESULT.HTM?src=glos&q=&in=pics&safe=on&size=l
+said WEB loaded file:///C:/WEB/RESULT.HTM?src=glos&q=&in=pics&safe=on&size=l title=Found blocks=1 links=0
 key alt+f4
 gone "A Form - Web Reader"
 expect WEB end
