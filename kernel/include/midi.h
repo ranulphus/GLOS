@@ -36,5 +36,7 @@ u32 midi_stat(char *buf, u32 max);              /* glos audio's lines */
 void sb16_midi(int on);                         /* (sb16.c) the card's MPU-401 is GLOS's: its interrupts too */
 u16 crystal_fm(void);                           /* (crystal.c) its FM chip's port, 0 if none set up */
 u16 crystal_mpu(void);                          /* ... and its MPU-401's */
+u16 cmi8738_fm(void);                           /* (cmi8738.c) its FM synthesiser's port, 0 if none */
+u16 cmi8738_mpu(void);                          /* ... and its MPU-401's */
 
 #endif

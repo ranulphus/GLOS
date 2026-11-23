@@ -220,6 +220,10 @@ void midi_late(void)
         fm_find(crystal_fm());
     if (!md.mpu && crystal_mpu())
         mpu_find(crystal_mpu(), 0);
+    if (!md.fm && cmi8738_fm())                 /* (phase H: a CMI8738's, in its own I/O space) */
+        fm_find(cmi8738_fm());
+    if (!md.mpu && cmi8738_mpu())
+        mpu_find(cmi8738_mpu(), 0);
 }
 
 static const char *port_name(u32 port) { return port == MIDI_FM ? "fm" : "mpu"; }

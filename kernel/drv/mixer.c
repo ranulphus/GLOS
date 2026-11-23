@@ -141,9 +141,12 @@ static void late(void)
         return;
     v[0] = 0;                                   /* (kcfg_get leaves it alone for a key the schema lacks) */
     kcfg_get("sound", "crystal", v, sizeof v);
-    if (crystal_init(v) != 0)
+    if (crystal_init(v) == 0)
+        mx.card = &crystal_card;
+    else if (cmi8738_init() == 0)               /* (phase H: a PCI CMI8738, cmi8738.c) */
+        mx.card = &cmi8738_card;
+    else
         return;
-    mx.card = &crystal_card;
     if (mx.bi->sound_flags & BI_SOUND_OFF)
         return;
     mx.found = mx.on = 1;

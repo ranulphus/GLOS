@@ -594,6 +594,7 @@ static void vm_leave(u32 code)
     lcon_leave();                               /* (the prompt on the PC's own screen: DOS's again) */
     mtrr_leave();                               /* (a write-combining range of GLOS's: off) */
     nic_leave();
+    cmi8738_leave();                            /* (a bus master's channels stopped before DOS has its memory back) */
     usb_leave();                                /* (its controllers stopped, reset, given back) */
     cache_end();
     if (vm.bi->flags & BI_F_SELFTEST)

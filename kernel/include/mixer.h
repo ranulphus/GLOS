@@ -64,7 +64,9 @@ int mixer_wants(struct app *a, u32 *id);                        /* a stream of a
 const char *mixer_card(void);                                   /* the card the mixer plays through, or NULL */
 int mixer_chan(int chan, int set, u8 *left, u8 *right, u8 *mute);
 int mixer_input(int set, int *input);
-extern const struct sound_card sb16_card, crystal_card;
+extern const struct sound_card sb16_card, crystal_card, cmi8738_card;
+int cmi8738_init(void);                         /* (phase H) a PCI CMI8738 found and set up: 0 */
+void cmi8738_leave(void);                       /* glos exit: its channels stopped, its legacy parts as they were */
 void mixer_refresh(void);                       /* the card started or stopped as things stand now */
 const char *mixer_blaster(void);                /* BLASTER for programs: the virtual Sound Blaster's, a Crystal chip's, 0 */
 void mixer_late(void);                          /* GLOS.CFG read: a Crystal chip set up when there's no SB16 */
