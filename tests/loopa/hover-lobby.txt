@@ -1,16 +1,24 @@
 # Cushion's lobby (apps/hover/lobby.c), played by the desk suite's hover case: the lobby with nobody's game
-# on the network, Play Alone, the game in its DOS-GL window, Esc back to the lobby, Quit.
+# on the network, the computer's craft made Keen, Play Alone, the game in its DOS-GL window, Esc back to the
+# lobby, Quit; started again, the strength chosen is still Keen (HVCRAFT.CFG's strength line), Quit.
 run HVCRAFT.EXE
 wait "Cushion"
 said HVCRAFT lobby shown
 said HVCRAFT lobby games=0
+quick alt+c home down down
 key alt+p
-said HVCRAFT lobby chose alone kind=0 arena=0 strength=1
+said HVCRAFT lobby chose alone kind=0 arena=0 strength=2
 said HVCRAFT started kind=0 craft=4 arena=The Old Basin
 pause 4000
 key esc
 said HVCRAFT lobby shown
 wait "Cushion"
 key alt+q
-said HVCRAFT lobby chose quit kind=0 arena=0 strength=1
+said HVCRAFT lobby chose quit kind=0 arena=0 strength=2
+expect HVCRAFT end
+run HVCRAFT.EXE
+wait "Cushion"
+said HVCRAFT lobby shown
+key alt+q
+said HVCRAFT lobby chose quit kind=0 arena=0 strength=2
 expect HVCRAFT end

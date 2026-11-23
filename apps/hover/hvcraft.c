@@ -458,6 +458,8 @@ static const char *const kind_words[4] = { "flags", "beacons", "lamp", "laps" };
 static char cfg_path[540], cfg_name[17];
 static int cfg_network;                 /* 0 alone, 1 open, 2 join */
 
+static const char *const strength_words[3] = { "mild", "normal", "keen" };
+
 static void cfg_read(const char *argv0, int *kind)
 {
     char line[120], key[24], val[64];
@@ -481,6 +483,10 @@ static void cfg_read(const char *argv0, int *kind)
             which = atoi(val);
         } else if (!strcmp(key, "name")) {
             snprintf(cfg_name, sizeof cfg_name, "%.16s", val);
+        } else if (!strcmp(key, "strength")) {  /* (2026-11-23: the computer's craft's, kept too) */
+            for (i = 0; i < 3; i++)
+                if (!strcmp(val, strength_words[i]))
+                    strength = i;
         } else if (!strcmp(key, "network")) {
             cfg_network = !strcmp(val, "open") ? 1 : !strcmp(val, "join") ? 2 : 0;
         }
@@ -496,6 +502,7 @@ static void cfg_write(int kind)
     fprintf(f, "game = %s\narena = %d\n", kind_words[kind & 3], which);
     if (cfg_name[0])
         fprintf(f, "name = %s\n", cfg_name);
+    fprintf(f, "strength = %s\n", strength_words[strength >= 0 && strength < 3 ? strength : 1]);
     if (cfg_network)
         fprintf(f, "network = %s\n", cfg_network == 1 ? "open" : "join");
     fclose(f);

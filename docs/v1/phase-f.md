@@ -1333,8 +1333,11 @@ The plan's "toolkit window" before the game (`docs/v1/apps/hovercraft.md`), `app
 - **Remembered** in HVCRAFT.CFG as before (the game, the arena, the name).
 - **Tests:** the hover case plays `tests/loopa/hover-lobby.txt` last on both desktops: the lobby with no
   game on the network, Play Alone, the game, Esc back to the lobby, Quit.
-- **Not yet:** a game of the lobby's list played over two emulated PCs (the hoverpair case joins by J); the
-  strength and the name remembered across starts (the name is); names over the craft.
+- **Since built** (2026-11-23): the computer's craft's strength kept across starts (HVCRAFT.CFG's `strength =
+  mild|normal|keen`, beside the name); `hover-lobby.txt` makes it Keen, plays, quits, and starts Cushion again
+  to find it Keen still.
+- **Not yet:** a game of the lobby's list played over two emulated PCs (the hoverpair case joins by J); names over
+  the craft.
 
 ## The Games Library: a game's profile (2026-11-22)
 
