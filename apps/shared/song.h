@@ -72,6 +72,10 @@ void song_track_remove(struct song *s, unsigned t);
 /* A note into a track, kept in order: its index, or SONG_E_MEMORY. */
 long song_note_add(struct song_track *t, unsigned long at, unsigned long len, unsigned key, unsigned force);
 void song_note_remove(struct song_track *t, unsigned long i);
+/* (2026-11-23) An event (a controller, a bend: status B0h, E0h ...) into a track, kept in order of time (after
+   those at its time): its index, or SONG_E_MEMORY. And one taken out. */
+long song_event_add(struct song_track *t, unsigned long at, unsigned status, unsigned d1, unsigned d2);
+void song_event_remove(struct song_track *t, unsigned long i);
 void song_sort(struct song_track *t);                   /* (after notes' starts were changed in place) */
 unsigned long song_ticks(const struct song *s);         /* to the end of its last note or event */
 unsigned long song_ms(const struct song *s, unsigned long tick);        /* a tick's time, by the tempo's changes */

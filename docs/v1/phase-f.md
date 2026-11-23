@@ -2019,4 +2019,14 @@ takes the notes of the bars chosen away (each one step of the history). F4 again
 - **Bars moved by dragging** (later the same afternoon): a press inside the bars chosen and a drag takes them
   along (the choice shows where they would go, onto another track too); at the release their notes move there,
   one step of the history (`bars moved ...`). `studio-arrange` drags bar 3 to bar 4.
-- **Not yet:** controller lanes.
+- **Controller lanes** (later the same afternoon): View, **Controller Lane** (F3) shows a lane 64 pixels high
+  under the roll, scrolled and zoomed with it, its kind chosen beside it (Alt+L): **Velocity** (a bar at each
+  note's start, as tall as it is struck; chosen notes in the chosen colour), **Volume**, **Pan**, **Modulation**,
+  **Sustain** (controllers 7, 10, 1, 64: the value held from each event to the next, from the track's own
+  volume and pan before its first) and **Pitch bend** (14 bits about the middle line). A drag draws: the notes
+  whose starts it passes take a velocity along the line from the last place; a controller gets an event at
+  every sixteenth passed (what was in that sixteenth goes), along the line. A drawing is one step of the
+  history, which now keeps a track's events as well as its notes. The song model gained `song_event_add`
+  (kept in order of time) and `song_event_remove` (song_test). `studio-lane` (host and the emulated desktops):
+  velocities drawn level over three notes, a volume ramp of nine events, a bend, Undo three times, Redo.
+- **Not yet:** a lane's events chosen, moved or deleted one by one; other controllers by number.

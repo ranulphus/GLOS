@@ -1,0 +1,45 @@
+# MIDI Studio's controller lane (apps/studio; phase F, 2026-11-23): C:\SND\WALTZ.MID's notes (a C at 0, a D at
+# 1000 ticks, an E at 1440), the lane under the roll (View, Controller Lane, F3): their velocities drawn level
+# across them; then Volume chosen and drawn as a ramp over the first two bars (a controller 7 at every
+# sixteenth, nine of them); Pitch bend drawn at a point; Undo takes the drawings back one at a time, Redo puts
+# one back; F3 hides the lane.
+run STUDIO.EXE -demo
+wait "MIDI Studio"
+key ctrl+o
+wait "Open"
+type C:\\SND\\WALTZ.MID\n
+said STUDIO opened WALTZ.MID tracks=1 notes=3
+key f3
+said STUDIO lane velocity
+drag "MIDI Studio" 2 380 200 380
+said STUDIO lane velocity drawn notes=3
+shot velocity "MIDI Studio"
+key alt+l
+key down
+said STUDIO lane volume
+drag "MIDI Studio" 2 400 125 360
+said STUDIO lane volume drawn events=9
+shot volume "MIDI Studio"
+key alt+l
+key down
+key down
+key down
+key down
+said STUDIO lane bend
+drag "MIDI Studio" 300 360 300 360
+said STUDIO lane bend drawn events=1
+key ctrl+z
+said STUDIO undone 3
+key ctrl+z
+said STUDIO undone 3
+key ctrl+z
+said STUDIO undone 3
+key ctrl+y
+said STUDIO redone 3
+key f3
+said STUDIO lane off
+key alt+f4
+wait "MIDI Studio"
+key alt+n
+gone "MIDI Studio"
+expect STUDIO end

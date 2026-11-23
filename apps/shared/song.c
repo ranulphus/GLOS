@@ -113,6 +113,39 @@ long song_note_add(struct song_track *t, unsigned long at, unsigned long len, un
     return (long)lo;
 }
 
+long song_event_add(struct song_track *t, unsigned long at, unsigned status, unsigned d1, unsigned d2)
+{
+    unsigned long lo = 0, hi = t->nevents;
+    struct song_event *e;
+    while (lo < hi) {                   /* (after every event at its time or before) */
+        unsigned long mid = (lo + hi) / 2;
+        if (t->events[mid].at <= at)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    if (t->nevents == t->event_room) {
+        unsigned long room = t->event_room ? t->event_room * 2 : 64;
+        if (!(e = realloc(t->events, room * sizeof *e)))
+            return SONG_E_MEMORY;
+        t->events = e, t->event_room = room;
+    }
+    memmove(&t->events[lo + 1], &t->events[lo], (t->nevents - lo) * sizeof t->events[0]);
+    e = &t->events[lo];
+    e->at = at, e->status = (unsigned char)(status & 0xF0), e->d1 = (unsigned char)(d1 & 0x7F), e->d2 = (unsigned char)(d2 & 0x7F);
+    e->pad = 0;
+    t->nevents++;
+    return (long)lo;
+}
+
+void song_event_remove(struct song_track *t, unsigned long i)
+{
+    if (i >= t->nevents)
+        return;
+    memmove(&t->events[i], &t->events[i + 1], (t->nevents - i - 1) * sizeof t->events[0]);
+    t->nevents--;
+}
+
 void song_note_remove(struct song_track *t, unsigned long i)
 {
     if (i >= t->nnotes)

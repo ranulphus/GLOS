@@ -116,9 +116,14 @@ int main(int argc, char **argv)
     t = &s->track[1];
     strcpy(t->name, "Flute"), t->program = 73, t->volume = 90, t->pan = 20;
     song_note_add(t, 240, 720, 76, 80);
-    t->events = malloc(2 * sizeof t->events[0]), t->event_room = 2, t->nevents = 2;
-    t->events[0].at = 300, t->events[0].status = 0xE0, t->events[0].d1 = 0, t->events[0].d2 = 80, t->events[0].pad = 0;
-    t->events[1].at = 900, t->events[1].status = 0xB0, t->events[1].d1 = 64, t->events[1].d2 = 127, t->events[1].pad = 0;
+    /* (2026-11-23) events put in out of order kept in order (one at a time already there: after it); one taken out */
+    CHECK(song_event_add(t, 900, 0xB0, 64, 127) == 0 && song_event_add(t, 300, 0xE5, 0, 80) == 0
+          && song_event_add(t, 900, 0xB0, 7, 99) == 2 && song_event_add(t, 600, 0xB0, 1, 200) == 1 && t->nevents == 4
+          && t->events[0].status == 0xE0 && t->events[1].at == 600 && t->events[1].d2 == 200 - 128 && t->events[2].d1 == 64
+          && t->events[3].d1 == 7, "events in order: %lu", t->nevents);
+    song_event_remove(t, 3);
+    song_event_remove(t, 1);
+    CHECK(t->nevents == 2 && t->events[0].at == 300 && t->events[1].at == 900 && t->events[1].d1 == 64, "events taken out");
     k = song_track_add(s, SONG_DRUMS);
     CHECK(k == 2 && s->track[2].channel == 9, "a drums track");
     song_note_add(&s->track[2], 0, 120, 36, 110);

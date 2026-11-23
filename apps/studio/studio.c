@@ -29,7 +29,7 @@
 
 enum { C_NEW = 1, C_OPEN, C_SAVE, C_SAVEAS, C_EXIT, C_UNDO, C_REDO, C_DELETE, C_SELALL, C_TRACK, C_DRUMS, C_UNTRACK, C_INSTR,
        C_MUTE, C_SOLO, C_PLAY, C_STOP, C_TEMPO, C_ZOOMIN, C_ZOOMOUT, C_RECORD, C_CLICK, C_COUNTIN, C_STEP, C_STEPLEN,
-       C_QUANT = C_STEPLEN + 4, C_UP, C_DOWN, C_OCTUP, C_OCTDOWN, C_METER, C_VELOCITY, C_ARRANGE, C_BCOPY, C_BPASTE, C_LOOP };
+       C_QUANT = C_STEPLEN + 4, C_UP, C_DOWN, C_OCTUP, C_OCTDOWN, C_METER, C_VELOCITY, C_ARRANGE, C_BCOPY, C_BPASTE, C_LOOP, C_LANE };
                                         /* (C_STEPLEN + n: a sixteenth, an eighth, a quarter, a half) */
 
 #define ROW 8                           /* a key's row on the roll: pixels */
@@ -58,6 +58,19 @@ static const char *const gm[128] = {
 
 static struct gui_window *win;
 static struct gui_widget *tracks, *roll, *status, *clock;
+/* (2026-11-23) The controller lane: under the roll, the chosen track's velocities or one of its controllers
+   (volume, pan, modulation, sustain, its bend), drawn with the mouse: View, Controller Lane (F3), its kind
+   chosen beside it. A drawing is one step of the history. */
+enum { LN_VELOCITY, LN_VOLUME, LN_PAN, LN_MOD, LN_SUSTAIN, LN_BEND, LN_KINDS };
+static const char *const lane_names[LN_KINDS] = { "Velocity", "Volume", "Pan", "Modulation", "Sustain", "Pitch bend" };
+static const char *const lane_words[LN_KINDS] = { "velocity", "volume", "pan", "modulation", "sustain", "bend" };
+static const unsigned char lane_cc[LN_KINDS] = { 0, 7, 10, 1, 64, 0 };
+static struct gui_widget *lane, *lane_row, *lane_choice;
+static int lane_on, lane_kind, lane_drag, lane_last_v;
+static long lane_last;                  /* the drag's last tick (a controller's: on the grid), -1 at its press */
+static unsigned long lane_count;        /* notes or events the drag set */
+static struct step *lane_step;
+#define LANE_H 64
 static struct song *song;
 static struct gui_undo *history;
 static int cur;                         /* the track the roll shows */
@@ -298,6 +311,8 @@ static void roll_draw(struct gui_widget *w, struct gfx_surface *s, const struct 
     if (stepping)                               /* step entry's cursor */
         gfx_fill(s, X(step_at), v->area.y, 2, v->area.h, 0x2060D0);
 #undef X
+    if (lane_on)                                /* (the lane follows the roll: scrolled, zoomed, its notes) */
+        gui_damage(lane);
 }
 
 static long note_at(const struct song_track *t, int x, int key)        /* the one on top there, or -1 */
@@ -522,6 +537,182 @@ static int arrange_event(struct gui_widget *w, struct gui_ev *e, int x, int y)
         return 1;
     }
     return e->type == GUI_EV_PRESS || e->type == GUI_EV_MOVE || e->type == GUI_EV_RELEASE;
+}
+
+/* ---- the controller lane */
+
+static unsigned faint(unsigned rgb)     /* a third of the colour, the rest the field's */
+{
+    unsigned field = GUI_ROLE(GLOS_ROLE_FIELD), out = 0;
+    int sh;
+    for (sh = 0; sh < 24; sh += 8)
+        out |= ((((rgb >> sh) & 0xFF) + 2 * ((field >> sh) & 0xFF)) / 3) << sh;
+    return out;
+}
+
+static int lane_max(void) { return lane_kind == LN_BEND ? 16383 : 127; }
+
+static int lane_match(const struct song_event *e)
+{
+    return lane_kind == LN_BEND ? (e->status & 0xF0) == 0xE0 : (e->status & 0xF0) == 0xB0 && e->d1 == lane_cc[lane_kind];
+}
+
+static int lane_value(const struct song_event *e) { return lane_kind == LN_BEND ? e->d1 | e->d2 << 7 : e->d2; }
+
+static int lane_first(const struct song_track *t)      /* the value before the track's first event of the kind */
+{
+    return lane_kind == LN_VOLUME ? t->volume : lane_kind == LN_PAN ? t->pan : lane_kind == LN_BEND ? 8192 : 0;
+}
+
+static int lane_dx(void)
+{
+    int dx = 0;
+    gui_cview_get_scroll(roll, &dx, NULL, NULL);
+    return dx;
+}
+
+static int lane_x(unsigned long tick, int dx) { return lane->r.x + (int)(((long)tick - dx) / zoom); }
+
+static void lane_draw(struct gui_widget *w, struct gfx_surface *s)
+{
+    const struct song_track *t;
+    int dx, x0 = w->r.x, x1 = w->r.x + w->r.w - GUI_SB, top = w->r.y + 2, h = w->r.h - 4, max = lane_max();
+    unsigned long i;
+#define LY(v) (top + h - 1 - (int)((long)(v) * (h - 1) / max))
+    gfx_fill(s, w->r.x, w->r.y, w->r.w, w->r.h, GUI_ROLE(GLOS_ROLE_FIELD));
+    gfx_fill(s, w->r.x, w->r.y, w->r.w, 1, GUI_ROLE(GLOS_ROLE_LINE));
+    if (!song || cur < 0 || cur >= (int)song->ntracks || arrange)
+        return;
+    t = &song->track[cur];
+    dx = lane_dx();
+    if (lane_kind == LN_VELOCITY) {             /* a bar at each note's start, as tall as it is struck */
+        for (i = 0; i < t->nnotes; i++) {
+            const struct song_note *n = &t->notes[i];
+            int x = lane_x(n->at, dx), y = LY(n->force);
+            if (x < x0 - 3 || x >= x1)
+                continue;
+            gfx_fill(s, x, y, 3, top + h - y, n->sel ? GUI_ROLE(GLOS_ROLE_CHOSEN) : GUI_ROLE(GLOS_ROLE_MARK));
+        }
+    } else {                                    /* the controller's value, held from each event to the next */
+        int v = lane_first(t), px = x0;
+        if (lane_kind == LN_BEND)
+            gfx_fill(s, x0, LY(8192), x1 - x0, 1, GUI_ROLE(GLOS_ROLE_SHADE));
+        for (i = 0; i <= t->nevents; i++) {
+            int ex;
+            if (i < t->nevents && !lane_match(&t->events[i]))
+                continue;
+            ex = i < t->nevents ? lane_x(t->events[i].at, dx) : x1;
+            ex = ex < x0 ? x0 : ex > x1 ? x1 : ex;
+            if (ex > px) {
+                int y = LY(v);
+                gfx_fill(s, px, y, ex - px, top + h - y, faint(GUI_ROLE(GLOS_ROLE_MARK)));
+                gfx_fill(s, px, y, ex - px, 1, GUI_ROLE(GLOS_ROLE_MARK));
+                px = ex;
+            }
+            if (i < t->nevents) {
+                v = lane_value(&t->events[i]);
+                if (ex > x0 && ex < x1)
+                    gfx_fill(s, ex - 1, LY(v) - 1, 3, 3, GUI_ROLE(GLOS_ROLE_LINE));
+            }
+        }
+    }
+    gfx_text(s, x0 + 4, top, gui_font, GUI_T(lane_names[lane_kind]), -1, GUI_ROLE(GLOS_ROLE_DIM));
+#undef LY
+}
+
+static int lane_at_y(int y)             /* the value at a height in the lane */
+{
+    int top = lane->r.y + 2, h = lane->r.h - 4, v = (int)((long)(top + h - 1 - y) * lane_max() / (h - 1));
+    return v < 0 ? 0 : v > lane_max() ? lane_max() : v;
+}
+
+static void lane_set(struct song_track *t, unsigned long at, int v)    /* a controller's value from a tick on the grid */
+{
+    unsigned long i;
+    for (i = t->nevents; i-- > 0; )             /* (what was there in that sixteenth goes) */
+        if (t->events[i].at >= at && t->events[i].at < at + GRID && lane_match(&t->events[i]))
+            song_event_remove(t, i);
+    if (lane_kind == LN_BEND)
+        song_event_add(t, at, 0xE0, (unsigned)v & 0x7F, (unsigned)v >> 7);
+    else
+        song_event_add(t, at, 0xB0, lane_cc[lane_kind], (unsigned)v);
+    lane_count++;
+}
+
+static void lane_put(int x, int y)       /* the pointer at x, y in the drag: what it passes set */
+{
+    struct song_track *t = &song->track[cur];
+    long tk = (long)lane_dx() + (long)(x - lane->r.x) * zoom;
+    int v = lane_at_y(y);
+    unsigned long i;
+    if (tk < 0)
+        tk = 0;
+    if (lane_kind == LN_VELOCITY) {             /* the notes starting between the last place and this one */
+        long a = lane_last < 0 ? tk - 3 * zoom : lane_last < tk ? lane_last + 1 : tk;
+        long b = lane_last < 0 ? tk + 3 * zoom : lane_last < tk ? tk : lane_last - 1;
+        for (i = 0; i < t->nnotes; i++) {
+            struct song_note *n = &t->notes[i];
+            long f = v;
+            if ((long)n->at < a || (long)n->at > b)
+                continue;
+            if (lane_last >= 0 && tk != lane_last)      /* (along the line from the last place) */
+                f = lane_last_v + (long)(v - lane_last_v) * ((long)n->at - lane_last) / (tk - lane_last);
+            f = f < 1 ? 1 : f > 127 ? 127 : f;
+            if (n->force != f)
+                n->force = (unsigned char)f, lane_count++;
+        }
+        lane_last = tk;
+    } else {                                    /* every sixteenth from the last one to this */
+        long g = tk / (long)GRID * (long)GRID, from = lane_last < 0 ? g : lane_last, step = g >= from ? (long)GRID : -(long)GRID, at;
+        for (at = from;; at += step) {
+            long f = v;
+            if (lane_last >= 0 && g != lane_last)
+                f = lane_last_v + (long)(v - lane_last_v) * (at - lane_last) / (g - lane_last);
+            if (at != lane_last || lane_last < 0)
+                lane_set(t, (unsigned long)at, (int)f);
+            if (at == g)
+                break;
+        }
+        lane_last = g;
+    }
+    lane_last_v = v;
+    gui_damage(lane);
+    gui_damage(roll);
+}
+
+static int lane_event(struct gui_widget *w, struct gui_ev *e)
+{
+    (void)w;
+    if (!song || cur < 0 || cur >= (int)song->ntracks || arrange)
+        return 0;
+    if (e->type == GUI_EV_PRESS && e->button == 1) {
+        lane_step = step_begin();
+        lane_drag = 1, lane_count = 0, lane_last = -1;
+        lane_put(e->x, e->y);
+        return 1;
+    }
+    if (e->type == GUI_EV_MOVE && lane_drag) {
+        lane_put(e->x, e->y);
+        return 1;
+    }
+    if (e->type == GUI_EV_RELEASE && lane_drag) {
+        lane_drag = 0;
+        step_end(lane_step, lane_kind == LN_VELOCITY ? GUI_T("Draw Velocity") : GUI_T("Draw Controller"));
+        lane_step = NULL;
+        say("lane %s drawn %s=%lu", lane_words[lane_kind], lane_kind == LN_VELOCITY ? "notes" : "events", lane_count);
+        return 1;
+    }
+    return e->type == GUI_EV_PRESS || e->type == GUI_EV_MOVE || e->type == GUI_EV_RELEASE;
+}
+
+static void lane_chosen(struct gui_widget *c, int what)
+{
+    if (what != GUI_ON_SELECT && what != GUI_ON_CHANGE)        /* (a choice tells of SELECT) */
+        return;
+    lane_kind = gui_value(c);
+    lane_kind = lane_kind < 0 || lane_kind >= LN_KINDS ? 0 : lane_kind;
+    say("lane %s", lane_words[lane_kind]);
+    gui_damage(lane);
 }
 
 static int roll_event(struct gui_widget *w, struct gui_ev *e, int x, int y)
@@ -1470,6 +1661,12 @@ static void command(struct gui_window *w, int id)
             loop_from = song_ms(song, asel_a * bar_ticks()), loop_to = song_ms(song, (asel_b + 1) * bar_ticks());
         say("loop %s from=%lu to=%lu", loop_on ? "on" : "off", loop_from, loop_to);
         break;
+    case C_LANE:                                /* (2026-11-23) the controller lane under the roll, or none */
+        lane_on = !lane_on;
+        gui_visible(lane_row, lane_on);
+        gui_visible(lane, lane_on);
+        say("lane %s", lane_on ? lane_words[lane_kind] : "off");
+        break;
     case C_ARRANGE:                             /* (2026-11-23) the arrangement, or the roll */
         arrange = !arrange;
         size_roll();
@@ -1670,6 +1867,7 @@ static void update(struct gui_window *w)
     gui_command_enable(w, C_SELALL, t->nnotes > 0 && !arrange);
     gui_command_check(w, C_ARRANGE, arrange);
     gui_command_check(w, C_LOOP, loop_on);
+    gui_command_check(w, C_LANE, lane_on);
     gui_command_enable(w, C_BCOPY, arrange && asel_t >= 0);
     gui_command_enable(w, C_BPASTE, arrange && asel_t >= 0 && bclip_bars > 0);
     gui_command_enable(w, C_UNTRACK, song->ntracks > 1);
@@ -1814,6 +2012,7 @@ static void build(void)
     gui_command(win, C_TEMPO, GUI_T("&Tempo..."), NULL, NULL, NULL);
     gui_command(win, C_METER, GUI_T("Time Si&gnature..."), NULL, NULL, NULL);
     gui_command(win, C_ARRANGE, GUI_T("&Arrangement"), "F4", NULL, GUI_T("Every track as a row of bars, or the notes of one"));
+    gui_command(win, C_LANE, GUI_T("Controller &Lane"), "F3", NULL, GUI_T("The track's velocities or a controller, under the roll"));
     gui_command(win, C_LOOP, GUI_T("L&oop the Chosen Bars"), "Ctrl+R", NULL, GUI_T("Play the bars chosen in the arrangement over and over"));
     gui_command(win, C_BCOPY, GUI_T("&Copy Bars"), "Ctrl+C", NULL, GUI_T("(The arrangement) the bars chosen"));
     gui_command(win, C_BPASTE, GUI_T("Paste &Bars"), "Ctrl+V", NULL, GUI_T("(The arrangement) onto the bar chosen"));
@@ -1850,7 +2049,7 @@ static void build(void)
     gui_menu_sep(m);
     gui_menu_command(m, C_TEMPO), gui_menu_command(m, C_METER);
     m = gui_menu(bar, GUI_T("&View"));
-    gui_menu_command(m, C_ARRANGE);
+    gui_menu_command(m, C_ARRANGE), gui_menu_command(m, C_LANE);
     gui_menu_sep(m);
     gui_menu_command(m, C_ZOOMIN), gui_menu_command(m, C_ZOOMOUT);
     tb = gui_toolbar(win);
@@ -1877,6 +2076,14 @@ static void build(void)
     roll = gui_canvas_view(win->root, 32 * 4 * (int)SONG_PPQ, 128 * ROW * zoom, roll_draw, roll_event);
     gui_cview_style(roll, GUI_CV_RING, 0);
     gui_grow(roll, 1);
+    lane_row = gui_form(win->root);             /* (a form's row: Alt+L reaches its choice) */
+    lane_choice = gui_choice(gui_row(lane_row, GUI_T("&Lane:"), NULL), 12);
+    for (i = 0; i < LN_KINDS; i++)
+        gui_choice_add(lane_choice, GUI_T(lane_names[i]));
+    gui_on(lane_choice, lane_chosen, 0);
+    lane = gui_canvas(win->root, 0, LANE_H, lane_draw, lane_event);
+    gui_visible(lane_row, 0);
+    gui_visible(lane, 0);
     status = gui_status(win);
 }
 
