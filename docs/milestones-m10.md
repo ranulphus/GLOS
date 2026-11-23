@@ -347,4 +347,4 @@ So the desktop on the real G400, drawn by its engine, gives the same bytes as th
 **Open, from the bench:**
 - With GLOS as the shell (`SHELL=`) under MS-DOS 7.1, the kernel never loads GLOS.CFG, and DJGPP programs that
   AUTOEXEC.BAT runs stall. The bench uses agent mode meanwhile.
-- `glos ver` says "GLOS M3".
+- `glos ver` says "GLOS M3". (Mended 2026-11-23: GLOS's release, its API's version and the day it was built.)

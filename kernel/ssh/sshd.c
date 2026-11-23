@@ -22,6 +22,7 @@
 #include "clip.h"
 #include "clock.h"
 #include "glos/config.h"
+#include "glos/api.h"
 #include "kcfg.h"
 #include "app.h"
 #include "arch.h"
@@ -1092,7 +1093,9 @@ static const struct ssh_ops ops;
 
 static int k_exec(struct ssh_chan *ch, const char *cmd)
 {
-    static const char ver[] = "GLOS M3 (" __DATE__ ")\n";
+    static char ver[80];
+    if (!ver[0])                                /* (GLOS's version, its API's, and the day it was built) */
+        ksnprintf(ver, sizeof ver, "GLOS %s (API %d.%d, built %s)\n", GLOS_RELEASE, GLOS_MAJOR, GLOS_MINOR, __DATE__);
     kprintf("GLOS-SSH exec=\"%s\"\n", !strncmp(cmd, "glos secrets ", 13) ? "glos secrets ..." : cmd);   /* (its words
                                                    may be a password: not for the log) */
     if (strncmp(cmd, "glos ", 5) && strcmp(cmd, "glos")) {

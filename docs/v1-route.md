@@ -459,7 +459,8 @@ before that.
   - P1: DOSBench within 3% under GLOS.
 - **The open problems:**
   - shell mode on MS-DOS 7.1;
-  - `glos ver`;
+  - `glos ver` (done 2026-11-23: "GLOS 1.0 preview (API 2.13, built DATE)", GLOS_RELEASE in api.h, its
+    "preview" to go at the release);
   - the intermittent direct-mode session failure on the 486;
   - T19 windowed on the G200;
   - the rare SSH channel message;

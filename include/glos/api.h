@@ -53,6 +53,8 @@
 #ifndef GLOS_API_H
 #define GLOS_API_H
 
+/* (2026-11-23) GLOS's own version, as `glos ver` says it: "preview" until v1 is released (docs/v1-route.md, G) */
+#define GLOS_RELEASE "1.0 preview"
 #define GLOS_MAJOR 2
 #define GLOS_MINOR 13           /* (2.13: CORE's POST to another app of the same program (glos_post's `to`);
                                    2.12: SYS's STAT GLOS_STAT_DEVICES, the devices and what serves each;
