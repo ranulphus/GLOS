@@ -15,6 +15,11 @@
  *   DISK n INSTALL [/ERASE] /Y       GLOS put on disk n to start from it with no DOS: NEW, FORMAT and BOOT /GLOS,
  *                                    then GLOSLDR.SYS and GLOS's folder copied there from the disk GLOS runs
  *                                    from (a USB stick's start, for one). A disk with partitions: only with /ERASE
+ *   DISK n INSTALL /FREE /Y          ... beside what is on the disk: a new partition in its largest free stretch
+ *                                    (the other entries and their volumes untouched), formatted, GLOS's boot
+ *                                    records (the first sector's code starts GLOS's partition whichever is
+ *                                    active; GLOS's loader offers the others), the files
+ *   DISK n INSTALL p [/ERASE] /Y     ... into partition p (one that holds a volume: only with /ERASE)
  *
  * The rules of whatever writes a disk (the owner, 2026-11-12):
  *   - It says what would be lost, and does nothing without /Y: the command as typed is the question, the same
@@ -265,6 +270,12 @@ static void own_volumes(struct diskcmd *c)
     char letters[3];
     struct dos_req q;
     u32 i, k, serial;
+    /* GLOS started with no DOS from a drive of the floppies' numbers (a floppy; a USB stick a BIOS starts as one):
+       its volume is on no hard disk, and no DOS runs from one. */
+    if ((vm.bi->flags & BI_F_NATIVE) && vm.bi->boot_disk.spt && vm.bi->boot_disk.dl < 0x80) {
+        c->own_floppy |= (u8)(1u << (vm.bi->boot_disk.dl & 1));
+        return;
+    }
     letters[0] = vm.bi->cfg_path[0], letters[2] = 0;
     letters[1] = vm.bi->comspec[0] && vm.bi->comspec[1] == ':' ? vm.bi->comspec[0] : 0;  /* (the DOS's COMMAND.COM,
                                                    where there is one: a bare name is none found, as on a disk
@@ -594,8 +605,8 @@ static int do_boot(struct diskcmd *c, u32 n, u32 p, int yes, int native)
     }
     say(c, "Disk %u: its boot record and partition %u's written anew. The PC then starts from partition %u, which\n"
         "starts %s in its first folder). No file is touched; another system's start-up code or a\n"
-        "boot manager there %s lost.\n", n, p, p, native ? "GLOS with no DOS (GLOSLDR.SYS" : "FreeDOS (KERNEL.SYS",
-        yes ? "is" : "would be");
+        "boot manager there %s lost.%s\n", n, p, p, native ? "GLOS with no DOS (GLOSLDR.SYS" : "FreeDOS (KERNEL.SYS",
+        yes ? "is" : "would be", native ? " GLOS's start-up menu offers the disk's other partitions." : "");
     if (!yes) {
         say(c, "Nothing was done. To do it: the same command with /Y\n");
         return 2;
@@ -617,10 +628,21 @@ static int do_boot(struct diskcmd *c, u32 n, u32 p, int yes, int native)
         return 1;
     }
     memcpy(m, W.first, 512);
-    mbr_boot(m);
-    for (i = 0; i < 4; i++)                     /* the PC starts from p, and from no other */
-        if (m[446 + i * 16 + 4])
-            m[446 + i * 16] = i + 1 == p ? 0x80 : 0;
+    if (native) {
+        /* GLOS's partition by its number in the first sector's code, whichever is active: the active one stays the
+           other system's (Windows gives its letters by it), GLOS's only if none is. */
+        u32 any = 0;
+        mbr_boot_part(m, p);
+        for (i = 0; i < 4; i++)
+            any |= m[446 + i * 16 + 4] && m[446 + i * 16] == 0x80;
+        if (!any)
+            m[446 + (p - 1) * 16] = 0x80;
+    } else {
+        mbr_boot(m);
+        for (i = 0; i < 4; i++)                 /* the PC starts from p, and from no other */
+            if (m[446 + i * 16 + 4])
+                m[446 + i * 16] = i + 1 == p ? 0x80 : 0;
+    }
     if ((e = bdisk_write(d, v->start, 1, s)) != 0
         || (copy && copy < rd16(s + 14) && (e = bdisk_write(d, v->start + copy, 1, s)) != 0)
         || (e = bdisk_write(d, 0, 1, m)) != 0)
@@ -893,12 +915,15 @@ static int i_folder(struct inst *I, const char *src, const char *dst, u32 depth)
     return e;
 }
 
-static int do_install(struct diskcmd *c, u32 n, int erase, int yes)
+static int do_install(struct diskcmd *c, u32 n, u32 p, int into_free, int erase, int yes)
 {
     struct inst I;
     struct vol *v;
+    struct mbr_part made;
     char dir[80], ldr[96], part[80];
+    u8 plan[512];
     u32 i, junk = 0, t0;
+    unsigned slot = 0;
     u16 h;
     int e;
     if ((e = target(c, n)) != 0)
@@ -929,6 +954,53 @@ static int do_install(struct diskcmd *c, u32 n, int erase, int yes)
         }
     }
     f_close(h);
+    if (into_free) {
+        /* Beside what is there: a partition of its own in the disk's largest free stretch, the table's other
+           entries and their volumes as they are. */
+        memcpy(plan, W.first, 512);
+        e = W.table < 0 ? -1 : mbr_add(plan, W.g.sectors, W.g.heads, W.g.spt, &made, &slot);
+        if (e) {
+            dos_release();
+            say(c, e == -1 ? "DISK: disk %u has no partition table: DISK %u INSTALL takes all of it\n"
+                : e == -2 ? "DISK: disk %u's partition table is full (four entries)\n"
+                : "DISK: disk %u has no free stretch of 32 MB or more outside its partitions\n", n, n);
+            return 1;
+        }
+        p = slot + 1;
+        say(c, "Disk %u (%u MB): GLOS put beside what is on it, to start with no DOS. A new partition (%u: %s, %u MB)\n"
+            "in the disk's free space, an empty volume named GLOS in it, GLOS's boot records; then %s\nand %s copied "
+            "there. The disk's %u other partition%s and what they hold stay as they are;\nGLOS's start-up menu offers "
+            "them.\n", n, mb(W.g.sectors), p, type_name(made.type), mb((u32)made.sectors), ldr, dir, W.nv,
+            W.nv == 1 ? "" : "s");
+        if (!yes) {
+            dos_release();
+            say(c, "Nothing was done. To do it: DISK %u INSTALL /FREE /Y\n", n);
+            return 2;
+        }
+    } else if (p) {
+        /* Into a partition that is there. */
+        if (!(v = part_of(c, n, p))) {
+            dos_release();
+            return 1;
+        }
+        say(c, "Partition %u of disk %u (%s, %u MB%s%s): made an empty volume named GLOS, GLOS's boot records; then\n"
+            "%s and %s copied there, to start with no DOS. The disk's other\npartitions stay as they are; GLOS's "
+            "start-up menu offers them.\n", p, n, type_name(v->type), mb(v->sectors),
+            v->fat ? v->label[0] ? ", volume " : ", no label" : ", not formatted", v->fat ? v->label : "", ldr, dir);
+        if (v->fat)
+            say(c, "EVERYTHING IN THAT PARTITION %s LOST.\n", yes && erase ? "IS" : "WOULD BE");
+        if (v->fat && !erase) {
+            dos_release();
+            say(c, "Nothing was done. A partition that holds a volume is taken only with /ERASE: DISK %u INSTALL %u /ERASE /Y\n",
+                n, p);
+            return 2;
+        }
+        if (!yes) {
+            dos_release();
+            say(c, "Nothing was done. To do it: DISK %u INSTALL %u%s /Y\n", n, p, v->fat ? " /ERASE" : "");
+            return 2;
+        }
+    } else {
     say(c, "Disk %u (%u MB): GLOS put on it, to start from it with no DOS. A new partition table with one partition\n"
         "over all of the disk, an empty volume named GLOS, GLOS's boot records; then %s and\n%s copied there.\n",
         n, mb(W.g.sectors), ldr, dir);
@@ -948,16 +1020,54 @@ static int do_install(struct diskcmd *c, u32 n, int erase, int yes)
         say(c, "Nothing was done. To do it: DISK %u INSTALL%s /Y\n", n, W.nv ? " /ERASE" : "");
         return 2;
     }
+    }
     t0 = timer_ticks();
+    if (into_free || p) {
+        /* Beside other systems: the disk's first sector as it is (its table, another system's start-up code),
+           kept in a file beside GLOS's own on the disk GLOS runs from, before anything is written. DD puts it
+           back: DD IF=that file OF=DISKn COUNT=1 /Y. Nothing is done if it can't be kept. */
+        char keep[96];
+        u16 kh;
+        ksnprintf(keep, sizeof keep, "%s\\DISK%u.MBR", dir, n);
+        if (f_open(keep, 1, &kh) != 0 || f_write(kh, W.first, 512) != 0) {
+            dos_release();
+            say(c, "DISK: the disk's first sector couldn't be kept in %s: nothing was done.\n", keep);
+            return 1;
+        }
+        f_close(kh);
+        say(c, "The disk's first sector as it was is kept in %s\n(to put it back: DD IF=%s OF=DISK%u COUNT=1 /Y).\n",
+            keep, keep, n);
+    }
     c->mute = 1;
-    e = do_new(c, n, 1);
+    e = 0;
+    if (into_free) {
+        /* The table with its new entry (the first sector's code as it is until BOOT), an old volume's first sector
+           in the new partition's place made empty first, the table read back. */
+        u8 zero[512], back[512];
+        u8 d = (u8)(0x7F + n);
+        int b;
+        memset(zero, 0, sizeof zero);
+        if ((b = bdisk_write(d, (u32)made.start, 1, zero)) != 0 || (b = bdisk_write(d, 0, 1, plan)) != 0
+            || (b = bdisk_read(d, 0, 1, back)) != 0)
+            e = bios_failed(c, b, "the write");
+        else if (memcmp(plan, back, 512)) {
+            say(c, "DISK: the disk's first sector reads back differently: the table was not written\n");
+            e = 1;
+        } else {
+            kprintf("GLOS-DISK add disk=%02x part=%u type=%02x start=%u sectors=%u\n", d, p, made.type, (u32)made.start,
+                    (u32)made.sectors);
+        }
+    } else if (!p) {
+        e = do_new(c, n, 1);
+        p = 1;
+    }
     if (!e)
-        e = do_format(c, n, 1, "GLOS", 1);
+        e = do_format(c, n, p, "GLOS", 1);
     if (!e)
-        e = do_boot(c, n, 1, 1, 1);
+        e = do_boot(c, n, p, 1, 1);
     if (!e)
         e = target(c, n);
-    v = e ? 0 : part_of(c, n, 1);
+    v = e ? 0 : part_of(c, n, p);
     c->mute = 0;
     if (e || !v) {
         dos_release();
@@ -965,7 +1075,7 @@ static int do_install(struct diskcmd *c, u32 n, int erase, int yes)
             say(c, "DISK: the new partition isn't there\n");
         return e ? e : 1;
     }
-    say(c, "The disk is laid out and formatted (%s, %u MB). Copying GLOS's files...\n", type_name(v->type), mb(v->sectors));
+    say(c, "Partition %u is formatted (%s, %u MB). Copying GLOS's files...\n", p, type_name(v->type), mb(v->sectors));
     memset(&I, 0, sizeof I);
     I.c = c, I.drive = (u8)(0x7F + n), I.base = v->start;
     I.chunk = dos_xfer_size() & ~511u;
@@ -1015,7 +1125,8 @@ static int do_install(struct diskcmd *c, u32 n, int erase, int yes)
         return 1;
     }
     say(c, "Done: %u files, %u KB, in %u seconds. Take out the disk GLOS runs from now and restart the PC\n"
-        "(REBOOT): it starts GLOS from disk %u, as its drive C:.\n", I.files, I.kb, (timer_ticks() - t0) / 1024, n);
+        "(REBOOT): it starts GLOS from disk %u, as its drive C:%s\n", I.files, I.kb, (timer_ticks() - t0) / 1024, n,
+        W.nv > 1 ? ", after a menu of the disk's partitions." : ".");
     return 0;
 }
 
@@ -1301,7 +1412,10 @@ static const char usage[] =
     "DISK n FORMAT [p] [/V:label] /Y   partition p (1 unless said) made an empty FAT volume\n"
     "DISK n BOOT [p] [/GLOS] /Y        boot records: the PC starts FreeDOS from partition p\n"
     "                                  (/GLOS: GLOS itself, with no DOS)\n"
-    "DISK n INSTALL [/ERASE] /Y        GLOS put on disk n, to start from it with no DOS\n"
+    "DISK n INSTALL [/ERASE] /Y        GLOS put on disk n, all of it, to start with no DOS\n"
+    "DISK n INSTALL /FREE /Y           ... in a new partition in the disk's free space, beside\n"
+    "                                  what is there (its start-up menu offers the others)\n"
+    "DISK n INSTALL p [/ERASE] /Y      ... in partition p, which is made empty\n"
     "Without /Y a command says what would be lost and does nothing. The disk GLOS or DOS runs\n"
     "from is never written.\n";
 
@@ -1323,7 +1437,7 @@ static int run(struct diskcmd *c)
 {
     char *w[8], *label = 0, *verb;
     u32 nw = 0, i, n = 0, p = 1;
-    int yes = 0, native = 0, erase = 0;
+    int yes = 0, native = 0, erase = 0, into_free = 0;
     char *a = c->args;
     while (*a) {                                /* words, in capitals; the switches taken out */
         while (*a == ' ' || *a == '\t')
@@ -1350,6 +1464,8 @@ static int run(struct diskcmd *c)
             native = 1;
         else if (!strcmp(w[i], "/ERASE"))
             erase = 1;
+        else if (!strcmp(w[i], "/FREE"))
+            into_free = 1;
         else if (!strncmp(w[i], "/V:", 3))
             label = w[i] + 3;
         else {
@@ -1373,8 +1489,8 @@ static int run(struct diskcmd *c)
     verb = w[1];
     if (!strcmp(verb, "NEW") && nw == 2)
         return do_new(c, n, yes);
-    if (!strcmp(verb, "INSTALL") && nw == 2)
-        return do_install(c, n, erase, yes);
+    if (!strcmp(verb, "INSTALL") && (nw == 2 || (nw == 3 && !into_free && number(w[2], &p) == 0)))
+        return do_install(c, n, nw == 3 ? p : 0, into_free, erase, yes);
     if ((!strcmp(verb, "FORMAT") || !strcmp(verb, "BOOT")) && (nw == 2 || (nw == 3 && number(w[2], &p) == 0)))
         return verb[0] == 'F' ? do_format(c, n, p, label, yes) : do_boot(c, n, p, yes, native);
     say(c, "%s", usage);

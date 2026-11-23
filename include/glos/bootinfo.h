@@ -11,7 +11,7 @@ typedef unsigned int   bi_u32;
 #endif
 
 #define BOOTINFO_MAGIC   0x4F4F4247UL           /* "GBOO" */
-#define BOOTINFO_VERSION 13
+#define BOOTINFO_VERSION 14
 
 #define KERNEL_MAGIC     0x4B4F4C47UL           /* "GLOK", first word of GLOSK.BIN */
 #define KERNEL_LINK      0xC0100000UL           /* where the kernel is linked */
@@ -187,6 +187,9 @@ struct bootinfo {
     /* version 13: ... and that disk as the BIOS describes it (spt 0 and no BI_DISK_PARAMS: not said). A BIOS may
        start a USB stick as a drive of the floppies' numbers (00h: the owner's PCChips M925G), which `disks` hasn't */
     struct bi_disk boot_disk;
+    /* version 14: the first sector on that disk of the volume GLOS started from (its partition's start; 0: the disk
+       is the volume), as the loader found it */
+    bi_u32 boot_lba;
 };
 #define BI_IF_UNKNOWN 0u
 #define BI_IF_ATA     1u                        /* "ATA", "ATAPI" */

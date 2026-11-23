@@ -1294,6 +1294,143 @@ static void shell_fallback(void)
 extern unsigned native_psp;
 extern unsigned char native_disk;
 int native_mount(void);
+unsigned long native_vol_lba(void);
+
+/* ---- the start-up menu (docs/v1/native-dos.md, the boot manager)
+
+   A hard disk GLOS started from may hold other systems: Windows 98 on the partition before GLOS's, for one. The
+   first sector's code starts GLOS's partition whichever is active (kernel/disk/mbrboot.S), so this menu is always
+   passed: each other primary partition whose first sector ends 55AAh is offered with GLOS, and GLOS starts after
+   five seconds if no key chooses. Another system is started as the first sector's code would have: its partition
+   made the active one if it isn't (Windows and DOS give their letters by it: two bytes of the table, the rest as
+   it was), its first sector at 0000:7C00h, the table at 0000:07BEh with DS:SI at its entry, the disk in DL. The
+   loader lies over 7C00h itself: a few bytes of code at 8000:0000h, with the sector and the table beside them,
+   do the last step. */
+int native_sector(unsigned long lba, void *buf);
+int native_sector_out(unsigned long lba, void *buf);
+extern void __cdecl native_far8000(void);       /* (nstart.asm) */
+
+/* 1 if the 11 bytes of a file's name as a folder has them are somewhere in a boot sector: the file it loads. */
+static int loads(const unsigned char *sector, const char *name)
+{
+    unsigned i;
+
+    for (i = 0; i + 11 <= 510; i++)
+        if (!memcmp(sector + i, name, 11))
+            return 1;
+    return 0;
+}
+
+static void native_chain(unsigned char *table, unsigned entry, const unsigned char *sector)
+{
+    static unsigned char stub[] = {
+        0xFA,                                   /* cli */
+        0x31, 0xC0,                             /* xor ax, ax */
+        0x8E, 0xD0,                             /* mov ss, ax */
+        0xBC, 0x00, 0x7C,                       /* mov sp, 7C00h */
+        0x8E, 0xC0,                             /* mov es, ax */
+        0x0E, 0x1F,                             /* push cs; pop ds */
+        0xFC,                                   /* cld */
+        0xBE, 0x00, 0x01,                       /* mov si, 0100h: the sector */
+        0xBF, 0x00, 0x7C,                       /* mov di, 7C00h */
+        0xB9, 0x00, 0x01,                       /* mov cx, 256 */
+        0xF3, 0xA5,                             /* rep movsw */
+        0xBE, 0x00, 0x03,                       /* mov si, 0300h: the table */
+        0xBF, 0xBE, 0x07,                       /* mov di, 07BEh */
+        0xB9, 0x20, 0x00,                       /* mov cx, 32 */
+        0xF3, 0xA5,                             /* rep movsw */
+        0x8E, 0xD8,                             /* mov ds, ax */
+        0xBE, 0xBE, 0x07,                       /* mov si, 07BEh + 16 * entry (set below) */
+        0x89, 0xF5,                             /* mov bp, si */
+        0xB2, 0x80,                             /* mov dl, the disk (set below) */
+        0xFB,                                   /* sti */
+        0xEA, 0x00, 0x7C, 0x00, 0x00            /* jmp 0000:7C00h */
+    };
+    unsigned char __far *to = (unsigned char __far *)MK_FP(0x8000, 0);
+    unsigned at = 0x07BE + 16 * entry;
+
+    stub[38] = (unsigned char)at, stub[39] = (unsigned char)(at >> 8);
+    stub[43] = native_disk;
+    _fmemcpy(to, stub, sizeof stub);
+    _fmemcpy(to + 0x100, sector, 512);
+    _fmemcpy(to + 0x300, table, 64);
+    native_far8000();
+}
+
+static void native_menu(void)
+{
+    static unsigned char mbr[512], bs[4][512];
+    static char names[4][28];
+    unsigned entry[4], n = 0, i, k;
+    unsigned long mb[4], __far *ticks = (unsigned long __far *)MK_FP(0x40, 0x6C), t0, left = 99;
+    union REGS r;
+    int choice = 0;
+
+    if (native_disk < 0x80 || native_sector(0, mbr) != 0 || mbr[510] != 0x55 || mbr[511] != 0xAA)
+        return;
+    for (i = 0; i < 4; i++) {
+        unsigned char *e = mbr + 446 + i * 16;
+        unsigned long start = *(unsigned long *)(e + 8);
+
+        if (!e[4] || e[4] == 0x05 || e[4] == 0x0F || e[4] == 0x85 || start == native_vol_lba())
+            continue;                           /* (none, a box of logical drives, GLOS's own) */
+        if (native_sector(start, bs[n]) != 0 || bs[n][510] != 0x55 || bs[n][511] != 0xAA)
+            continue;                           /* (nothing to start there) */
+        entry[n] = i;
+        mb[n] = *(unsigned long *)(e + 12) / 2048;
+        strcpy(names[n], !memcmp(bs[n] + 3, "MSWIN4", 6) ? "Windows 95/98"
+                         : !memcmp(bs[n] + 3, "MSDOS", 5) || !memcmp(bs[n] + 3, "IBM ", 4) ? "MS-DOS"
+                         : !memcmp(bs[n] + 3, "FRDOS", 5) || !memcmp(bs[n] + 3, "FreeDOS", 7)
+                           || loads(bs[n], "KERNEL  SYS") ? "FreeDOS"
+                         : loads(bs[n], "GLOSLDR SYS") ? "GLOS (another)"
+                         : !memcmp(bs[n] + 3, "NTFS", 4) ? "Windows NT" : "another system");
+        n++;
+    }
+    if (!n)
+        return;
+    say("");
+    say("This disk can start:");
+    say("  1  GLOS");
+    for (k = 0; k < n; k++)
+        say("  %u  %s (partition %u, %lu MB)", k + 2, names[k], entry[k] + 1, mb[k]);
+    say("GLOS-BOOT menu choices=%u", n + 1);
+    t0 = *ticks;
+    for (;;) {
+        unsigned long passed = (*ticks - t0) / 18;      /* (18.2 ticks a second) */
+
+        if (passed >= 5)
+            break;
+        if (5 - passed != left) {
+            left = 5 - passed;
+            say("GLOS starts in %lu... (press 1 to %u, or Enter for GLOS)", left, n + 1);
+        }
+        if (*(unsigned __far *)MK_FP(0x40, 0x1A) == *(unsigned __far *)MK_FP(0x40, 0x1C))
+            continue;                           /* (the BIOS's keyboard buffer: empty) */
+        r.h.ah = 0x00;
+        int86(0x16, &r, &r);
+        if (r.h.al == '\r' || r.h.al == '1')
+            break;
+        if (r.h.al >= '2' && r.h.al < '2' + n) {
+            choice = r.h.al - '1';
+            break;
+        }
+    }
+    if (!choice) {
+        say("GLOS-BOOT menu chosen=1 glos");
+        return;
+    }
+    k = (unsigned)choice - 1;
+    say("GLOS-BOOT menu chosen=%d partition=%u %s", choice + 1, entry[k] + 1, names[k]);
+    if (mbr[446 + entry[k] * 16] != 0x80) {     /* its partition the active one */
+        for (i = 0; i < 4; i++)
+            mbr[446 + i * 16] = i == entry[k] ? 0x80 : 0;
+        if (native_sector_out(0, mbr) != 0)
+            say("GLOS-BOOT menu active-flag error (started all the same)");
+        else
+            say("GLOS-BOOT menu active=%u", entry[k] + 1);
+    }
+    native_chain(mbr + 446, entry[k], bs[k]);
+}
 
 /* How the BIOS reaches the disk GLOS started from, where it says: INT 13h 48h's interface type (EDD 3.0: the
    device path, its key BEDDh at 1Eh, the type's name at 28h). The kernel leaves USB to the BIOS when its drive
@@ -1405,12 +1542,15 @@ void __cdecl native_main(void)
         refuse("no-volume");
         return;
     }
+    native_menu();                              /* (another system chosen there never comes back) */
     bi.cache_mode = BI_CACHE_ON;
     bi.boot_dl = native_disk;
+    bi.boot_lba = native_vol_lba();
     native_boot_disk();
     bi.boot_if = native_if();
-    say("GLOS-BOOT step=disk dl=%02x if=%lu chs=%lu/%lu/%lu sectors=%lu flags=%lx", native_disk, bi.boot_if,
-        bi.boot_disk.cyls, bi.boot_disk.heads, bi.boot_disk.spt, bi.boot_disk.sectors_lo, bi.boot_disk.flags);
+    say("GLOS-BOOT step=disk dl=%02x if=%lu chs=%lu/%lu/%lu sectors=%lu flags=%lx volume=%lu", native_disk, bi.boot_if,
+        bi.boot_disk.cyls, bi.boot_disk.heads, bi.boot_disk.spt, bi.boot_disk.sectors_lo, bi.boot_disk.flags,
+        bi.boot_lba);
     /* Its command line (the prelude's CMDLINE): the folder GLOS's files are in (a word that begins with a
        backslash: \GLOS if none), where GLOS.EXE would be under DOS, and GLOS.EXE's flags. GLOS.CFG's [shell]
        section is read as when GLOS is DOS's shell: natively it is the shell. */

@@ -22,7 +22,8 @@ static int get(unsigned long lba, unsigned char *buf)
     return fseek(img, (long)((base + lba) * 512UL), SEEK_SET) != 0 || fread(buf, 512, 1, img) != 1;
 }
 
-/* GLOS's boot code into the volume's sector at lba, naming GLOSLDR.SYS. */
+/* GLOS's boot code into the volume's sector at lba, naming GLOSLDR.SYS (or what MKVOL_BOOT in the environment says,
+   11 characters as a folder has them: "KERNEL  SYS" for a volume that starts FreeDOS). */
 static int boot(unsigned long lba, int fat)
 {
     unsigned char s[512];
@@ -32,7 +33,9 @@ static int boot(unsigned long lba, int fat)
         return -1;
     for (i = 0; i + 11 <= 510; i++)
         if (!memcmp(s + i, "KERNEL  SYS", 11)) {
-            memcpy(s + i, "GLOSLDR SYS", 11);
+            const char *name = getenv("MKVOL_BOOT");
+
+            memcpy(s + i, name && strlen(name) == 11 ? name : "GLOSLDR SYS", 11);
             return put(0, lba, s, 1);
         }
     return -1;

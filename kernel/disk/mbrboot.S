@@ -1,6 +1,8 @@
 /* GLOS's boot code for a hard disk's first sector (kernel/disk/disk.h: mbr_boot). The BIOS loads the sector at
-   0:7C00h and jumps there with the disk in DL. The code moves itself to 0:0600h, finds the active partition,
-   reads its first sector to 0:7C00h (the BIOS's LBA call where it has one, else by the entry's cylinder, head
+   0:7C00h and jumps there with the disk in DL. The code moves itself to 0:0600h, finds the partition to start
+   (GLOS's own, if its number is kept here, mbr_code_part: GLOS's loader then offers the other systems, whichever
+   partition is the active one, as Windows's must be for Windows; docs/v1/native-dos.md, the boot manager; else
+   the active partition), reads its first sector to 0:7C00h (the BIOS's LBA call where it has one, else by the entry's cylinder, head
    and sector) and jumps to it, DL the disk and SI the entry, as DOS's boot sectors expect. 386 code: GLOS
    needs one. Linked into the kernel as bytes (mbr_code to mbr_code_end); never run there. */
 #ifdef __DJGPP__                        /* (linked into an app as well: Disk Tools. COFF: its data, and C's names
@@ -10,7 +12,7 @@
     .section .rodata
 #endif
     .code16
-    .globl mbr_code, mbr_code_end
+    .globl mbr_code, mbr_code_end, mbr_code_part
 mbr_code:
     cli
     xorw %ax, %ax
@@ -26,7 +28,17 @@ mbr_code:
     rep movsw
     ljmp $0, $(0x0600 + 1f - mbr_code)
 1:  movw $(0x0600 + 0x1BE), %si
-    movb $4, %cl
+    movb (0x0600 + mbr_code_part - mbr_code), %al      /* GLOS's partition (1 to 4), if it is in the table */
+    decb %al
+    cmpb $3, %al
+    ja 10f
+    shlb $4, %al
+    movzbw %al, %bx
+    cmpb $0, 4(%bx, %si)
+    je 10f
+    addw %bx, %si
+    jmp 3f
+10: movb $4, %cl
 2:  cmpb $0x80, (%si)
     je 3f
     addw $16, %si
@@ -76,6 +88,8 @@ mbr_code:
     jmp 9b
 drive:
     .byte 0
+mbr_code_part:                          /* (mbr_boot_part writes it) */
+    .byte 0
 packet:
     .byte 0x10, 0
     .word 1
@@ -89,9 +103,10 @@ msg_system:
     .asciz "No system on the disk's partition\r\n"
 mbr_code_end:
 #ifdef __DJGPP__
-    .globl _mbr_code, _mbr_code_end
+    .globl _mbr_code, _mbr_code_end, _mbr_code_part
     .set _mbr_code, mbr_code
     .set _mbr_code_end, mbr_code_end
+    .set _mbr_code_part, mbr_code_part
 #else
     .section .note.GNU-stack, "", @progbits
 #endif

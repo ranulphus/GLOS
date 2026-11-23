@@ -18,6 +18,10 @@ unsigned char native_disk;
 /* ---- the disk */
 
 static unsigned long vol_lba;           /* the volume's first sector on the disk */
+unsigned long native_lba;               /* ... as the boot sector that loaded GLOSLDR.SYS had it (nprelude.S,
+                                           nstart.asm); FFFFFFFFh: not said */
+
+unsigned long native_vol_lba(void) { return vol_lba; }
 static int ext;                         /* the BIOS's LBA calls (41h) */
 static unsigned spt, heads;
 static struct fat_vol vol;
@@ -55,6 +59,47 @@ static int sectors_in(unsigned long lba, unsigned n, void *buf)
         if (!r.x.cflag)
             return 0;
         r.h.ah = 0x00;                          /* (a reset, and again) */
+        r.h.dl = native_disk;
+        int86(0x13, &r, &r);
+    }
+    return -1;
+}
+
+/* A sector of the disk GLOS started from, read and written (the start-up menu's: the partition table, another
+   system's boot sector, the active flag). 0, or -1. */
+int native_sector(unsigned long lba, void *buf) { return sectors_in(lba, 1, buf); }
+
+int native_sector_out(unsigned long lba, void *buf)
+{
+    union REGS r;
+    struct SREGS s;
+    int tries;
+
+    for (tries = 0; tries < 3; tries++) {
+        segread(&s);
+        if (ext) {
+            static struct { unsigned char size, zero; unsigned n, off, seg; unsigned long lo, hi; } dap;
+
+            dap.size = 16, dap.zero = 0, dap.n = 1, dap.off = (unsigned)buf, dap.seg = s.ds;
+            dap.lo = lba, dap.hi = 0;
+            r.x.ax = 0x4300;
+            r.h.dl = native_disk;
+            r.x.si = (unsigned)&dap;
+        } else {
+            unsigned long c = lba / ((unsigned long)spt * heads), t = lba % ((unsigned long)spt * heads);
+
+            r.x.ax = 0x0301;
+            r.h.ch = (unsigned char)c;
+            r.h.cl = (unsigned char)(((c >> 2) & 0xC0) | (t % spt + 1));
+            r.h.dh = (unsigned char)(t / spt);
+            r.h.dl = native_disk;
+            s.es = s.ds;
+            r.x.bx = (unsigned)buf;
+        }
+        int86x(0x13, &r, &r, &s);
+        if (!r.x.cflag)
+            return 0;
+        r.h.ah = 0x00;
         r.h.dl = native_disk;
         int86(0x13, &r, &r);
     }
@@ -108,8 +153,12 @@ int native_mount(void)
     heads = r.x.cflag ? 2 : r.h.dh + 1u;
     if (!spt)
         spt = 63;
+    /* The volume: where the boot sector that loaded this says it starts (the partition GLOS is on, whichever is
+       the active one: Windows's, when both are on the disk); else a hard disk's active FAT partition. */
     vol_lba = 0;
-    if (native_disk >= 0x80 && sectors_in(0, 1, s) == 0 && s[510] == 0x55 && s[511] == 0xAA)
+    if (native_lba != 0xFFFFFFFFUL)
+        vol_lba = native_lba;
+    else if (native_disk >= 0x80 && sectors_in(0, 1, s) == 0 && s[510] == 0x55 && s[511] == 0xAA)
         for (i = 0; i < 4; i++) {
             unsigned char *e = s + 446 + i * 16;
 

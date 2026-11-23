@@ -10,7 +10,11 @@
    - its command tail, PSP:80h, from the 94 bytes at 01A0h of this sector (CMDLINE: an ASCIZ string, empty as
      built; tools/ndos/native-image.sh writes one there): the loader's command line, as GLOS.EXE's is under DOS
      (a folder for GLOS's files, \GLOS if none, and GLOS.EXE's flags);
-   - DS and ES the PSP, SS:SP and CS:IP from the header, DL the disk.
+   - DS and ES the PSP, SS:SP and CS:IP from the header, DL the disk;
+   - the volume's first sector on the disk, for the loader, at 7000:0070h: the "hidden sectors" of the volume's
+     parameters as GLOS's boot sector has them in memory when it enters here (it runs at 1FE0:7C00h with SS its
+     segment and BP at its start; a BIOS that starts a USB stick as a floppy has made them 0 there, which is
+     right for the drive it then is). FFFFFFFFh if something else loaded this.
 
    16-bit code, assembled once and linked as bytes (objcopy); it never runs again. Its code stays below 0700h:
    the PSP may begin at 0720h (a header of two paragraphs). */
@@ -19,11 +23,19 @@
     .globl _start
 _start:
     cli
-    movw $0x0060, %ax
+    orl $-1, %ecx                       /* the volume's start, from the boot sector's parameters */
+    movw %ss, %ax
+    cmpw $0x1FE0, %ax
+    jne 1f
+    cmpw $0xAA55, %ss:0x1FE(%bp)
+    jne 1f
+    movl %ss:0x1C(%bp), %ecx
+1:  movw $0x0060, %ax
     movw %ax, %ds
     movw $0x7000, %ax                   /* a stack away from everything: 7000:FFFEh (448 KB up) */
     movw %ax, %ss
     movw $0xFFFE, %sp
+    movl %ecx, %ss:0x70
     sti
     cld
     movb %bl, %dl                       /* the disk, kept in DL to the end */
@@ -163,7 +175,7 @@ bad:
 3:  hlt
     jmp 3b
 msg:
-    .asciz "GLOSLDR.SYS: no loader\r\n"
+    .asciz "No loader\r\n"
 said:
     .asciz "GLOS-BOOT step=prelude\r\n"
     .org 0x1A0

@@ -731,6 +731,29 @@ missing came after the kernel's entry, where C: was GLOS's IDE driver's or nothi
   - The loader's lines go to the screen as well as to COM1, and the stick's folder has GLOS.EXE.
   `loopa-nboot` starts GLOS from a 1.44 MB floppy with a blank hard disk beside it (bf6, 486): the loader's track
   reads, C: by the BIOS's cylinder, head and sector calls, a file written and read there.
+- **Beside another system** (the owner, 2026-11-23, for that PC: a 20 GB disk with Windows 98 on its first 10 GB;
+  "the boot manager" above, its "another partition" case, built):
+  - `DISK n INSTALL /FREE /Y` adds a partition in the disk's largest free stretch (`mbr_add`: whole cylinders, its
+    type by its size, the table's other entries not touched, not active while another is), formats it, writes
+    GLOS's boot records and copies the files. `DISK n INSTALL p [/ERASE] /Y` takes a partition that is there. The
+    disk's first sector as it was is kept first in a file beside GLOS's own on the disk GLOS runs from
+    (`DISKn.MBR`; `DD IF=that OF=DISKn COUNT=1 /Y` puts it back), and nothing is done if it can't be.
+  - The first sector's code keeps GLOS's partition's number (`mbr_boot_part`) and starts that partition whichever
+    is the active one, which stays the other system's (Windows gives its letters by it).
+  - GLOS's boot sector knows where its volume starts (its parameters' hidden sectors); the prelude takes that from
+    it in memory (1FE0:7C00h) for the loader, which mounts that volume and tells the kernel (`bootinfo.boot_lba`,
+    version 14): GLOS is on the partition it started from, not the active one.
+  - The loader's menu (`native_menu`): every other primary partition whose first sector ends 55AAh, named by
+    what its boot sector says (Windows 95/98, MS-DOS, FreeDOS, Windows NT); GLOS after five seconds, or the
+    number pressed. Another system is started as the first sector's code would have started it: its partition
+    made active if it isn't (the only write), its first sector at 0000:7C00h, the table at 0000:07BEh, DS:SI at
+    its entry, DL the disk, by a few bytes of code at 8000:0000h (the loader lies over 7C00h). `[boot]` settings
+    (the default, the time, names) are still to come.
+  - `loopa-nboot`: a disk with FreeDOS on its first partition and free space (bf6, 486), and the private MS-DOS
+    7.1 disk with 2.2 GB added (bf6: GLOS's partition is then FAT32 by the LBA calls, past cylinder 1023; skipped
+    where that disk isn't). GLOS is started from a floppy, installed beside the other system, whose partition is
+    the same to the byte afterwards; the disk alone then shows the menu and starts GLOS, and with 2 pressed the
+    other system, which runs its AUTOEXEC.BAT.
 - **Tested:** `loopa-nboot` has `DISK 2 INSTALL` onto a blank second disk (and again with `/ERASE`), the PC then
   started from that disk alone: the same files, a program run (bf6 with the first start by `/BIOSDISK`, 486). It
   also has the NB2-NB4 case a second time with `/BIOSDISK` (bf6, 486): every file, program

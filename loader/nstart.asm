@@ -35,6 +35,7 @@ STACK   ends
         extrn   _native_main:near
         extrn   _native_psp:word
         extrn   _native_disk:byte
+        extrn   _native_lba:dword
 
 _TEXT   segment word public 'CODE' use16
         assume  cs:_TEXT, ds:DGROUP
@@ -65,10 +66,22 @@ _nstart:
         rep     stosb
         mov     _native_psp, bx
         mov     _native_disk, dl
+        mov     ax, 7000h                       ; the volume's first sector, where the prelude left it
+        mov     fs, ax
+        mov     eax, fs:[0070h]
+        mov     _native_lba, eax
         call    _native_main
 hang:   cli
         hlt
         jmp     hang
+
+; The start-up menu's last step (loader/main.c, native_chain): into the few bytes it put at 8000:0000h, which
+; start another system. (A far jump written out: the C compiler's call through a far pointer made of constants
+; went elsewhere.)
+        public  _native_far8000
+_native_far8000:
+        db      0EAh
+        dw      0000h, 8000h
 _TEXT   ends
 
         end     _nstart

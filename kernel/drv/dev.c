@@ -71,6 +71,11 @@ static int uhci_quiet(struct pci_dev *d, const char **how)
                 return 0;
             }
         }
+        if ((v & 0xFFFF) != 0xFFFF && (v & LEGSUP_SMIEN)) {
+            *how = "smi";                       /* (PIRQ off already and SMI on: its interrupts are the BIOS's SMIs,
+                                                   never the line. The M925G's BIOS leaves it so: legsup=0030) */
+            return 0;
+        }
         if (!intr) {                            /* (it can't interrupt as it is) */
             *how = "no-intr";
             return 0;
@@ -124,9 +129,44 @@ static int ohci_quiet(struct pci_dev *d, const char **how)
     return 0;
 }
 
+/* A Matrox G-series display card (G100 to G550: its registers are its second memory range, 16 KB). Its one
+   source of interrupts is what its interrupt enable register (IEN, 1E1Ch) lets through: the vertical retrace's,
+   the drawing engine's. Nothing enables them for a BIOS or a DOS program's VGA and VESA use (the owner's PCChips
+   M925G: a G550 on the network card's line, 2026-11-23): with the register 0 the card is quiet as it is, and
+   nothing is written. If something has enabled one, the card is somebody's and stays so. (GLOS's own Matrox
+   driver, kernel/gfx/mga.c, uses none.) */
+#define MGA_IEN 0x1E1C
+
+static int mga_match(const struct pci_dev *d)
+{
+    return d->class == 0x03 && d->vendor == 0x102B
+           && (d->device == 0x1000 || d->device == 0x1001 || d->device == 0x0520 || d->device == 0x0521
+               || d->device == 0x0525 || d->device == 0x2527);
+}
+
+static int mga_quiet(struct pci_dev *d, const char **how)
+{
+    volatile u32 *r;
+    if (!(pci_read32(d->bus, d->dev, d->fn, 4) & 2)) {         /* its memory isn't decoded */
+        *how = "off";
+        return 0;
+    }
+    if ((d->bar[1] & 1) || !(d->bar[1] & ~15u) || !(r = mm_dev_map(d->bar[1] & ~15u, 16384))) {
+        *how = "no-memory";
+        return -1;
+    }
+    if (r[MGA_IEN / 4]) {
+        *how = "driven";
+        return -1;
+    }
+    *how = "no-intr";
+    return 0;
+}
+
 static const struct quiet quiets[] = {
     { "uhci", uhci_match, uhci_quiet },
     { "ohci", ohci_match, ohci_quiet },
+    { "mga", mga_match, mga_quiet },
 };
 
 /* ---- lines */

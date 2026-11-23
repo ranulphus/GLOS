@@ -22,6 +22,18 @@ int mbr_one(unsigned char *sector, unsigned long total, unsigned heads, unsigned
 /* GLOS's boot code into a first sector (its table kept): it starts the active partition, by the BIOS's LBA
    calls where it has them, else by cylinder, head and sector. */
 void mbr_boot(unsigned char *sector);
+/* ... and it starts partition `part` (1 to 4), whichever is active: GLOS's own, whose loader offers the other
+   systems on the disk (0: the active one, as mbr_boot leaves it). */
+void mbr_boot_part(unsigned char *sector, unsigned part);
+/* The partition GLOS's boot code in a first sector starts whichever is active: 1 to 4; 0 if it has none kept, or
+   the sector's code isn't GLOS's. */
+unsigned mbr_boot_part_of(const unsigned char *sector);
+/* A new partition in the largest free stretch of a disk that has a table, nothing else in the table changed: whole
+   cylinders of the BIOS's `heads` and `spt` (after the first track at the disk's start), its type by its size
+   as mbr_one's, active only if no other is. Its place in the table (0 to 3) and its start and size are given
+   back. -1: no table; -2: no free entry; -3: no free stretch of 32 MB or more. */
+int mbr_add(unsigned char *sector, unsigned long total, unsigned heads, unsigned spt, struct mbr_part *made,
+            unsigned *slot);
 
 /* ---- a FAT volume made new */
 #define FAT16_MOST 4194000UL            /* sectors: just under 2 GB, the most FAT16 holds with DOS's 32 KB clusters */

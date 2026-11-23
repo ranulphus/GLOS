@@ -7770,6 +7770,149 @@ def nboot_floppy_case(profile, card):
         not bad
 
 
+def nboot_dual_case(profile, card, msdos=False):
+    """GLOS installed beside another system, and the start-up menu (docs/v1/native-dos.md, the boot manager). A hard
+    disk with FreeDOS on its first partition (GLOS's formatter and boot code naming KERNEL.SYS, FreeDOS's kernel and
+    COMMAND.COM from Loop A's boot floppy, an AUTOEXEC.BAT that says so on COM1) and free space after it; GLOS
+    started from a floppy beside it. DISK 1 INSTALL /FREE makes a second partition there and puts GLOS in it, the
+    first entry and its volume untouched. The PC then started from the disk alone: GLOS's loader shows its menu
+    and, no key pressed, starts GLOS from the second partition (the first is still the active one); started
+    again with 2 pressed at the menu, FreeDOS starts from the first.
+
+    msdos: the disk is the private MS-DOS 7.1 one (tools/ndos/msdos-image.sh's: a FAT32 partition, as Windows 98's
+    is; its AUTOEXEC.BAT runs DOSDIFF and NDOSTEST and says HX-DONE) with free space added after it, a copy kept
+    beside it outside the repository (MS-DOS's files are private). Its partition's every sector is as it was after
+    GLOS is installed and has run; MS-DOS then starts from the menu. Skipped where that disk isn't."""
+    import hashlib
+    import time
+    tag = "ndual%s-%s" % ("m" if msdos else "", profile)
+    d = os.path.join(ROOT, "out", tag + "-img")
+    os.makedirs(d, exist_ok=True)
+    fimg, disk = os.path.join(d, "a.img"), os.path.join(d, "c.img")
+    private = os.path.join(os.environ.get("MGA_CACHE", os.path.expanduser("~/.cache/mga-glide")), "msdos71-img")
+    if msdos:
+        if not os.path.exists(os.path.join(private, "c.img")):
+            return "  %-22s SKIP no MS-DOS 7.1 disk (tools/ndos/msdos-image.sh)" % tag, True
+        disk = os.path.join(private, "dual-%s.img" % profile)
+    cfg = batfile(tag + "/GLOS.CFG", ["; jobs.py nboot: GLOS beside another system"])
+    auto = batfile(tag + "/AUTOEXEC.BAT", ["@ECHO OFF", "SERSAY HX-FREEDOS started", "SERSAY HX-DONE 0"])
+    gold = subprocess.run([os.path.join(MGA, "tools/loopa/mkgolden.sh")], capture_output=True,
+                          cwd=MGA).stdout.decode().strip().splitlines()[-1]
+    first = 64 * 16 * 63                        # (the first partition's disk: 32 MB; then 100 MB free)
+    script = "\n".join([
+        "set -e", "t=$(mktemp -d)", "trap 'rm -rf $t' EXIT", "export MTOOLS_SKIP_CHECK=1",
+        "gcc -m32 -O1 -Ikernel/include -Iinclude -o $t/mkvol tools/ndos/mkvol.c kernel/disk/fatfmt.c kernel/disk/mbr.c "
+        "kernel/disk/mbrboot.S kernel/disk/fdboot.S sdk/config/cp.c sdk/config/cp_tables.c",
+        "gcc -m32 -O1 -o $t/mkmbr tools/ndos/mkmbr.c kernel/disk/mbr.c kernel/disk/mbrboot.S",
+        # the floppy GLOS starts from
+        "rm -f %s %s" % (fimg, disk), "truncate -s 1474560 %s" % fimg, "$t/mkvol %s 0 2880 GLOSFLOPPY 2 0" % fimg,
+        "mcopy -i %s build/ow/GLOSLDR.SYS ::GLOSLDR.SYS" % fimg, "mmd -i %s ::GLOS ::GLOS/KEYS" % fimg,
+        "mcopy -i %s build/kernel/GLOSK.BIN build/glos/COMMAND.COM %s ::GLOS/" % (fimg, cfg),
+        "mcopy -i %s tests/keys/hostkey ::GLOS/KEYS/HOSTKEY" % fimg,
+        "mcopy -i %s tests/keys/AUTHKEYS ::GLOS/KEYS/AUTHKEYS" % fimg,
+        # the disk: FreeDOS on its first 32 MB; or MS-DOS 7.1's own, longer
+        ] + ([
+        "cp %s %s" % (os.path.join(private, "c.img"), disk),
+        # (4,600 cylinders more, 2.2 GB, sparse: GLOS's partition is then FAT32 by the LBA calls and ends past
+        # cylinder 1023, as on the owner's PCChips M925G beside Windows 98)
+        "truncate -s %d %s" % (os.path.getsize(os.path.join(private, "c.img")) + 4600 * 16 * 63 * 512, disk)] if msdos else [
+        "$t/mkmbr %d 0 16 > $t/mbr 2> $t/part" % first, "read start sectors < $t/part",
+        "truncate -s %d %s" % ((64 + 200) * 16 * 63 * 512, disk), "dd if=$t/mbr of=%s conv=notrunc status=none" % disk,
+        "MKVOL_BOOT='KERNEL  SYS' $t/mkvol %s $start $sectors FREEDOS 16" % disk,
+        "i=%s@@$((start * 512))" % disk,
+        "mcopy -i %s/boot.img ::KERNEL.SYS $t/" % gold,
+        "mcopy -i %s/boot.img ::COMMAND.COM $t/ 2> /dev/null || mcopy -i %s/boot.img ::FREEDOS/BIN/COMMAND.COM $t/" % (gold, gold),
+        "mcopy -i $i $t/KERNEL.SYS $t/COMMAND.COM %s %s ::" % (os.path.join(MGA, "build/ow/dos/SERSAY.COM"), auto)]))
+    mk = subprocess.run(["sh", "-c", script], cwd=ROOT, capture_output=True)
+    checks, info = {"image": mk.returncode == 0}, ""
+    if not checks["image"]:
+        return "  %-22s FAIL image=%r" % (tag, mk.stderr.decode("latin-1")[-400:]), False
+    sector0 = open(disk, "rb").read(512)
+    table0 = sector0[446:462]
+    one = r"  1  FAT32 \[0[cC]\] +\d+ MB  active" if msdos else r"  1  FAT16 \[04\] +\d+ MB  active +volume FREEDOS"
+
+    def first_partition():                      # (every sector of it, summed)
+        e = open(disk, "rb").read(512)[446:462]
+        with open(disk, "rb") as f:
+            f.seek(int.from_bytes(e[8:12], "little") * 512)
+            return hashlib.sha256(f.read(int.from_bytes(e[12:16], "little") * 512)).hexdigest()
+
+    sum0 = first_partition()
+
+    def stopped(agent):
+        t0 = time.time()
+        while time.time() - t0 < 60 and "GLOS-EXIT code=" not in agent.log():
+            time.sleep(0.5)
+        agent.proc.kill()
+        agent.proc.wait()
+        return agent.log()
+
+    # 1: from the floppy, GLOS put beside FreeDOS.
+    agent = Agent(tag + "a-" + card, profile, card, ["--hdd", disk, "--floppy", fimg], timeout=1500, files=False)
+    try:
+        checks["listen"] = agent.listening()
+        if checks["listen"]:
+            disk_cmd = lambda a, t=180: (lambda r: (r[0], (r[1] + r[2]).replace("\r", "")))(agent.ssh("disk " + a, timeout=t))
+            rc, out = disk_cmd("1")
+            checks["before"] = rc == 0 and re.search(one, out) is not None and "runs from" not in out
+            rc, out = disk_cmd("1 install /free")
+            checks["asks"] = rc == 2 and "Nothing was done" in out and "stay as they are" in out
+            rc, out = disk_cmd("1 install /free /y", 900)
+            m = re.search(r"Done: (\d+) files, (\d+) KB, in (\d+) seconds", out)
+            checks["install"] = rc == 0 and m is not None and "after a menu" in out and "is kept in C:\\GLOS\\DISK1.MBR" in out
+            kept = subprocess.run(agent.opts + ["glos@127.0.0.1", "glos dd if=c:\\glos\\disk1.mbr of=-"], capture_output=True,
+                                  timeout=120).stdout
+            checks["first-saved"] = kept[:512] == sector0
+            info += " install=%s" % (m.group(0) if m else repr(out[-300:]))
+            rc, out = disk_cmd("1")
+            checks["after"] = rc == 0 and re.search(one, out) is not None \
+                and re.search(r"  2  FAT32 \[0[cC]\] +\d+ MB +volume GLOS" if msdos
+                              else r"  2  FAT16 \[0?6\] +\d+ MB +volume GLOS", out) is not None
+            if not checks["after"]:
+                info += " after=%r" % out[-300:]
+            agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = stopped(agent)
+    checks["clean-1"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
+    sector = open(disk, "rb").read(512)
+    checks["first-kept"] = sector[446:462] == table0 and sector[462 + 4] != 0 and sector[462] == 0
+    start2 = int.from_bytes(sector[462 + 8:462 + 12], "little")
+    if not checks.get("install"):
+        bad = [k for k, v in checks.items() if not v]
+        return "  %-22s FAIL%s failed: %s" % (tag, info, " ".join(bad)), False
+    # 2: the disk alone, no key: the menu, then GLOS from its own partition.
+    agent = Agent(tag + "b-" + card, profile, card, ["--hdd", disk], timeout=600, files=False)
+    try:
+        checks["glos"] = agent.listening()
+        if checks["glos"]:
+            ls = agent.ssh("dir C:\\GLOS")
+            job = agent.ssh("C:\\GLOS\\COMMAND.COM /C VER")
+            checks["runs"] = ls[0] == 0 and "GLOSK" in ls[1] and job[0] == 0 and "GLOS" in job[1]
+            agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        checks["timeout-2"] = False
+    text = stopped(agent)
+    checks["menu"] = "This disk can start:" in text and re.search(r"  2  .* \(partition 1, \d+ MB\)", text) is not None \
+        and "GLOS-BOOT menu chosen=1 glos" in text
+    checks["volume"] = re.search(r"GLOS-NATIVE step=c dl=80 disk=\S+ .* base=%d mount=0" % start2, text) is not None
+    checks["clean-2"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-REFUSE" not in text
+    if not (checks["menu"] and checks["volume"]):
+        info += " log=%r" % [l for l in text.split("\n") if "menu" in l or "step=c" in l or "step=disk" in l][:6]
+    checks["untouched"] = first_partition() == sum0    # (GLOS installed, and run: not a byte of the other's)
+    # 3: 2 pressed at the menu: FreeDOS (or MS-DOS 7.1, which runs its AUTOEXEC.BAT's programs), from the first partition.
+    st, serial = run(tag + "c", ["--hdd", disk, "--machine", profile, "--timeout", "400" if msdos else "120",
+                                 "--idle", "200", "--keys", "@GLOS-BOOT menu choices,1:0x03"])
+    checks["other"] = ("GLOS-BOOT menu chosen=2 partition=1 %s" % ("Windows 95/98" if msdos else "FreeDOS")) in serial \
+        and ("HX-DONE 0" if msdos else "HX-FREEDOS started") in serial and "GLOS-BOOT step=enter" not in serial
+    if not checks["other"]:
+        info += " other=%r" % serial[-300:]
+    checks["table-kept"] = open(disk, "rb").read(512)[446:510] == sector[446:510]     # (it was the active one: no write)
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % (tag, "PASS" if not bad else "FAIL", info, "" if not bad else " failed: " + " ".join(bad)), \
+        not bad
+
+
 def ndos_case(profile, card):
     """A native machine (docs/v1/native-dos.md, native-DOS sessions, NS1: kernel/vm/ndm.c): GLOS's second V86 machine,
     no DOS under it, its INT 21h GLOS's own. Through the agent, twice (the first machine's memory and thread
@@ -12890,6 +13033,11 @@ def main():
             res += matrix(api_dbg_case, wins, a.jobs)   # ... and a program debugged
             res += matrix(api_sec_case, wins, a.jobs)   # ... and secrets kept
         return 0 if all(r[1] for r in res) else 1
+    if a.suite == "nboot" and os.environ.get("NBOOT_ONLY") == "dual":     # (one part of it, while it is worked on)
+        cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
+        if os.environ.get("NBOOT_MSDOS"):
+            cases = [c + (True,) for c in cases if c[0] == "bf6"]
+        return 0 if all(r[1] for r in matrix(nboot_dual_case, cases, a.jobs)) else 1
     if a.suite == "nboot":                      # (native boot: the bf6, the 486)
         cases = [c for c in [("bf6", None), ("486dx2", None)] if not a.profile or c[0] in a.profile]
         res = matrix(nboot_case, cases, a.jobs)
@@ -12901,6 +13049,8 @@ def main():
         res += matrix(nboot_install_case, cases, a.jobs)        # (DISK n INSTALL, and a start from what it made)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
         res += matrix(nboot_floppy_case, cases, a.jobs)         # (from a drive of the floppies' numbers)
+        res += matrix(nboot_dual_case, cases, a.jobs)           # (GLOS beside another system: the start-up menu)
+        res += matrix(nboot_dual_case, [c + (True,) for c in cases if c[0] == "bf6"], a.jobs)  # (... beside MS-DOS 7.1)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "ndos":                       # (native machines: the bf6 with VME, the 486 without)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]

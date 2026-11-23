@@ -91,6 +91,42 @@ int main(int argc, char **argv)
     mbr_boot(s);
     check("boot code", !memcmp(s, mbr_code, (size_t)(mbr_code_end - mbr_code)) && s[510] == 0x55 && s[511] == 0xAA
           && mbr_parse(s, p) == 1 && p[0].type == 0x0C);
+    check("no partition kept", mbr_boot_part_of(s) == 0);
+    mbr_boot_part(s, 2);
+    check("GLOS's partition kept", mbr_boot_part_of(s) == 2 && mbr_parse(s, p) == 1 && p[0].type == 0x0C);
+    s[3] ^= 0x55;
+    check("another's code keeps none", mbr_boot_part_of(s) == 0);
+
+    /* A partition added beside what is there: the owner's PCChips M925G, a 20 GB disk (the BIOS's 255 heads by
+       63) with Windows 98 on its first 10 GB. The new one takes the rest, in whole cylinders, FAT32 by the LBA
+       calls (past cylinder 1023), not active (Windows's is); the first entry as it was. */
+    {
+        unsigned char was[16];
+        unsigned slot = 9;
+        unsigned long cyl = 255UL * 63, win = 1274UL * cyl - 63;
+
+        memset(s, 0, sizeof s);
+        check("add: no table", mbr_add(s, 39102336UL, 255, 63, &made, &slot) == -1);
+        s[510] = 0x55, s[511] = 0xAA;
+        s[446] = 0x80, s[446 + 4] = 0x0C, s[446 + 8] = 63;
+        s[446 + 12] = (unsigned char)win, s[446 + 13] = (unsigned char)(win >> 8), s[446 + 14] = (unsigned char)(win >> 16);
+        s[446 + 15] = (unsigned char)(win >> 24);
+        memcpy(was, s + 446, 16);
+        check("add", mbr_add(s, 39102336UL, 255, 63, &made, &slot) == 0 && slot == 1 && made.start == 1274UL * cyl
+              && made.sectors == 39102336UL / cyl * cyl - 1274UL * cyl && made.type == 0x0C && !made.active);
+        check("add: the first kept", !memcmp(was, s + 446, 16) && mbr_parse(s, p) == 2 && p[0].active && !p[1].active
+              && p[1].start == made.start && p[1].sectors == made.sectors && p[1].type == 0x0C);
+        check("add: its end is the BIOS's last", s[446 + 16 + 5] == 254 && s[446 + 16 + 6] == 0xFF && s[446 + 16 + 7] == 0xFF);
+        check("add: no room left", mbr_add(s, 39102336UL, 255, 63, &made, &slot) == -3);
+        /* ... a stretch between two partitions is taken when it is the largest; a full table refuses */
+        memset(s + 446, 0, 64);
+        s[446 + 4] = 0x06, s[446 + 8] = 63, s[446 + 12] = (unsigned char)(1008 - 63), s[446 + 13] = (unsigned char)((1008 - 63) >> 8);
+        s[446 + 32 + 4] = 0x83, s[446 + 32 + 10] = 0x08, s[446 + 32 + 14] = 0x01;     /* 80000h, 10000h sectors */
+        check("add between", mbr_add(s, 0x90000UL + 1008, 16, 63, &made, &slot) == 0 && slot == 1 && made.start == 1008
+              && made.sectors == 0x80000UL / 1008 * 1008 - 1008 && made.type == 0x06 && made.active);
+        s[446 + 48 + 4] = 0x82, s[446 + 48 + 8] = 1;
+        check("add: table full", mbr_add(s, 0x90000UL + 1008, 16, 63, &made, &slot) == -2);
+    }
 
     /* Volumes: the floppies, then disks' sizes at the edges of each kind of FAT. */
     volume(dir, "f360", 720, 0, 0, 12);

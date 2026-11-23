@@ -190,8 +190,9 @@ static int fat_first(const unsigned char *s)
    (the size the BIOS's 48h gives, or up to a cylinder more, a BIOS's rounding; at least the size of 08h's geometry
    on a BIOS without 48h), by GLOS's IDE driver; none, or two alike, and the disk is read by the BIOS's calls (so
    is every disk with /BIOSDISK, the tests', and a disk of the floppies' numbers: a USB stick a BIOS starts as
-   one). If the BIOS can't be asked: the ATA disk of its size, else the first. Then the volume: the disk itself
-   if its first sector is a FAT volume's, else its active FAT partition. */
+   one). If the BIOS can't be asked: the ATA disk of its size, else the first. Then the volume: where the loader
+   found it (bootinfo's boot_lba); without its word, the disk itself if its first sector is a FAT volume's, else
+   its active FAT partition. */
 static void mount_c(void)
 {
     static unsigned char s[512], s0[512];
@@ -263,7 +264,10 @@ static void mount_c(void)
     if (r == 0) {
         r = -1;
         cbase = 0;
-        if (!fat_first(s) && s[510] == 0x55 && s[511] == 0xAA)
+        if (said)                               /* (the loader's volume: the partition GLOS started from, active
+                                                   or not) */
+            cbase = vm.bi->boot_lba;
+        else if (!fat_first(s) && s[510] == 0x55 && s[511] == 0xAA)
             for (i = 0; i < 4; i++)
                 if ((s[446 + i * 16] & 0x80) && is_fat(s[446 + i * 16 + 4])) {
                     cbase = (unsigned long)s[446 + i * 16 + 8] | (unsigned long)s[446 + i * 16 + 9] << 8

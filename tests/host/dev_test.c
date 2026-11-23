@@ -18,7 +18,7 @@ static struct pci_dev fn[8];
 static int nfn;
 static u32 legsup[8];                           /* config C0h of each function */
 static u32 command[8];                          /* config 04h: I/O and memory decoded unless a case says not */
-static u32 ohci[32];                            /* an OHCI's registers, where mm_dev_map leads */
+static u32 ohci[4096];                          /* an OHCI's registers (a Matrox card's 16 KB), where mm_dev_map leads */
 static u32 mapped;                              /* the address mm_dev_map was last asked for */
 
 void *mm_dev_map(u32 phys, u32 bytes)
@@ -187,6 +187,29 @@ int main(void)
     CHECK(dev_take_line(nic, with, sizeof with) == 0 && usb->keeper == DEV_QUIET && legsup[0] == 0);
     CHECK(strstr(logbuf, "legsup=2000 usbintr=000f line=masked") != NULL && strstr(logbuf, "how=pirq") != NULL);
     heard = 1;
+    /* ... as the M925G's BIOS leaves it in fact: PIRQ off, SMI on (legsup=0030), interrupts enabled: they are the
+       BIOS's SMIs. And a Matrox G550 on the same line, no interrupt of its own enabled: both quiet as they are,
+       nothing written, the card taken */
+    reset();
+    usb = add(16, 0, 0x1106, 0x3038, 0x0C, 0x03, 0x00, 1, 11, 0xE400);
+    other = add(0, 0, 0x102B, 0x2527, 0x03, 0x00, 0x00, 1, 11, 0);
+    other->bus = 1;
+    other->bar[1] = 0xDFE00000u;
+    nic = add(18, 0, 0x1106, 0x3065, 0x02, 0x00, 0x00, 1, 11, 0);
+    legsup[0] = 0x0030;
+    fake_ports[0xE400] = 1;
+    fake_ports[0xE404] = 0x0005;
+    CHECK(dev_take_line(nic, with, sizeof with) == 0 && usb->keeper == DEV_QUIET && other->keeper == DEV_QUIET);
+    CHECK(legsup[0] == 0x0030 && fake_ports[0xE404] == 0x0005 && mapped == 0xDFE00000u && ohci[0x1E1C / 4] == 0);
+    CHECK(strstr(logbuf, "class=uhci irq=11 how=smi") != NULL && strstr(logbuf, "class=mga irq=11 how=no-intr") != NULL);
+    /* ... the card with an interrupt enabled is somebody's: kept, the network card refused */
+    reset();
+    other = add(0, 0, 0x102B, 0x2527, 0x03, 0x00, 0x00, 1, 11, 0);
+    other->bar[1] = 0xDFE00000u;
+    nic = add(18, 0, 0x1106, 0x3065, 0x02, 0x00, 0x00, 1, 11, 0);
+    ohci[0x1E1C / 4] = 0x20;
+    CHECK(dev_take_line(nic, with, sizeof with) == -1 && other->keeper == DEV_DOS && ohci[0x1E1C / 4] == 0x20);
+    CHECK(strstr(logbuf, "class=mga irq=11 why=driven") != NULL);
     /* ... no such register (it reads 0), but the controller's own interrupt enables all off: quiet as it is */
     reset();
     usb = add(16, 0, 0x1106, 0x3038, 0x0C, 0x03, 0x00, 1, 11, 0xE400);
