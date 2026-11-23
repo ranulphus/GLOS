@@ -154,6 +154,22 @@ The mixer tries it after a Crystal chip and before the PCI cards. The virtual So
 - **Tests:** Loop A's audio suite gains bf6 + G200 + 86Box's `ess_es1688` (BLASTER "A220 I5 D1 T4"). The Sound
   Recorder must say it can't record. Bench D's ES1887 is owed.
 
+## Tier 2: OPTi 82C93x (begun 2026-11-23)
+
+Not built yet. What was found:
+
+- **The chip:** OPTi's 82C931 data book (rev 2.1, August 1997; sha256 1c73a813...4f1f, from bitsavers' mirror).
+  The configuration is in indirect "MC" registers (MCIR1-23) behind a password: E4h written to 0F8Dh, its only
+  fixed port. Bits 4-0 there place the MC index and data ports (0E0Eh-0FFFh). The Sound Blaster Pro is at
+  220/240, the WSS codec (AD1848/CS4231 class) at 530/640/E80/F40 (the codec's index at WSBase+4), and an OPL3
+  at 388. In PnP mode the resources come from ISA PnP.
+- **The plan:** split `crystal.c` into its codec half (the CS4231-class codec at a base, shared) and its chip
+  set-up, and write an OPTi set-up beside it: read or set the WSS base, IRQ and DMA through the MC registers
+  (or PnP), then play through the shared codec code.
+- **Loop A:** 86Box's `opti_82c931` needs its PnP ROM image (`roms/sound/opti931/adsrom.bin`) in RetroGPU's
+  sparse ROM set (the owner's OK first). The ROM-free `opti_82c930` sets itself up in another way (its own MC
+  scheme). The owner's spare card is an 82C931.
+
 ## Still to come in tier 1
 
 - **Bench checks:** the RTL8139 on bench F, the ALS100 with sb16.c on bench C (once fitted), PLIP between two
