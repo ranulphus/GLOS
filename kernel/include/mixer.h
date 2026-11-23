@@ -70,6 +70,8 @@ const char *mixer_card(void);                                   /* the card the 
 int mixer_chan(int chan, int set, u8 *left, u8 *right, u8 *mute);
 int mixer_input(int set, int *input);
 extern const struct sound_card sb16_card, crystal_card, cmi8738_card, es1371_card, ich97_card, via686_card, ess_card;
+extern const struct sound_card via8233_card;    /* (via686.c's, for the VT8233 family) */
+int via686_is8233(void);
 int via686_init(void);                          /* (phase H) VIA's VT82C686 AC'97 found and its codec ready: 0 */
 void via686_leave(void);
 int ich97_init(void);                           /* (phase H) Intel's ICH AC'97 found and its codec ready: 0 */

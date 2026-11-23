@@ -32,6 +32,7 @@ memory DOS has back. The mixer tries them in this order, after the SB16 and a Cr
 | `es1371.c` | Ensoniq ES1371/ES1373, Creative CT5880 (1274:1371, 5880) | Ensoniq's AudioPCI 97 specification; the converter's arithmetic as FreeBSD's BSD-licensed es137x has it | `audio` suite: bf6 + G200 + `es1371` | a spare card, in B or F |
 | `ich97.c` | Intel ICH to ICH7's AC'97 (8086:2415 ... 27DE) | Intel's ICH datasheets | none (not modelled) | E, if its controller is an ICH |
 | `via686.c` | VIA VT82C686A/B AC'97 (1106:3058) | VIA's VT82C686A data sheet | none (no VIA machine in Loop A) | E, if its controller is a 686 |
+| `via686.c` (the same file) | VIA VT8233, VT8235, VT8237 AC'97 (1106:3059) | VIA's VT8235M data sheet | none (not modelled) | G (a VT8235) |
 
 `ac97.c` is the codec's half for the last three. It resets the codec and waits until it is ready. It sets the
 master, PCM, CD, line and mic levels, the record source and gain, and the variable rate. It maps GLOS's 0 to 255
@@ -46,6 +47,12 @@ Per chip:
   MIDI UART is not used yet.
 - **ICH and VIA 686:** they play at the codec's variable rates. A codec without them plays only at 48 kHz, so
   `[sound] rate = 48000` is then needed.
+- **VIA VT8233 family (bench G, added the same evening):** the AC-link and the codec register are the 686's;
+  the channels are not. It plays through DXS channel 0, whose own rate converter takes any rate to the codec's
+  48 kHz (so no variable rates are needed) and whose volume, muted after a reset, is set to 0 dB. It records
+  through write channel 0 at the codec's ADC rate. The codec layer sets the DAC's and the ADC's rates
+  separately for it (`ac97_rates`). If bench G is silent, the first thing to try is configuration 41h's bit 2
+  (slots 3 and 4 given to the multichannel channel), which is set as on the 686.
 
 The downloaded specifications (C-Media's, Ensoniq's, VIA's) are reference only and are not in the repository.
 Each driver's head names its source and its SHA-256.

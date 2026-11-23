@@ -15,6 +15,7 @@ struct ac97 {
 
 int ac97_start(struct ac97 *c);         /* reset, ready, levels set: 0, or -1 */
 int ac97_rate(struct ac97 *c, u32 rate);
+int ac97_rates(struct ac97 *c, u32 dac, u32 adc);       /* each its own; 0 leaves one alone */
 /* mixer.h's chan and input, on the codec's registers (no FM channel: -1) */
 int ac97_chan(struct ac97 *c, int chan, int set, u8 *left, u8 *right, u8 *mute);
 int ac97_input(struct ac97 *c, int set, int *input);

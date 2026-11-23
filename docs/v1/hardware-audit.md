@@ -33,6 +33,7 @@ not measurements, and are marked so.
 | D (Pentium MMX) | not yet known | not yet known | not yet known | ESS AudioDrive ES1887 | not yet known | no |
 | E (Tualatin Pentium III-S) | not yet known | not yet known | not yet known | Realtek ALC201A (an AC'97 codec) onboard | not yet known | no |
 | F (Pentium 4 3.06 HT) | Gigabyte GA-8I915PMD: i915P/ICH6 | Matrox G450 PCI (102b:0525, behind a HiNT bridge) | Realtek RTL8139 (10ec:8139 rev 10) | Realtek ALC880, Intel HD Audio | ICH6: 4 UHCI + EHCI | yes, its own partition |
+| G (Pentium 4; added 2026-11-23) | PCChips M925G: VIA VT8235 | Matrox G550 (102b:2527) | VIA Rhine onboard | VIA AC'97, 1106:3059 | 3 UHCI (1106:3038) + EHCI (1106:3104) | yes: native, beside Windows 98, the native-dos session's branch |
 
 The owner's spare cards (2026-11-11):
 

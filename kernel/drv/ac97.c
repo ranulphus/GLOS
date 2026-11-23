@@ -56,15 +56,21 @@ int ac97_start(struct ac97 *c)
 
 /* A rate for the codec's DAC and ADC where it has variable rates (a controller that converts the rate itself,
    as the ES1371, leaves the codec at 48 kHz): 0, or -1 (not that rate). */
-int ac97_rate(struct ac97 *c, u32 rate)
+/* The front DAC's rate and the ADC's, each left alone if 0 (a controller that converts the rate itself keeps the
+   DAC at 48000 and records at another: via686.c's VT8233): 0, or -1 if the codec can't. */
+int ac97_rates(struct ac97 *c, u32 dac, u32 adc)
 {
     if (!c->vra)
-        return rate == 48000 ? 0 : -1;
+        return (!dac || dac == 48000) && (!adc || adc == 48000) ? 0 : -1;
     c->wr(c->ctx, R_EXTCTL, (u16)(c->rd(c->ctx, R_EXTCTL) | 1));
-    c->wr(c->ctx, R_DACRATE, (u16)rate);
-    c->wr(c->ctx, R_ADCRATE, (u16)rate);
-    return c->rd(c->ctx, R_DACRATE) == (u16)rate ? 0 : -1;
+    if (dac)
+        c->wr(c->ctx, R_DACRATE, (u16)dac);
+    if (adc)
+        c->wr(c->ctx, R_ADCRATE, (u16)adc);
+    return (!dac || c->rd(c->ctx, R_DACRATE) == (u16)dac) ? 0 : -1;
 }
+
+int ac97_rate(struct ac97 *c, u32 rate) { return ac97_rates(c, rate, rate); }
 
 static u8 level_of(u32 v, u32 bits, int gain)   /* a register's field as GLOS's 0 to 255 */
 {
