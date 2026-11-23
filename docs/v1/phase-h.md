@@ -50,14 +50,29 @@ Per chip:
 The downloaded specifications (C-Media's, Ensoniq's, VIA's) are reference only and are not in the repository.
 Each driver's head names its source and its SHA-256.
 
-- **Tests:** builds. The Loop A audio cases for the CMI8738 and the ES1371 run once the PC is free (the found
-  line, the start and stop lines, every tone in 86Box's recording, FM in a session for the CMI8738, the exit
-  line).
+- **Tests (Loop A, 2026-11-23 afternoon):**
+  - **CMI8738:** passed the whole audio case once: tones, two streams, a session, the Mixer, the Sound
+    Recorder, the Player, MIDI Studio, FM in a session, every tone in 86Box's recording, exit.
+  - **ES1371:** plays in every stream.
+  - **Its recording:** 86Box's model has the ES1371's ADC registers but never runs the channel or raises its
+    interrupt, so recording is a bench's to prove.
+  - **Open:** in two runs out of five, a card's playback stopped for good about 18 seconds in (1,544 and 1,546
+    interrupts), at the step where the Mixer app opens an input and the mixer starts recording on the card. The
+    handlers now go round until their card says nothing is pending, and a start clears what was left; the ES1371
+    has not stopped since. Until neither stops, the two cases are out of the gate's audio suite
+    (`AUDIO_CASES_H`, run by `LOOPA_AUDIO_SOUND=cmi8738,es1371`).
+  - **ES1371 codec:** its codec's vendor reads as FFFFFFFF in 86Box (its model's codec).
 - **Owed:**
   - each chip on its bench;
   - the CMI8738's FM on bench B's chip (an OPL3 on most);
   - the ES1371's codec writes on silicon: FreeBSD waits for a window of the converter's before each write,
     which is not done here yet.
+
+## Tier 2: write-combining for the Rage 128 Pro (2026-11-23)
+
+`[display] write_combining = auto` covers 1002:5046 (the Rage 128 Pro). Its registers are in a BAR of their
+own, unlike the Rage Pro's. DOS-GL checked it on bench B with MTRR LFB ON by hand: GTA's Glide replay frames
+were byte-identical, Glide conformance and DOS-GL's 35/35 were as before.
 
 ## Tier 2: AMD PCnet-PCI (2026-11-23)
 

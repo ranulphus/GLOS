@@ -467,8 +467,10 @@ static struct region region = { REGION_YMD, '-', 0, '.', ',', 1, 0, "us", "en" }
    framebuffer made write-combining as GLOS starts. auto (the default): for the cards it has been checked on with
    real hardware, whose registers are in a range of their own (Matrox's G-series: the G400 measured; NVIDIA's
    TNT and TNT2: the TNT2 M64 measured); on: any card with a framebuffer PCI shows; off. A card auto leaves alone
-   is said in the log, and MTRR LFB ON still tries it by hand. (ATI's Rage family and S3's cards have registers
-   inside the framebuffer's range: not auto's until looked at.) */
+   is said in the log, and MTRR LFB ON still tries it by hand. (ATI's Rage Pro and S3's cards have registers
+   inside the framebuffer's range: not auto's until looked at. The Rage 128 Pro, 1002:5046, has them in a BAR of
+   its own: auto's since 2026-11-23, after DOS-GL's Glide and DOS-GL conformance and GTA's replays were the same
+   with its aperture write-combining on bench B.) */
 static void wc_config(void)
 {
     static u8 done;
@@ -485,7 +487,9 @@ static void wc_config(void)
         return;
     known = (card->vendor == 0x102B && (card->device == 0x0520 || card->device == 0x0521 || card->device == 0x0525
                                         || card->device == 0x1000 || card->device == 0x1001 || card->device == 0x2527))
-        || (card->vendor == 0x10DE && (card->device == 0x0020 || (card->device >= 0x0028 && card->device <= 0x002F)));
+        || (card->vendor == 0x10DE && (card->device == 0x0020 || (card->device >= 0x0028 && card->device <= 0x002F)))
+        || (card->vendor == 0x1002 && card->device == 0x5046);  /* (phase H tier 2: the Rage 128 Pro, its registers in
+                                                   a BAR of their own; checked on bench B by DOS-GL, 2026-11-23) */
     if (!same(v, "on") && !known) {
         kprintf("GLOS-MTRR wc skip card=%04x:%04x reason=unchecked-card (MTRR LFB ON tries it)\n", card->vendor, card->device);
         return;
