@@ -131,6 +131,29 @@ is probed after the PCnet and before the NE2000.
   lines in hostio.py's NICS, merged with the owner's OK the same evening); with an older RetroGPU the cases are
   left out.
 
+## Tier 2: ESS AudioDrive (2026-11-23)
+
+`kernel/drv/ess.c` plays the ESS AudioDrives (ES688, ES1688, ES1868/1869, ES1878/1879, ES1887/1888): ISA chips
+on many cards and boards of 1995-1999, bench D's among them (an ES1887). As a Sound Blaster they are a Pro (DSP
+3.01), which `sb16.c` refuses. This driver plays them in ESS's Extended Mode, from ESS's ES1868 data sheet:
+
+- found at BLASTER's port by their answer to E7h (68h, 8xh); their interrupt and 8-bit DMA channel are BLASTER's
+  I and D (they have no H);
+- 16-bit signed stereo by auto-initialised DMA (demand mode, four bytes a request), interrupting at each half;
+  the rate from the 397.7 or 795.5 kHz clock (22050 plays at 22097 Hz), the filter at 80% of half the rate;
+- the chip's mixer through its four-bit Extended Access registers; the master, the voice and FM set full when it
+  is found (88h after a reset, some 30 dB down in all: the first run's tones were 37 dB below the CMI8738's, and
+  MIDI Studio's FM note too faint to find);
+- reset to a Sound Blaster Pro when the mixer stops it and at glos exit.
+
+The mixer tries it after a Crystal chip and before the PCI cards. The virtual Sound Blaster then offers sessions
+"A220 I5 D1 T6": an SB16 doing its 16-bit transfers on the 8-bit channel, as an SB16 does when BLASTER has no H.
+
+- **Not yet:** recording (the first DMA channel plays or records, not both; full duplex needs the second); its FM
+  (ESFM) and MPU-401 for `midi.c`; setting up the PnP chips itself (the BIOS or ESS's DOS program does it now).
+- **Tests:** Loop A's audio suite gains bf6 + G200 + 86Box's `ess_es1688` (BLASTER "A220 I5 D1 T4"). The Sound
+  Recorder must say it can't record. Bench D's ES1887 is owed.
+
 ## Still to come in tier 1
 
 - **Bench checks:** the RTL8139 on bench F, the ALS100 with sb16.c on bench C (once fitted), PLIP between two

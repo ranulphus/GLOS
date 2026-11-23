@@ -597,6 +597,7 @@ static void vm_leave(u32 code)
     mtrr_leave();                               /* (a write-combining range of GLOS's: off) */
     nic_leave();
     cmi8738_leave();                            /* (a bus master's channels stopped before DOS has its memory back) */
+    ess_leave();
     es1371_leave();
     ich97_leave();
     via686_leave();

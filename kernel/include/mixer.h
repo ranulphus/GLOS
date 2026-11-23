@@ -69,7 +69,7 @@ int mixer_wants(struct app *a, u32 *id);                        /* a stream of a
 const char *mixer_card(void);                                   /* the card the mixer plays through, or NULL */
 int mixer_chan(int chan, int set, u8 *left, u8 *right, u8 *mute);
 int mixer_input(int set, int *input);
-extern const struct sound_card sb16_card, crystal_card, cmi8738_card, es1371_card, ich97_card, via686_card;
+extern const struct sound_card sb16_card, crystal_card, cmi8738_card, es1371_card, ich97_card, via686_card, ess_card;
 int via686_init(void);                          /* (phase H) VIA's VT82C686 AC'97 found and its codec ready: 0 */
 void via686_leave(void);
 int ich97_init(void);                           /* (phase H) Intel's ICH AC'97 found and its codec ready: 0 */
@@ -77,6 +77,8 @@ void ich97_leave(void);
 int es1371_init(void);                          /* (phase H) a PCI ES1371, ES1373 or CT5880 found and set up: 0 */
 void es1371_leave(void);                        /* glos exit: its channels stopped */
 int cmi8738_init(void);                         /* (phase H) a PCI CMI8738 found and set up: 0 */
+int ess_init(const struct bootinfo *bi);        /* (phase H) an ESS AudioDrive at BLASTER's A, I and D: 0 */
+void ess_leave(void);                           /* glos exit: stopped, a Sound Blaster Pro again */
 void cmi8738_leave(void);                       /* glos exit: its channels stopped, its legacy parts as they were */
 void mixer_refresh(void);                       /* the card started or stopped as things stand now */
 const char *mixer_blaster(void);                /* BLASTER for programs: the virtual Sound Blaster's, a Crystal chip's, 0 */

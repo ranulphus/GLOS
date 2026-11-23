@@ -144,6 +144,9 @@ static void late(void)
     kcfg_get("sound", "crystal", v, sizeof v);
     if (crystal_init(v) == 0)
         mx.card = &crystal_card;
+    else if (ess_init(mx.bi) == 0)              /* (phase H: BLASTER's card an ESS AudioDrive, a Sound Blaster Pro
+                                                   to sb16.c: ess.c) */
+        mx.card = &ess_card;
     else if (cmi8738_init() == 0)               /* (phase H: a PCI CMI8738, cmi8738.c) */
         mx.card = &cmi8738_card;
     else if (es1371_init() == 0)                /* (... an ES1371, ES1373 or CT5880, es1371.c) */

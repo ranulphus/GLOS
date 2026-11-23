@@ -5183,7 +5183,8 @@ AUDIO_CASES = [("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k"),
                ("bf6", "g200", "ne2kpci", "cs4236b"), ("bf6", "g200", "ne2kpci", "cs4232"),
                ("bf6", "g200", "ne2kpci", "cs4235"),      # (docs/crystal-audio.md: GLOS sets the chip up; 86Box
                ("bf6", "g200", "ne2kpci", "cmi8738"),     # offers these three Crystal cards, given MGA-Glide's
-               ("bf6", "g200", "ne2kpci", "es1371")]      # sound/crystal ROMs) (phase H's PCI cards: kernel/drv/
+               ("bf6", "g200", "ne2kpci", "es1371"),      # sound/crystal ROMs) (phase H's PCI cards: kernel/drv/
+               ("bf6", "g200", "ne2kpci", "ess_es1688")]  # (... and an ESS AudioDrive, kernel/drv/ess.c)
 #   cmi8738.c and es1371.c; their lost edges on IRQ 12 are the mixer's watchdog's: docs/v1/phase-h.md)
 
 
@@ -5264,6 +5265,7 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
     crystal = sound.startswith("cs42")
     cmi = sound == "cmi8738"                    # (phase H: a PCI card GLOS finds by itself; no BLASTER of its own)
     es = sound in ("es1371", "es1373", "ct5880")     # (... another, with an AC'97 codec and no FM synthesiser)
+    ess = sound.startswith("ess_")              # (... an ESS AudioDrive, ISA, BLASTER's: ess.c; no recording yet)
     tag = "%s-%s" % (profile, vcard) + ("-" + sound if sound != "sb16" else "")
     # (Then phase F's Mixer, Sound Recorder and Player, the real programs: below.)
     # With the virtual Sound Blaster (the rule since 2026-11-19; docs/v1/vsb.md) the mixer plays from GLOS's
@@ -5272,7 +5274,7 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
     # back, a Crystal chip's own BLASTER.
     if not virtual:
         tag += "-real"
-    blaster = "A220 I5 D1 T4" if crystal and not virtual else "A220 I5 D1 H5 T6"
+    blaster = "A220 I5 D1 T4" if (crystal and not virtual) or ess else "A220 I5 D1 H5 T6"
     # The Player's files (phase F): five seconds of 1175 Hz as a WAV (16 bits, one channel, 22050 Hz), and a
     # module of one long note: a sine of 32 bytes at the period 428, 259 Hz, for a pattern (7.7 seconds).
     snd = os.path.join(ROOT, "out", "bat", "audio-" + tag)       # (beside the case's other inputs: its own folder
@@ -5301,7 +5303,7 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
         "; jobs.py audio, the virtual Sound Blaster off", "[time]", "sntp = off", "[sound]", "virtual = off"])
         + "=/TEST/GLOS.CFG"]
     agent = Agent("audio-" + tag, profile, card, ["--card", vcard, "--sound", sound, "--wav"] + off_cfg
-        + ([] if sound != "sb16" else ["--pre", "SET BLASTER=" + blaster]) + [
+        + ([] if sound != "sb16" and not ess else ["--pre", "SET BLASTER=" + blaster]) + [
         "--file", "build/dj/AUDTEST.EXE=/TEST/AUDTEST.EXE", "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE",
         "--file", "build/ow/dos/FMTEST.EXE=/TEST/FMTEST.EXE", "--file", "build/apps/MIXER.EXE=/TEST/MIXER.EXE",
         "--file", "build/apps/RECORDER.EXE=/TEST/RECORDER.EXE", "--file", "build/apps/PLAYER.EXE=/TEST/PLAYER.EXE",
@@ -5341,12 +5343,15 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
         while time.time() - t0 < 30 and not agent.ssh("glos audio")[1].startswith(want):
             time.sleep(0.5)
         checks["idle"] = agent.ssh("glos audio")[1].startswith(want)
-        checks["said"] = ("blaster virtual " + blaster in agent.ssh("glos audio")[1]) == virtual
+        checks["said"] = ("blaster virtual " + (blaster if not ess else "A220 I5 D1 T6")      # (an ESS: the virtual
+                          in agent.ssh("glos audio")[1]) == virtual    # SB16's 16-bit on its 8-bit channel, no H)
         if crystal:                             # (GLOS set it up: the data sheet's resources, BLASTER for sessions)
             checks["setup"] = "GLOS-SOUND crystal wss=534 sb=220 fm=388 irq=5 dma=1 " in agent.log()
             checks["blaster"] = "BLASTER=" + blaster in agent.ssh("SET")[1]
         if cmi or es:                           # (found on the PCI bus, its I/O and its line)
             checks["setup"] = re.search(r"GLOS-(CMI|ES) found io=[0-9a-f]+ irq=\d+", agent.log()) is not None
+        if ess:                                 # (found at BLASTER's port: an AudioDrive by its E7h answer)
+            checks["setup"] = re.search(r"GLOS-ESS found port=220 irq=5 dma=1 dsp=3\.\d+ id=688", agent.log()) is not None
         checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0
         t0 = time.time()
         while time.time() - t0 < 60 and not agent.ssh("glos audio")[1].startswith("audio on "):
@@ -5417,8 +5422,11 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
         time.sleep(2)
         keys("ctrl+r")
         time.sleep(4)
+        if ess:                                 # (ess.c can't record yet: the Recorder says so in a message)
+            checks["rec-dialog"] = bool(g.until(lambda d: g.window("Sound Recorder", d) is not None, 60))
+            keys("enter")
         keys("f6")
-        if not es:                              # (86Box's ES1371 never runs its ADC: nothing recorded, nothing to save)
+        if not es and not ess:                  # (86Box's ES1371 never runs its ADC: nothing recorded, nothing to save)
             keys("ctrl+s")
             checks["rec-dialog"] = bool(g.until(lambda d: g.window("Save As", d) is not None, 60))
             agent.ssh("glos type C:\\\\OUT\\\\TAKE\\n")
@@ -5440,6 +5448,9 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
                               and wav[36:40] == b"data" and struct.unpack_from("<I", wav, 40)[0] == n_rec * 4)
         if es:                                  # (... the Recorder says so and ends; recording is a bench's to prove)
             checks["rec-said"] = rc_rec == 0 and "RECORDER recorded 0 at 22050 Hz" in o_rec and "RECORDER end" in o_rec
+            checks["rec-file"] = True
+        if ess:
+            checks["rec-said"] = rc_rec == 0 and "RECORDER refused record" in o_rec and "RECORDER end" in o_rec
             checks["rec-file"] = True
         if not (checks["rec-said"] and checks["rec-file"]):
             print("    %s recorder: rc=%d %r file=%d bytes" % (tag, rc_rec, o_rec[-300:], len(wav)))
@@ -5522,7 +5533,8 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
             checks["fm"] = rc1 == 0 and rc2 == 0 and "found=1 notes=1" in o1 and "found=1 notes=1" in o2
         log = agent.log()
         on, off = ("GLOS-SOUND start", "GLOS-SOUND stop") if crystal else ("GLOS-CMI start", "GLOS-CMI stop") if cmi \
-            else ("GLOS-ES start", "GLOS-ES stop") if es else ("GLOS-SB start", "GLOS-SB stop")
+            else ("GLOS-ES start", "GLOS-ES stop") if es else ("GLOS-ESS start", "GLOS-ESS stop") if ess \
+            else ("GLOS-SB start", "GLOS-SB stop")
         checks["handed-over"] = (log.count(on) >= 2 and off in log) if not virtual else off not in log
         info += " periods=%d" % n
         checks["exit"] = agent.ssh("glos exit")[0] == 0
