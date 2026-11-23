@@ -922,7 +922,8 @@ def net(profile, card):
                                     "--tcp-send", "GLOS-NET dhcp|net:7|" + line] + GLOS_FILES + cfg + [
         "--cmd", "SERSAY HX-START net", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE /SELFTEST /RUN WAITSEC 12",
         "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"])
-    want = {"ne2kpci": "rtl8029", "rtl8139c+": "rtl8139", "i82557": "i8255x", "i82558": "i8255x"}.get(card, "ne2000")
+    want = {"ne2kpci": "rtl8029", "rtl8139c+": "rtl8139", "i82557": "i8255x", "i82558": "i8255x",
+            "pcnetpci": "pcnet"}.get(card, "ne2000")
     echo = os.path.join(ROOT, "out", "net-" + tag, "tcp-0.txt")
     echo = open(echo, "rb").read().decode("latin-1") if os.path.exists(echo) else ""
     checks = {
