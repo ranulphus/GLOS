@@ -1953,3 +1953,15 @@ copy an uninitialised reason; a name whose first byte is E5h (CP437's sigma) was
 the entry read as deleted (now 05h, as DOS writes it: `fatimg_test`); Fall Line's other skiers' and groomers'
 start steps were 16 bits (a run past 18 minutes jumped them; now 32); and two lists recorded their doubled room
 before realloc succeeded (rich view tints, the thinning's folders).
+
+## Phase F's apps on a real PC (2026-11-23, bench-g400: an IBM 300PL, Pentium II, Matrox G400; GLOS main 6d10b1f)
+
+- **Fall Line:** the demonstration's whole run on mountain 7 (red slalom; 2,730 steps) at 640 by 480 by 16:
+  **28.0 frames a second** (1,393 frames in 49.7 s, the run and its stop; the game draws at most 30), every
+  gate, no fall, the same steps as on the emulated PCs. (Before the day's weather, lift, hares, other skiers
+  and groomer; those want measuring again, and the 486's figure is still owed: bench C was off.)
+- **The Web Reader:** `WEB -dump https://www.iana.org/` fetched 6,253 bytes over TLS (the name a CNAME to
+  Cloudflare's) and read the page's title, headings, paragraphs and links. (example.org gave "no such name":
+  the house's router answers nothing for its A record, which is the router's, not GLOS's.)
+- **Seen on the way:** OpenSSH's client printed `channel_by_id: 0: bad id: channel free` on one of the
+  `glos ps` calls: the release's open "rare SSH channel message", met again; not yet looked into.
