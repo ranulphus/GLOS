@@ -1902,3 +1902,10 @@ Transport, **Time Signature...**: beats a bar (1 to 16) and the beat's note (a h
 sixteenth); the roll's bars, the clicks and the file's time signature follow it. **Tempo...** gains **From bar**
 (1 to 999): the tempo set there, a change of tempo from that bar on (by the time signature's bars), kept and
 played (`song_tempo_set`). `studio-meter` (new): 3/4, then 90 a minute from bar 3 (tick 2880).
+
+## MIDI Studio: velocity (2026-11-23)
+
+The plan's velocity lane, in a smaller form: each note on the roll is shaded by its velocity (the accent's colour
+at 127, paler towards the field's as it is softer, a third of the way at 1), and **Edit, Velocity...** (Ctrl+E)
+sets the chosen notes' (or every note's) velocity, 1 to 127, one step of the history. `studio-step`: all six
+notes to 40 (paler in its picture). Not yet: a lane under the roll to draw velocities and controllers in.

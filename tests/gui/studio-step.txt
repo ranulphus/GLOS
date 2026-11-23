@@ -3,7 +3,8 @@
 # E; Backspace takes the E away and the cursor back; Shift+V an F with an accent (velocity 127) in its place;
 # a chord (C, E and G held together: Z, C and B) at one step; D after it, alone; F8 off. Each note is one step of
 # the history: Ctrl+Z takes the D away again. Then all of them a semitone up (Ctrl+Up) and an octave down
-# (Ctrl+Shift+Down); Quantise (Ctrl+Q) finds them on sixteenths already; one more Ctrl+Z.
+# (Ctrl+Shift+Down); Quantise (Ctrl+Q) finds them on sixteenths already; Velocity (Ctrl+E) 40 for all (paler
+# in the picture); one more Ctrl+Z.
 run STUDIO.EXE -demo
 wait "MIDI Studio"
 key f8
@@ -40,6 +41,13 @@ key ctrl+shift+down
 said STUDIO transposed 6 by -12
 key ctrl+q
 said STUDIO quantised 0
+key ctrl+e
+wait "Velocity"
+key ctrl+a
+type 40
+key enter
+gone "Velocity"
+said STUDIO velocity 40 notes=6
 shot moved "MIDI Studio"
 key ctrl+z
 said STUDIO undone 6

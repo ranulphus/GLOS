@@ -46,4 +46,6 @@ same step, and the cursor moves on once.
 
 **Edit, Quantise** (Ctrl+Q) puts the chosen notes' starts (or all the track's, with none chosen) on the
 nearest sixteenth. **Transpose Up** and **Down** (Ctrl+Up, Ctrl+Down) move them a semitone, **An Octave Up**
-and **Down** (Ctrl+Shift+Up, Ctrl+Shift+Down) twelve; nothing moves if a note would go past the keyboard's end.
+and **Down** (Ctrl+Shift+Up, Ctrl+Shift+Down) twelve; nothing moves if a note would go past the keyboard's end. **Edit,
+Velocity** (Ctrl+E) sets how hard the chosen notes (or all) are played, 1 to 127; softer notes are paler on the
+roll.

@@ -29,7 +29,7 @@
 
 enum { C_NEW = 1, C_OPEN, C_SAVE, C_SAVEAS, C_EXIT, C_UNDO, C_REDO, C_DELETE, C_SELALL, C_TRACK, C_DRUMS, C_UNTRACK, C_INSTR,
        C_MUTE, C_SOLO, C_PLAY, C_STOP, C_TEMPO, C_ZOOMIN, C_ZOOMOUT, C_RECORD, C_CLICK, C_COUNTIN, C_STEP, C_STEPLEN,
-       C_QUANT = C_STEPLEN + 4, C_UP, C_DOWN, C_OCTUP, C_OCTDOWN, C_METER };
+       C_QUANT = C_STEPLEN + 4, C_UP, C_DOWN, C_OCTUP, C_OCTDOWN, C_METER, C_VELOCITY };
                                         /* (C_STEPLEN + n: a sixteenth, an eighth, a quarter, a half) */
 
 #define ROW 8                           /* a key's row on the roll: pixels */
@@ -188,6 +188,19 @@ static int black(int key)
     return is[key % 12];
 }
 
+/* (2026-11-23) A note's colour by its velocity: the accent's at 127, paler towards the field's as it is softer
+   (a third of the way at 1). */
+static unsigned soft(unsigned rgb, unsigned force)
+{
+    unsigned field = GUI_ROLE(GLOS_ROLE_FIELD), out = 0, k = 127 + (127 - (force > 127 ? 127 : force)) / 2;
+    int sh;
+    for (sh = 0; sh < 24; sh += 8) {
+        unsigned a = (rgb >> sh) & 0xFF, b = (field >> sh) & 0xFF;
+        out |= ((a * 127 + b * (k - 127)) / k) << sh;
+    }
+    return out;
+}
+
 static void roll_draw(struct gui_widget *w, struct gfx_surface *s, const struct gui_viewport *v)
 {
     const struct song_track *t = &song->track[cur];
@@ -214,7 +227,7 @@ static void roll_draw(struct gui_widget *w, struct gfx_surface *s, const struct 
         x0 = X(n->at), x1 = X(n->at + n->len), y = v->oy + (127 - n->key) * ROW;
         if (x1 < x0 + 3)
             x1 = x0 + 3;
-        gfx_fill(s, x0, y, x1 - x0, ROW - 1, GUI_ROLE(n->sel ? GLOS_ROLE_CHOSEN : GLOS_ROLE_MARK));
+        gfx_fill(s, x0, y, x1 - x0, ROW - 1, n->sel ? GUI_ROLE(GLOS_ROLE_CHOSEN) : soft(GUI_ROLE(GLOS_ROLE_MARK), n->force));
         gfx_frame(s, x0, y, x1 - x0, ROW - 1, GUI_ROLE(GLOS_ROLE_LINE));
     }
     for (row = first < 0 ? 0 : first; f && row <= last && row < 128; row++)     /* the C's names, where they show */
@@ -1105,6 +1118,45 @@ static void pick_tempo(void)
     dlg_spin2 = NULL;
 }
 
+static void pick_velocity(void)         /* (2026-11-23) the chosen notes' velocity (or all the track's) */
+{
+    struct song_track *t = &song->track[cur];
+    struct gui_window *d = gui_window(GUI_T("Velocity"), 260, 0, GUI_W_DIALOG);
+    struct gui_widget *box, *form;
+    unsigned long i, n = 0;
+    int any = 0, first = -1;
+    struct step *st;
+    for (i = 0; i < t->nnotes; i++)
+        if (t->notes[i].sel) {
+            any = 1;
+            if (first < 0)
+                first = t->notes[i].force;
+        }
+    d->owner = win;
+    box = gui_vbox(d->root, 6, 8);
+    form = gui_form(box);
+    dlg_list = NULL, dlg_spin2 = NULL, dlg_choice = NULL;
+    dlg_spin = gui_spin(gui_row(form, any ? GUI_T("The chosen notes' &velocity:") : GUI_T("Every note's &velocity:"), NULL),
+                        1, 127, first > 0 ? first : 100);
+    gui_label(box, GUI_T("1 is the softest, 127 the loudest."));
+    dlg_buttons(d, box);
+    gui_focus(dlg_spin);
+    dlg_value = 0;
+    if (gui_modal(d) != GUI_OK || dlg_value < 1 || dlg_value > 127) {
+        say("velocity left");
+        return;
+    }
+    st = step_begin();
+    for (i = 0; i < t->nnotes; i++)
+        if (!any || t->notes[i].sel) {
+            t->notes[i].force = (unsigned char)dlg_value;
+            n++;
+        }
+    step_end(st, GUI_T("Velocity"));
+    say("velocity %d notes=%lu", dlg_value, n);
+    gui_damage(roll);
+}
+
 static void pick_meter(void)            /* (2026-11-23) the time signature: beats a bar, and the beat's note */
 {
     static const unsigned units[4] = { 2, 4, 8, 16 };
@@ -1322,6 +1374,9 @@ static void command(struct gui_window *w, int id)
     case C_METER:
         pick_meter();
         break;
+    case C_VELOCITY:
+        pick_velocity();
+        break;
     case C_STEP:
         step_toggle();
         break;
@@ -1461,6 +1516,7 @@ static void build(void)
     gui_command(win, C_DOWN, GUI_T("Transpose Do&wn"), "Ctrl+Down", NULL, GUI_T("... a semitone down"));
     gui_command(win, C_OCTUP, GUI_T("An &Octave Up"), "Ctrl+Shift+Up", NULL, NULL);
     gui_command(win, C_OCTDOWN, GUI_T("An Octave Dow&n"), "Ctrl+Shift+Down", NULL, NULL);
+    gui_command(win, C_VELOCITY, GUI_T("&Velocity..."), "Ctrl+E", NULL, GUI_T("The chosen notes' velocity (or every note's)"));
     gui_command(win, C_TRACK, GUI_T("&New Track"), "Ctrl+T", gui_glyph("add"), GUI_T("A new track"));
     gui_command(win, C_DRUMS, GUI_T("New &Drum Track"), NULL, NULL, NULL);
     gui_command(win, C_UNTRACK, GUI_T("&Remove Track"), NULL, NULL, NULL);
@@ -1496,7 +1552,7 @@ static void build(void)
     gui_menu_command(m, C_DELETE), gui_menu_command(m, C_SELALL);
     gui_menu_sep(m);
     gui_menu_command(m, C_QUANT), gui_menu_command(m, C_UP), gui_menu_command(m, C_DOWN);
-    gui_menu_command(m, C_OCTUP), gui_menu_command(m, C_OCTDOWN);
+    gui_menu_command(m, C_OCTUP), gui_menu_command(m, C_OCTDOWN), gui_menu_command(m, C_VELOCITY);
     gui_menu_sep(m);
     gui_menu_command(m, C_STEP);
     {
