@@ -22,6 +22,10 @@ Undo is Ctrl+Z, Redo Ctrl+Y. Ctrl++ and Ctrl+- show more or less of the roll.
 
 ## Hearing it
 
+**View, Arrangement** (F4) shows every track as a row of bars, with each bar's notes small in it: press a bar
+to choose it (drag along to choose several), then **Edit, Copy Bars** (Ctrl+C), choose where they should go and
+**Paste Bars** (Ctrl+V), or **Delete** them. F4 again shows the notes of one track.
+
 **F5** plays from the start, **F6** stops. **Transport, Tempo** sets the speed in quarter notes a minute, from
 the start or from a bar on (a change of tempo there). **Transport, Time Signature** sets the beats in a bar and
 the note a beat is.

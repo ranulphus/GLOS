@@ -29,7 +29,7 @@
 
 enum { C_NEW = 1, C_OPEN, C_SAVE, C_SAVEAS, C_EXIT, C_UNDO, C_REDO, C_DELETE, C_SELALL, C_TRACK, C_DRUMS, C_UNTRACK, C_INSTR,
        C_MUTE, C_SOLO, C_PLAY, C_STOP, C_TEMPO, C_ZOOMIN, C_ZOOMOUT, C_RECORD, C_CLICK, C_COUNTIN, C_STEP, C_STEPLEN,
-       C_QUANT = C_STEPLEN + 4, C_UP, C_DOWN, C_OCTUP, C_OCTDOWN, C_METER, C_VELOCITY };
+       C_QUANT = C_STEPLEN + 4, C_UP, C_DOWN, C_OCTUP, C_OCTDOWN, C_METER, C_VELOCITY, C_ARRANGE, C_BCOPY, C_BPASTE };
                                         /* (C_STEPLEN + n: a sixteenth, an eighth, a quarter, a half) */
 
 #define ROW 8                           /* a key's row on the roll: pixels */
@@ -157,15 +157,29 @@ static void show_clock(void)            /* where the playing is: bar, beat */
     gui_set_text(clock, t);
 }
 
+/* (2026-11-23) The arrangement: the roll's canvas shows every track as a row, the bars along it, each bar's notes
+   small in it; bars of a track chosen (a press, a drag along) are copied (Ctrl+C), pasted from a bar chosen
+   (Ctrl+V: onto that track, at that bar) or deleted (Del). View, Arrangement (F4) and back. */
+#define AROW 24                         /* a track's row: pixels */
+static int arrange, asel_t = -1, adrag;
+static unsigned long asel_a, asel_b, adrag_from;        /* the bars chosen: from, to (both in it) */
+static struct song_note *bclip;         /* (Copy Bars) their notes, from the first bar's start */
+static unsigned long nbclip, bclip_bars;
+
+static unsigned long bar_ticks(void)
+{
+    return SONG_PPQ * 4ul / (song->unit ? song->unit : 4) * (song->beats ? song->beats : 4);
+}
+
 static void size_roll(void)             /* the roll's document: the song and eight bars, 32 at least; the keys */
 {
-    unsigned long bar = SONG_PPQ * 4ul / (song->unit ? song->unit : 4) * (song->beats ? song->beats : 4);
+    unsigned long bar = bar_ticks();
     unsigned long w = song_ticks(song) + 8 * bar;
     if (w < 32 * bar)
         w = 32 * bar;
     if (w > 0x3FFFFFFul)
         w = 0x3FFFFFFul;
-    gui_cview_size(roll, (int)w, 128 * ROW * zoom);
+    gui_cview_size(roll, (int)w, arrange ? (int)(song->ntracks ? song->ntracks : 1) * AROW * zoom : 128 * ROW * zoom);
     gui_cview_scale(roll, 1, zoom);
 }
 
@@ -201,9 +215,44 @@ static unsigned soft(unsigned rgb, unsigned force)
     return out;
 }
 
+static void arrange_draw(struct gfx_surface *s, const struct gui_viewport *v)
+{
+    unsigned long bar = bar_ticks(), i;
+    unsigned tr;
+    long tk;
+#define AX(tick) (v->ox + (int)((long)(tick) / zoom))
+    for (tr = 0; tr < song->ntracks; tr++) {
+        int y = v->oy + (int)tr * AROW;
+        const struct song_track *t = &song->track[tr];
+        gfx_fill(s, v->area.x, y, v->area.w, AROW, GUI_ROLE(tr == (unsigned)cur ? GLOS_ROLE_FIELD : GLOS_ROLE_FACE));
+        if ((int)tr == asel_t)                  /* the bars chosen */
+            gfx_fill(s, AX(asel_a * bar), y, AX((asel_b + 1) * bar) - AX(asel_a * bar), AROW,
+                     soft(GUI_ROLE(GLOS_ROLE_CHOSEN), 30));
+        for (i = 0; i < t->nnotes; i++) {       /* its notes, small: the row's height the keys' 128 */
+            const struct song_note *n = &t->notes[i];
+            int x0 = AX(n->at), x1 = AX(n->at + n->len), ny = y + 2 + (127 - n->key) * (AROW - 4) / 128;
+            if ((long)(n->at + n->len) < v->doc.x || (long)n->at > v->doc.x + v->doc.w)
+                continue;
+            gfx_fill(s, x0, ny, x1 > x0 + 1 ? x1 - x0 : 2, 2, soft(GUI_ROLE(GLOS_ROLE_MARK), n->force));
+        }
+        gfx_fill(s, v->area.x, y + AROW - 1, v->area.w, 1, GUI_ROLE(GLOS_ROLE_SHADE));
+    }
+    for (tk = (long)(v->doc.x / (long)bar * (long)bar); tk <= v->doc.x + v->doc.w; tk += (long)bar)
+        if (tk >= 0)
+            gfx_fill(s, AX(tk), v->area.y, 1, v->area.h, GUI_ROLE(GLOS_ROLE_LINE));
+    if (line >= 0)
+        gfx_fill(s, AX(line), v->area.y, 1, v->area.h, 0xD02020);
+#undef AX
+}
+
 static void roll_draw(struct gui_widget *w, struct gfx_surface *s, const struct gui_viewport *v)
 {
     const struct song_track *t = &song->track[cur];
+    if (arrange) {
+        (void)w;
+        arrange_draw(s, v);
+        return;
+    }
     const struct gfx_font *f = gui_font_get(GUI_FONT_SANS, 0);
     unsigned long beat = SONG_PPQ * 4ul / (song->unit ? song->unit : 4), bar = beat * (song->beats ? song->beats : 4), i;
     long tk;
@@ -341,12 +390,40 @@ static int step_end(struct step *st, const char *name)
 static void chord_reset(void);           /* (step entry's chords: below) */
 static unsigned char midi_held[128];     /* (step entry: a MIDI keyboard's keys held, for chords) */
 
+static int arrange_event(struct gui_widget *w, struct gui_ev *e, int x, int y)
+{
+    unsigned long b = x < 0 ? 0 : (unsigned long)x / bar_ticks();
+    int tr = y < 0 ? -1 : y / (AROW * zoom);
+    if (e->type == GUI_EV_PRESS && e->button == 1 && tr >= 0 && tr < (int)song->ntracks) {
+        asel_t = tr, asel_a = asel_b = adrag_from = b, adrag = 1;
+        if (cur != tr) {
+            cur = tr;
+            show_tracks();
+        }
+        gui_damage(w);
+        return 1;
+    }
+    if (e->type == GUI_EV_MOVE && adrag) {      /* (along the track: the bars from the first to this) */
+        asel_a = b < adrag_from ? b : adrag_from, asel_b = b < adrag_from ? adrag_from : b;
+        gui_damage(w);
+        return 1;
+    }
+    if (e->type == GUI_EV_RELEASE && adrag) {
+        adrag = 0;
+        say("bars chosen track=%d from=%lu to=%lu", asel_t + 1, asel_a + 1, asel_b + 1);
+        return 1;
+    }
+    return e->type == GUI_EV_PRESS || e->type == GUI_EV_MOVE || e->type == GUI_EV_RELEASE;
+}
+
 static int roll_event(struct gui_widget *w, struct gui_ev *e, int x, int y)
 {
     struct song_track *t = &song->track[cur];
     int key = 127 - y / (ROW * zoom);
     unsigned long i;
     long hit;
+    if (arrange)
+        return arrange_event(w, e, x, y);
     switch (e->type) {
     case GUI_EV_PRESS:
         if (drag || x < 0 || y < 0 || key < 0)
@@ -1256,7 +1333,63 @@ static void command(struct gui_window *w, int id)
     case C_REDO:
         gui_redo(history);
         break;
+    case C_ARRANGE:                             /* (2026-11-23) the arrangement, or the roll */
+        arrange = !arrange;
+        size_roll();
+        gui_damage(roll);
+        say("arrangement %s", arrange ? "on" : "off");
+        break;
+    case C_BCOPY:                               /* the bars chosen: their notes kept, from the first bar's start */
+        if (!arrange || asel_t < 0 || asel_t >= (int)song->ntracks)
+            break;
+        {
+            const struct song_track *a = &song->track[asel_t];
+            unsigned long from = asel_a * bar_ticks(), to = (asel_b + 1) * bar_ticks(), k = 0;
+            free(bclip), bclip = NULL, nbclip = 0;
+            for (i = 0; i < a->nnotes; i++)
+                k += a->notes[i].at >= from && a->notes[i].at < to;
+            if (k && !(bclip = malloc(k * sizeof *bclip)))
+                break;
+            for (i = 0; i < a->nnotes; i++)
+                if (a->notes[i].at >= from && a->notes[i].at < to) {
+                    bclip[nbclip] = a->notes[i];
+                    bclip[nbclip].at -= from, bclip[nbclip++].sel = 0;
+                }
+            bclip_bars = asel_b - asel_a + 1;
+            say("bars copied %lu notes=%lu", bclip_bars, nbclip);
+        }
+        break;
+    case C_BPASTE:                              /* ... onto the track chosen, from the bar chosen */
+        if (!arrange || asel_t < 0 || asel_t >= (int)song->ntracks || !bclip_bars)
+            break;
+        st = step_begin();
+        for (i = 0; i < nbclip; i++)
+            if (song_note_add(&song->track[asel_t], asel_a * bar_ticks() + bclip[i].at, bclip[i].len, bclip[i].key,
+                              bclip[i].force) >= 0)
+                n++;
+        step_end(st, GUI_T("Paste Bars"));
+        say("bars pasted track=%d at=%lu notes=%lu", asel_t + 1, asel_a + 1, n);
+        size_roll();
+        gui_damage(roll);
+        break;
     case C_DELETE:
+        if (arrange) {                          /* (the arrangement: the notes of the bars chosen) */
+            struct song_track *a;
+            unsigned long from = asel_a * bar_ticks(), to = (asel_b + 1) * bar_ticks();
+            if (asel_t < 0 || asel_t >= (int)song->ntracks)
+                break;
+            a = &song->track[asel_t];
+            st = step_begin();
+            for (i = a->nnotes; i-- > 0; )
+                if (a->notes[i].at >= from && a->notes[i].at < to) {
+                    song_note_remove(a, i);
+                    n++;
+                }
+            step_end(st, GUI_T("Delete Bars"));
+            say("bars deleted %lu", n);
+            gui_damage(roll);
+            break;
+        }
         st = step_begin();
         for (i = t->nnotes; i-- > 0; )
             if (t->notes[i].sel) {
@@ -1396,8 +1529,11 @@ static void update(struct gui_window *w)
     unsigned long i, chosen = 0;
     for (i = 0; i < t->nnotes; i++)
         chosen += t->notes[i].sel;
-    gui_command_enable(w, C_DELETE, chosen > 0);
-    gui_command_enable(w, C_SELALL, t->nnotes > 0);
+    gui_command_enable(w, C_DELETE, arrange ? asel_t >= 0 : chosen > 0);
+    gui_command_enable(w, C_SELALL, t->nnotes > 0 && !arrange);
+    gui_command_check(w, C_ARRANGE, arrange);
+    gui_command_enable(w, C_BCOPY, arrange && asel_t >= 0);
+    gui_command_enable(w, C_BPASTE, arrange && asel_t >= 0 && bclip_bars > 0);
     gui_command_enable(w, C_UNTRACK, song->ntracks > 1);
     gui_command_enable(w, C_STOP, heard != NULL || recording);
     gui_command_check(w, C_RECORD, recording);
@@ -1539,6 +1675,9 @@ static void build(void)
     gui_command(win, C_COUNTIN, GUI_T("Count &In a Bar"), NULL, NULL, GUI_T("A bar of clicks before recording begins"));
     gui_command(win, C_TEMPO, GUI_T("&Tempo..."), NULL, NULL, NULL);
     gui_command(win, C_METER, GUI_T("Time Si&gnature..."), NULL, NULL, NULL);
+    gui_command(win, C_ARRANGE, GUI_T("&Arrangement"), "F4", NULL, GUI_T("Every track as a row of bars, or the notes of one"));
+    gui_command(win, C_BCOPY, GUI_T("&Copy Bars"), "Ctrl+C", NULL, GUI_T("(The arrangement) the bars chosen"));
+    gui_command(win, C_BPASTE, GUI_T("Paste &Bars"), "Ctrl+V", NULL, GUI_T("(The arrangement) onto the bar chosen"));
     gui_command(win, C_ZOOMIN, GUI_T("Zoom &In"), "Ctrl++", gui_glyph("zoom-in"), GUI_T("Zoom in"));
     gui_command(win, C_ZOOMOUT, GUI_T("Zoom &Out"), "Ctrl+-", gui_glyph("zoom-out"), GUI_T("Zoom out"));
     bar = gui_menubar(win);
@@ -1549,6 +1688,7 @@ static void build(void)
     m = gui_menu(bar, GUI_T("&Edit"));
     gui_menu_command(m, C_UNDO), gui_menu_command(m, C_REDO);
     gui_menu_sep(m);
+    gui_menu_command(m, C_BCOPY), gui_menu_command(m, C_BPASTE);
     gui_menu_command(m, C_DELETE), gui_menu_command(m, C_SELALL);
     gui_menu_sep(m);
     gui_menu_command(m, C_QUANT), gui_menu_command(m, C_UP), gui_menu_command(m, C_DOWN);
@@ -1571,6 +1711,8 @@ static void build(void)
     gui_menu_sep(m);
     gui_menu_command(m, C_TEMPO), gui_menu_command(m, C_METER);
     m = gui_menu(bar, GUI_T("&View"));
+    gui_menu_command(m, C_ARRANGE);
+    gui_menu_sep(m);
     gui_menu_command(m, C_ZOOMIN), gui_menu_command(m, C_ZOOMOUT);
     tb = gui_toolbar(win);
     gui_toolbar_command(tb, C_NEW), gui_toolbar_command(tb, C_OPEN), gui_toolbar_command(tb, C_SAVE);

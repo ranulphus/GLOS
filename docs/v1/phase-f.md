@@ -1965,3 +1965,16 @@ before realloc succeeded (rich view tints, the thinning's folders).
   the house's router answers nothing for its A record, which is the router's, not GLOS's.)
 - **Seen on the way:** OpenSSH's client printed `channel_by_id: 0: bad id: channel free` on one of the
   `glos ps` calls: the release's open "rare SSH channel message", met again; not yet looked into.
+
+## MIDI Studio: the arrangement view (2026-11-23)
+
+The plan's "arrangement view (regions along bars)": View, **Arrangement** (F4) draws the roll's canvas another
+way: every track a row (24 pixels), the bars along it (by the time signature), each bar's notes small in it (the
+row's height the 128 keys, shaded by velocity), the current track's row lighter. A press chooses a bar of a
+track (and makes it the current track), a drag along it several; **Copy Bars** (Ctrl+C) keeps their notes from
+the first bar's start, **Paste Bars** (Ctrl+V) puts them onto the track chosen from the bar chosen, **Delete**
+takes the notes of the bars chosen away (each one step of the history). F4 again: the roll.
+
+- **Tests:** `studio-arrange` (new: WALTZ.MID arranged, bar 1 copied, pasted at bar 3, bars 1 and 2 deleted by
+  a drag, Undo, back to the roll; pictures).
+- **Not yet:** regions moved by dragging; loops; controller lanes.

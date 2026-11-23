@@ -1,0 +1,35 @@
+# MIDI Studio's arrangement (apps/studio; phase F, 2026-11-23): C:\SND\WALTZ.MID (3/4: a C and a D in bar 1, an E in
+# bar 2) seen as View, Arrangement (F4): its track a row of bars, each bar's notes small in it (a picture); bar 1
+# chosen by a press and copied (Ctrl+C), bar 3 chosen and pasted (Ctrl+V: the C and the D there too); bars 1 to 2
+# chosen by a drag and deleted (Del); Undo gives them back; F4: the roll again.
+run STUDIO.EXE -demo
+wait "MIDI Studio"
+key ctrl+o
+wait "Open"
+type C:\\SND\\WALTZ.MID\n
+said STUDIO opened WALTZ.MID tracks=1 notes=3
+key f4
+said STUDIO arrangement on
+shot arranged "MIDI Studio"
+click "MIDI Studio" 30 220
+said STUDIO bars chosen track=1 from=1 to=1
+key ctrl+c
+said STUDIO bars copied 1 notes=2
+click "MIDI Studio" 380 220
+said STUDIO bars chosen track=1 from=3 to=3
+key ctrl+v
+said STUDIO bars pasted track=1 at=3 notes=2
+shot pasted "MIDI Studio"
+drag "MIDI Studio" 30 220 300 220
+said STUDIO bars chosen track=1 from=1 to=2
+key del
+said STUDIO bars deleted 3
+key ctrl+z
+said STUDIO undone 5
+key f4
+said STUDIO arrangement off
+key alt+f4
+wait "MIDI Studio"
+key alt+n
+gone "MIDI Studio"
+expect STUDIO end
