@@ -571,7 +571,12 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
   buffer was written by the scan's listing between the write's copy into it and DOS's reading of it, though
   findfirst, findnext, printf and fflush all take the C library's lock (gloswrap.c; GAMES.map shows them
   wrapped). Not yet explained. Next: GAMES built with a check of the transfer buffer before and after each
-  write (a log line when it changed), run on the 486 until it happens.
+  write (a log line when it changed), run on the 486 until it happens. Ruled out by reading (2026-11-23 evening): the lock
+  itself (an xchg swap; the owner and depth written by the holder alone); `rm_call` returning before DOS has
+  read the buffer (it is synchronous); `opendir`/`readdir` unlocked (they are in wrap.list); the toolkit's and
+  libglos's own DOS calls (4408h and 6601h: no buffer); the kernel's folder API (`api2fs.c`: DOS blocks of its
+  own, never the app's transfer buffer). The bytes are what DJGPP's own `findfirst` puts at the start of the
+  transfer buffer, so a library call from the worker still overlapped the window thread's write somehow.
 
 - **The SB16's playback dead after a recording** (the fortieth gate, 2026-11-22, devserver:
   `audio-486dx2-vbe`; not seen in three runs here). The Player's stream was never mixed (`periods=0` for its
