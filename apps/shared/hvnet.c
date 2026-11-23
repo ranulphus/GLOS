@@ -1,5 +1,6 @@
 /* The hovercraft game over a network (hvnet.h): the messages made and read. Every number is written a byte at
  * a time, low byte first; nothing read is believed beyond its length and its ranges. */
+#include <stdio.h>
 #include <string.h>
 
 #include "hvnet.h"
@@ -19,7 +20,7 @@ static int head(unsigned char *m, int type)
 /* 0: not a message of the game's; else its type (the caller looks at m[2] for the version). */
 static int type_of(const unsigned char *m, int n)
 {
-    return n >= 4 && m[0] == 'H' && m[1] == 'V' && m[3] >= HV_M_FIND && m[3] <= HV_M_BYE ? m[3] : 0;
+    return n >= 4 && m[0] == 'H' && m[1] == 'V' && m[3] >= HV_M_FIND && m[3] <= HV_M_NAMES ? m[3] : 0;
 }
 
 /* ---- the opener */
@@ -159,6 +160,29 @@ int hv_joiner_bye(const struct hv_joiner *j, unsigned char *m)
     return k;
 }
 
+const char *hv_opener_name(const struct hv_opener *o, int craft, char *out13)
+{
+    out13[0] = 0;
+    if (craft == o->own)
+        snprintf(out13, 13, "%.12s", o->name);     /* (the game's name: its first twelve letters) */
+    else if (craft >= 0 && craft < o->game.ncraft && o->seat[craft].taken)
+        snprintf(out13, 13, "%.12s", o->seat[craft].name);
+    return out13;
+}
+
+int hv_opener_names(const struct hv_opener *o, unsigned char *m)
+{
+    int k = head(m, HV_M_NAMES), i;
+    char name[13];
+    m[k++] = (unsigned char)o->game.ncraft;
+    for (i = 0; i < o->game.ncraft; i++, k += 12) {
+        memset(m + k, 0, 12);
+        hv_opener_name(o, i, name);             /* (first: an argument's order of working out is not C's to say) */
+        memcpy(m + k, name, strlen(name));
+    }
+    return k;
+}
+
 int hv_joiner_hear(struct hv_joiner *j, const struct hv_arena *a, const unsigned char *m, int n, int *offer, char *name17)
 {
     int type = type_of(m, n), i, k;
@@ -190,6 +214,14 @@ int hv_joiner_hear(struct hv_joiner *j, const struct hv_arena *a, const unsigned
     case HV_M_FULL:
         if (!j->joined)
             j->refused = 1;
+        return 0;
+    case HV_M_NAMES:                    /* (kept; nothing of the view changes) */
+        if (!j->joined || n < 5 || m[4] != j->ncraft || n < 5 + 12 * m[4])
+            return 0;
+        for (i = 0; i < m[4]; i++) {
+            memcpy(j->names[i], m + 5 + 12 * i, 12);
+            j->names[i][12] = 0;
+        }
         return 0;
     case HV_M_STATE:
         if (!j->joined || !a || n < 45 || m[9] != j->ncraft || n < 45 + 15 * m[9] || m[8] != j->kind)

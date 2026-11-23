@@ -17,7 +17,10 @@
      FULL    'H' 'V' ver 5                              ... or has none
      KEYS    'H' 'V' ver 6 craft count:u32 controls     a joiner's controls, and how many it has sent
      STATE   'H' 'V' ver 7 step:u32 kind score0:i16 score1:i16 flags... craft...     the game as it is
-     BYE     'H' 'V' ver 8 craft                        a joiner leaves */
+     BYE     'H' 'V' ver 8 craft                        a joiner leaves
+     NAMES   'H' 'V' ver 9 ncraft name[12]...           (2026-11-23) the players' names, a craft each ("": the
+                                                        computer's), every second: shown over their craft. A
+                                                        PC of before it passes it over, as any it doesn't know */
 #ifndef HVNET_H
 #define HVNET_H
 
@@ -27,7 +30,7 @@
 #define HV_NET_MOST 256                 /* a message's bytes at most */
 #define HV_NET_QUIET (3 * HV_STEPS)     /* steps without a word: the computer takes the craft */
 
-enum { HV_M_FIND = 1, HV_M_OFFER, HV_M_JOIN, HV_M_TAKEN, HV_M_FULL, HV_M_KEYS, HV_M_STATE, HV_M_BYE };
+enum { HV_M_FIND = 1, HV_M_OFFER, HV_M_JOIN, HV_M_TAKEN, HV_M_FULL, HV_M_KEYS, HV_M_STATE, HV_M_BYE, HV_M_NAMES };
 
 /* ---- the opener's side */
 
@@ -56,6 +59,10 @@ int hv_opener_hear(struct hv_opener *o, unsigned long who, const unsigned char *
 void hv_opener_step(struct hv_opener *o, unsigned own_controls);
 /* The game as it is, for every joiner (sent every other step): its length. */
 int hv_opener_state(const struct hv_opener *o, unsigned char *m);
+/* (2026-11-23) The players' names (the opener's own craft: the game's name; a joiner's: its own; the computer's:
+   ""): its length. And one craft's. */
+int hv_opener_names(const struct hv_opener *o, unsigned char *m);
+const char *hv_opener_name(const struct hv_opener *o, int craft, char *out13);
 
 /* ---- a joiner's side */
 
@@ -69,6 +76,7 @@ struct hv_joiner {
                                            (a flag or the lamp taken, a flag dropped, a point, a beacon, a craft
                                            in the water; not the bumps) */
     int refused;                        /* the opener had no craft free, or is of another version */
+    char names[HV_CRAFT][13];           /* (2026-11-23) the players' names as last told ("": the computer's) */
     int coasted;                        /* steps gone since the last state (hv_joiner_coast) */
 };
 

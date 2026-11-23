@@ -33,6 +33,9 @@ int hvlink_craft(void);                 /* the player's craft in it */
 int hvlink_seats(void);                 /* the opener's: joiners now */
 const struct hv_joiner *hvlink_joiner(void);
 const char *hvlink_host(void);          /* a joiner's: the name of the game it found */
+/* (2026-11-23) A craft's player's name, in a game on the network ("": the computer's, or alone): the opener
+   knows its joiners'; a joiner is told them every second (NAMES). */
+const char *hvlink_name(int craft);
 
 /* The lobby's: the network's open games, looked for (a broadcast every second) and listed as they answer; one
    that has not answered for four seconds is gone from the list. hvlink_join_offer joins the one chosen

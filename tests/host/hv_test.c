@@ -382,6 +382,16 @@ static void net_tests(void)
         hv_opener_step(&o, 0);
     }
     CHECK(!o.seat[j[1].craft].taken && o.seat[j[2].craft].taken, "the quiet one's craft is the computer's");
+    /* (2026-11-23) the names: the opener's own craft the game's name, a joiner's its own, the computer's none */
+    n = hv_opener_names(&o, m);
+    hv_joiner_hear(&j[2], &basin, m, n, offer, name);
+    CHECK(n == 5 + 12 * o.game.ncraft && !strncmp(j[2].names[o.own], o.name, 12) && !strcmp(j[2].names[j[2].craft], "Second")
+          && !j[2].names[j[1].craft][0], "names: %s %s [%s]", j[2].names[o.own], j[2].names[j[2].craft], j[2].names[j[1].craft]);
+    m[4] = (unsigned char)(o.game.ncraft + 1);
+    strcpy(j[2].names[0], "kept");
+    hv_joiner_hear(&j[2], &basin, m, n, offer, name);
+    CHECK(!strcmp(j[2].names[0], "kept"), "names for another number of craft: passed over");
+    strcpy(j[2].names[0], j[2].names[o.own]);
     n = hv_joiner_bye(&j[2], m);
     hv_opener_hear(&o, 2, m, n, back);
     CHECK(!o.seat[j[2].craft].taken, "the one that left");

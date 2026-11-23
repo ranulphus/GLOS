@@ -7931,8 +7931,9 @@ def hover_case(profile, vcard, card):
         # the PC's own ports as it would another PC's: one opens a game, the other finds it and is given the
         # second craft; both say the game at every 150th step as they have it, and for the same step the two
         # say the same line; the joiner leaves 1200 steps after the first it was told, the opener says its craft
-        # the computer's again and plays on to its own end. And where nobody has a game open, one that looks
-        # says so and ends.
+        # the computer's again and plays on to its own end. Both know the players' names (2026-11-23: the
+        # opener's craft its game's name, the joiner's its own; NAMES every second), shown over their craft. And
+        # where nobody has a game open, one that looks says so and ends.
         ho = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\HVCRAFT.EXE -demo -open -name Quay -until 3000"],
                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         started = lambda: agent.log().split("HX-START hover")[-1].count("GLOS-APP start")
@@ -7952,7 +7953,8 @@ def hover_case(profile, vcard, card):
         checks["net"] = rc == 0 and ho.returncode == 0 and "HVCRAFT net open kind=0 arena=0 name=Quay" in oo \
             and "HVCRAFT net joined craft=1 of=4 kind=0 arena=0 game=Quay" in oj and len(both) >= 3 \
             and all(mo[k] == mj[k] for k in both) and "HVCRAFT net end step=" in oj \
-            and re.findall(r"HVCRAFT net seats=(\d)", oo) == ["1", "0"] and "HVCRAFT net end step=3000 seats=0" in oo
+            and re.findall(r"HVCRAFT net seats=(\d)", oo) == ["1", "0"] and "HVCRAFT net end step=3000 seats=0" in oo \
+            and "HVCRAFT net names Quay|Skiff||" in oo and "HVCRAFT net names Quay|Skiff||" in oj
         info += " net=%d" % len(both)
         if not checks["net"]:
             rest = lambda o: [l for l in o.split("\n") if l and not l.startswith("HVCRAFT net at ")]

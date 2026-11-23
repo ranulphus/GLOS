@@ -1361,8 +1361,16 @@ The plan's "toolkit window" before the game (`docs/v1/apps/hovercraft.md`), `app
 - **Since built** (2026-11-23): the computer's craft's strength kept across starts (HVCRAFT.CFG's `strength =
   mild|normal|keen`, beside the name); `hover-lobby.txt` makes it Keen, plays, quits, and starts Cushion again
   to find it Keen still.
-- **Not yet:** a game of the lobby's list played over two emulated PCs (the hoverpair case joins by J); names over
-  the craft.
+- **Names over the craft** (2026-11-23): a new message, NAMES ('H' 'V' 1 9, the craft's count, twelve bytes a
+  craft), sent by the opener every second while anyone has joined: its own craft its game's name, a joiner's
+  the name it joined with, the computer's none. A PC of before it passes it over (any type it doesn't know), so
+  the version stays 1. Each other craft with a name has it drawn over it (a point 0.75 above the craft, through
+  the scene's own matrices, `glGetFloatv`), in a small font of the game's own (five by seven, two pixels to
+  one, capitals and figures; a ? for the rest) on a dark ground. HVCRAFT says `HVCRAFT net names A|B||` when
+  they change. hv_test (the names heard; a count of craft that differs passed over); the desk suite's hover
+  case checks both copies say `Quay|Skiff||`. **Owed:** that case run on Loop A (written while gate 46 had the
+  PC), and a picture with a name in it.
+- **Not yet:** a game of the lobby's list played over two emulated PCs (the hoverpair case joins by J).
 
 ## The Games Library: a game's profile (2026-11-22)
 

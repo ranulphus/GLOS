@@ -32,6 +32,16 @@ int hvlink_craft(void) { return mode == HVL_OPEN ? op.own : jn.craft; }
 const struct hv_joiner *hvlink_joiner(void) { return &jn; }
 const char *hvlink_host(void) { return host_name; }
 
+const char *hvlink_name(int craft)
+{
+    static char name[13];
+    if (craft < 0 || craft >= HV_CRAFT)
+        return "";
+    if (mode == HVL_OPEN)
+        return hv_opener_name(&op, craft, name);
+    return mode == HVL_JOINED ? jn.names[craft] : "";
+}
+
 int hvlink_seats(void)
 {
     int i, n = 0;
@@ -132,6 +142,12 @@ static unsigned opener_step(unsigned controls)
             seat_addr[i] = seat_port[i] = 0;
     if (hvlink_seats() != before)
         ev |= HVL_SEATS;
+    if (op.game.steps % HV_STEPS == 0 && hvlink_seats()) {     /* (every second: the players' names) */
+        n = hv_opener_names(&op, out);
+        for (i = 0; i < op.game.ncraft; i++)
+            if (op.seat[i].taken && seat_addr[i])
+                glos_net_sendto(port_h, out, (unsigned)n, 0, seat_addr[i], seat_port[i]);
+    }
     if (!(op.game.steps & 1)) {
         n = hv_opener_state(&op, out);
         for (i = 0; i < op.game.ncraft; i++)

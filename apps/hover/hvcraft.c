@@ -36,6 +36,8 @@
  * A pad drives it too (pad_held: the left stick, the right stick or the shoulder buttons, A boosts, B sets down),
  * and the mouse (mouse_held: towards the pointer's side, the left button forwards, the right one boosts).
  *
+ * In a game on the network the other players' names are drawn over their craft (2026-11-23; hvnet's NAMES).
+ *
  * Not yet (the plan's rest): the lobby (the games found as a list, names, the craft's colour); a joiner's own
  * craft moved at once by its own controls; the mouse taken (captured) as a pointer that never leaves; full screen; the computer's strengths chosen; names over the craft; an arrow to the flag or the lamp. */
 #include <stdio.h>
@@ -215,6 +217,9 @@ static void draw_craft(int i)
     glPopMatrix();
 }
 
+static int view_w = 640, view_h = 480;  /* (the window's pixels: where the names go) */
+static void names_place(int w, int h);
+
 static void frame(float aspect)
 {
     const struct hv_craft *my = &G->c[me];
@@ -243,6 +248,7 @@ static void frame(float aspect)
     draw_arena();
     for (i = 0; i < G->ncraft; i++)
         draw_craft(i);
+    names_place(view_w, view_h);
 }
 
 /* ---- over the scene: the score, the boost's tank, a small map. Flat, in the window's own pixels. */
@@ -273,6 +279,121 @@ static float number(float x, float y, long v, const float *c)
         if (m & 0x40) flat(x, y + 21.0f, 14.0f, 3.0f, c);
     }
     return x;
+}
+
+/* ---- (2026-11-23) the players' names over their craft, in a game on the network: a small font of the game's
+   own (five by seven pixels, drawn two pixels to one; capitals, figures and - . _ ' ; anything else a ?) */
+static const char NAME_CHARS[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._\'?";
+static const unsigned char NAME_FONT[][7] = {
+    { 0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11 },
+    { 0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E },
+    { 0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E },
+    { 0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E },
+    { 0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F },
+    { 0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10 },
+    { 0x0E, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0F },
+    { 0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11 },
+    { 0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E },
+    { 0x07, 0x02, 0x02, 0x02, 0x02, 0x12, 0x0C },
+    { 0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11 },
+    { 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F },
+    { 0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11 },
+    { 0x11, 0x11, 0x19, 0x15, 0x13, 0x11, 0x11 },
+    { 0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E },
+    { 0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10 },
+    { 0x0E, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0D },
+    { 0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11 },
+    { 0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E },
+    { 0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04 },
+    { 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E },
+    { 0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04 },
+    { 0x11, 0x11, 0x11, 0x15, 0x15, 0x15, 0x0A },
+    { 0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11 },
+    { 0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04 },
+    { 0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F },
+    { 0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E },
+    { 0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E },
+    { 0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F },
+    { 0x1F, 0x02, 0x04, 0x02, 0x01, 0x11, 0x0E },
+    { 0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02 },
+    { 0x1F, 0x10, 0x1E, 0x01, 0x01, 0x11, 0x0E },
+    { 0x06, 0x08, 0x10, 0x1E, 0x11, 0x11, 0x0E },
+    { 0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08 },
+    { 0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E },
+    { 0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C },
+    { 0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00 },
+    { 0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C },
+    { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1F },
+    { 0x04, 0x04, 0x08, 0x00, 0x00, 0x00, 0x00 },
+    { 0x0E, 0x11, 0x01, 0x02, 0x04, 0x00, 0x04 }
+};
+static float name_x[HV_CRAFT], name_y[HV_CRAFT];
+static int name_on[HV_CRAFT];
+
+/* Where each other craft's name goes: a point above it, through the scene's own matrices. */
+static void names_place(int w, int h)
+{
+    float pm[16], mv[16];
+    int i;
+    glGetFloatv(GL_PROJECTION_MATRIX, pm);
+    glGetFloatv(GL_MODELVIEW_MATRIX, mv);
+    for (i = 0; i < G->ncraft; i++) {
+        const struct hv_craft *c = &G->c[i];
+        float p[3], e[4], q[4];
+        int k;
+        name_on[i] = 0;
+        if (i == me || c->wet || !hvlink_name(i)[0])
+            continue;
+        p[0] = (float)c->x / 256.0f, p[1] = (float)hv_craft_level(G, i) / 256.0f * LEVEL + 0.75f, p[2] = (float)c->y / 256.0f;
+        for (k = 0; k < 4; k++)
+            e[k] = mv[k] * p[0] + mv[4 + k] * p[1] + mv[8 + k] * p[2] + mv[12 + k];
+        for (k = 0; k < 4; k++)
+            q[k] = pm[k] * e[0] + pm[4 + k] * e[1] + pm[8 + k] * e[2] + pm[12 + k] * e[3];
+        if (q[3] <= 0.05f)
+            continue;                           /* (behind the eye) */
+        name_x[i] = (q[0] / q[3] + 1.0f) * 0.5f * (float)w;
+        name_y[i] = (1.0f - q[1] / q[3]) * 0.5f * (float)h;
+        name_on[i] = name_x[i] > -40.0f && name_x[i] < (float)w + 40.0f && name_y[i] > 0.0f && name_y[i] < (float)h;
+    }
+}
+
+static float name_width(const char *s) { return (float)strlen(s) * 12.0f - 2.0f; }
+
+static void name_draw(float x, float y, const char *s, const float *c)  /* (inside glBegin(GL_TRIANGLES)) */
+{
+    for (; *s; s++, x += 12.0f) {
+        int ch = *s >= 'a' && *s <= 'z' ? *s - 32 : *s, r, b;
+        const char *at = ch == ' ' ? NULL : strchr(NAME_CHARS, ch);
+        const unsigned char *g;
+        if (ch == ' ')
+            continue;
+        g = NAME_FONT[at && ch ? at - NAME_CHARS : (int)sizeof NAME_CHARS - 2];
+        for (r = 0; r < 7; r++)
+            for (b = 0; b < 5; b++) {
+                int run = 0;
+                while (b + run < 5 && g[r] & (0x10 >> (b + run)))
+                    run++;
+                if (run) {                      /* (a row's lit pixels side by side: one rectangle) */
+                    flat(x + 2.0f * (float)b, y + 2.0f * (float)r, 2.0f * (float)run, 2.0f, c);
+                    b += run;
+                }
+            }
+    }
+}
+
+static void names_overlay(void)
+{
+    static const float back[3] = { 0.10f, 0.10f, 0.12f }, white[3] = { 1.0f, 1.0f, 1.0f };
+    int i;
+    for (i = 0; i < G->ncraft; i++) {
+        const char *s = hvlink_name(i);
+        float wd, x, y;
+        if (!name_on[i] || !s[0])
+            continue;
+        wd = name_width(s), x = name_x[i] - wd / 2.0f, y = name_y[i] - 20.0f;
+        flat(x - 3.0f, y - 3.0f, wd + 6.0f, 20.0f, back);
+        name_draw(x, y, s, white);
+    }
 }
 
 static void overlay(int w, int h)
@@ -322,6 +443,7 @@ static void overlay(int w, int h)
     for (i = G->ncraft - 1; i >= 0; i--)
         if (!G->c[i].wet)
             flat(mx + (float)G->c[i].x / 256.0f * cell - 1.5f, my + (float)G->c[i].y / 256.0f * cell - 1.5f, 3.0f, 3.0f, i != me ? SIDE[G->c[i].side] : white);
+    names_overlay();                    /* (2026-11-23) the players' names over their craft */
     glEnd();
     glEnable(GL_DEPTH_TEST);
 }
@@ -619,6 +741,17 @@ static int play(int demo, long until, int opening, int joining, int pre, const c
                     heard = 1, heard_from = G->steps;   /* (a joiner's -until counts from the first step it is told) */
                 if (le & HVL_SEATS)
                     printf("HVCRAFT net seats=%d\n", hvlink_seats());
+                if (G->steps % HV_STEPS == 0) {    /* (the suite's: the players' names, when they change) */
+                    static char said_names[HV_CRAFT * 14];
+                    char now_names[HV_CRAFT * 14];
+                    int k, at = 0;
+                    for (k = 0; k < G->ncraft && k < HV_CRAFT; k++)
+                        at += snprintf(now_names + at, sizeof now_names - (size_t)at, "%s%s", k ? "|" : "", hvlink_name(k));
+                    if (strcmp(now_names, said_names)) {
+                        memcpy(said_names, now_names, sizeof said_names);
+                        printf("HVCRAFT net names %s\n", now_names);
+                    }
+                }
                 if ((mode == HVL_OPEN || (le & HVL_STATE)) && G->steps % 150 == 0 && G->steps != marked) {
                     marked = G->steps;          /* (the suite's: the game as both PCs have it at this step) */
                     printf("HVCRAFT net at %u score=%d:%d c0=%d,%d,%d c1=%d,%d,%d lamp=%d\n", G->steps, G->score[0], G->score[1],
@@ -654,6 +787,7 @@ static int play(int demo, long until, int opening, int joining, int pre, const c
                        + (my_keys & (HV_C_SLIDE_L | HV_C_SLIDE_R) ? 1 : 0);
             hvsound_frame(work > 3 ? 3 : work, vx > vy ? vx + vy * 3 / 8 : vy + vx * 3 / 8, my->down, my->wet != 0);
         }
+        view_w = w, view_h = h;
         frame((float)w / (float)h);
         overlay(w, h);
         dglSwapBuffers();
