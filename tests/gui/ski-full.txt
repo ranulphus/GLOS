@@ -7,8 +7,9 @@ pause 1500
 said SKI at 240 x=435 y=827 speed=232 score=0 gates=1/0 falls=0
 key ctrl+d
 said SKI double refused 640x480
-wait "Fall Line"
+wait "Fall Line" 2
 key enter
+wait "Fall Line" 1
 key f11
 said SKI full on 640x480
 pause 300

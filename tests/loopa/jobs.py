@@ -8617,8 +8617,13 @@ class GuiDriver:
                 if not ok:
                     self.bad.append("said-%d" % n)
                     self.notes.append("never said %r" % want)
-            elif cmd == "wait":
-                if not self.until(lambda d: self.window(args[0], d) is not None, 120):
+            elif cmd == "wait":                 # wait "TITLE": a window of that title shown. wait "TITLE" N: just
+                # N of them (an app's message box has the app's own title: `wait "Fall Line" 2` is the window and
+                # its box, `wait "Fall Line" 1` the box gone again; the host's player, whose boxes come and go at
+                # once, takes no notice of N)
+                count = int(args[1]) if len(args) > 1 and args[1].isdigit() else 0
+                shown = lambda d: sum(1 for w in d["win"] if w["shown"] and w["title"] == args[0] and w["kind"] != "bar")
+                if not self.until(lambda d: shown(d) == count if count else shown(d) >= 1, 120):
                     self.bad.append("wait-%d" % n)
             elif cmd == "gone":
                 if not self.until(lambda d: self.window(args[0], d) is None, 60):
