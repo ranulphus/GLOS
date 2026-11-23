@@ -260,6 +260,46 @@ int main(int argc, char **argv)
               set_off, stopped, too_near, off_piste, hits);
         CHECK(waited >= mountains / 2, "other skiers waiting at the start: %ld", waited);
     }
+    /* (phase F) the groomers: some; each sets off as the skier comes near and parks beyond the far edge, having
+       crossed the clear line (those near the valley may still be crossing when the run ends); skied into, a fall;
+       flown over in a jump, nothing */
+    {
+        long count = 0, parked = 0, crossed = 0, hit = 0, flown = 0, tried = 0;
+        for (seed = 1; seed <= 120; seed++) {
+            int c, x, y, dir, moving, done;
+            run_auto(&r, seed * 131u + 7, (int)(seed % 4), (int)(seed & 1), 5 * 60 * SKI_STEPS);
+            for (c = 0; c < SKI_OTHERS; c++) {
+                if (!skirun_groomer(&r, c, &x, &y, &dir, &moving, &done))
+                    continue;
+                count++;
+                parked += r.groomer[c].start && !moving && done == r.groomer[c].travel;
+                crossed += (x - skimount_line(&r.m, y)) * dir > 0;
+            }
+            {
+                struct skirun f;
+                skirun_start(&f, seed * 131u + 7, (int)(seed % 4), (int)(seed & 1));
+                for (c = 0; c < SKI_OTHERS && !skirun_groomer(&f, c, &x, &y, &dir, &moving, &done); c++)
+                    ;
+                if (c < SKI_OTHERS) {
+                    struct skirun g;
+                    tried++;                    /* (on the piste: set off, half way across) */
+                    f.groomer[c].start = 1, f.steps = 1 + (unsigned)f.groomer[c].travel / 2 * 256 / 77;
+                    skirun_groomer(&f, c, &x, &y, &dir, &moving, &done);
+                    f.x = x * 256, f.y = (y - 4) * 256, f.vx = 0, f.vy = 64, f.state = SKI_S_SKIING, f.grace = 0;
+                    g = f;
+                    skirun_step(&f, 0);
+                    hit += f.state == SKI_S_FALLEN;
+                    g.state = SKI_S_AIR, g.air = g.air_total = 20;
+                    skirun_step(&g, 0);
+                    flown += g.falls == 0;
+                }
+            }
+        }
+        printf("  groomers: %ld on 120 mountains, %ld parked, %ld past the line\n", count, parked, crossed);
+        CHECK(count >= 120 && parked >= count / 2 && crossed >= parked && hit == tried && flown == tried,
+              "groomers: %ld, %ld parked, %ld past the line; %ld of %ld skied into a fall, %ld flown over", count, parked,
+              crossed, hit, tried, flown);
+    }
 
     /* (phase F) in the wind: the gusts blow by rule (a run skied twice is the same run), they push (the run is
        not the calm one's), they blow both ways and calm between, and the careful skier still gets down */

@@ -1848,4 +1848,14 @@ The plan's "other skiers (slow ones who zigzag, to be passed)": `skirun_other` (
   run's end, none near the line, off the piste or in anything; the first of each mountain, skied into, is a
   fall; the careful skier's golden runs unchanged and no fall on 1200 mountains (24,000 in `ski_test more`).
   `ski.txt` holds the demonstration at step 1920 beside one (a picture).
-- **Not yet:** the groomer (which crosses the line, so the careful skier would have to wait for it).
+- **The groomer** (`skirun_groomer`, later the same morning): a piece in ten may have one, on a line across the
+  piste where nothing stands near (its band clear the whole width and 40 pixels beyond). It waits beyond the
+  edge further from the clear line and sets off across when the skier is within 400 pixels above, at 18 pixels
+  a second, parking beyond the other edge; behind it the snow is groomed (ridges). A skier at speed is by
+  before it nears the line, so the careful skier never waits for it; a slow skier must go round it, or jump it
+  (flown over, nothing; skied into, within its 44 by 20 pixels, a fall). Drawn as a red snowcat, its blade in
+  front. `ski_test`: 197 on 120 mountains, most parked by the run's end, past the line; skied into half way
+  across, a fall; flown over, nothing; the careful skier's golden runs unchanged, no fall on 1200 and 24,000
+  mountains. (Set off first from the edge nearer the line, faster, it was met by the careful skier on a few
+  black slaloms: the far edge, 18 pixels a second and 400 pixels' notice give it room.)
+- **Not yet:** the window doubled and full screen; the 486's frame rate (measured on the bench).

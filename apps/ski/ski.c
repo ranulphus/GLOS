@@ -790,6 +790,17 @@ static void draw_field(struct gfx_surface *s, int ox, int oy)
                 art_draw(s, &art_other[c % OTHER_JACKETS][heading & 31], ox + x - cam_x, oy + yy - cam_y);
             }
     }
+    {                                   /* the groomers: the snow groomed behind each, then itself */
+        int c, x, gy, dir, moving, done, k;
+        for (c = (cam_y - 40) / SKI_CHUNK - 1; c <= (cam_y + FH + 40) / SKI_CHUNK; c++)
+            if (c >= 0 && skirun_groomer(&run, c, &x, &gy, &dir, &moving, &done) && gy - cam_y > -30 && gy - cam_y < FH + 30) {
+                int x0 = x - dir * done;
+                for (k = 0; k < 4 && done > SKI_GROOMER_W / 2; k++)      /* (its ridges, behind it) */
+                    gfx_fill(s, ox + (dir > 0 ? x0 : x + SKI_GROOMER_W / 2) - cam_x, oy + gy - cam_y + 4 + k * 4 - 8,
+                             done - SKI_GROOMER_W / 2, 1, 0xDDE6EE);
+                art_draw(s, &art_thing[dir > 0 ? ART_GROOMER_R : ART_GROOMER_L], ox + x - cam_x, oy + gy - cam_y);
+            }
+    }
     draw_lift(s, ox, oy, cam_x, cam_y);
     draw_hares(s, ox, oy, cam_x, cam_y);
     draw_weather(s, ox, oy, px - cam_x, py - cam_y);

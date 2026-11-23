@@ -221,6 +221,21 @@ static void things(void)
     begin(a, 12, 4, 6, 2);
     colour(a, SHADOW), rect(a, 1, 0, 10, 4);
 
+    {                                   /* the piste groomer: a red snowcat on its tracks, its blade in front */
+        int k;
+        for (k = 0; k < 2; k++) {       /* (k 0 going rightwards; 1 the same, mirrored) */
+#define GX(x, w) (k ? 46 - (x) - (w) : (x))
+            a = &art_thing[k ? ART_GROOMER_L : ART_GROOMER_R];
+            begin(a, 46, 28, 23, 24);
+            colour(a, SHADOW), rect(a, GX(4, 40), 25, 40, 3);
+            colour(a, 0x2B2B2Bu), rect(a, GX(4, 32), 17, 32, 8);                        /* the tracks */
+            colour(a, 0xC8281Eu), rect(a, GX(6, 28), 9, 28, 9), rect(a, GX(10, 14), 2, 14, 8); /* body, cabin */
+            colour(a, 0x9FD3F0u), rect(a, GX(12, 10), 4, 10, 4);                        /* its windows */
+            colour(a, 0xB8B8B8u), rect(a, GX(37, 4), 12, 4, 14), rect(a, GX(34, 3), 15, 3, 3);   /* the blade */
+            colour(a, 0x6E6E6Eu), rect(a, GX(4, 32), 19, 32, 1), rect(a, GX(4, 32), 22, 32, 1);
+#undef GX
+        }
+    }
     {                                   /* the mountain hare, white for the winter, black at the ears' tips */
         int k;
         for (k = 0; k < 2; k++) {       /* (k 0 rightwards; 1 the same, mirrored) */

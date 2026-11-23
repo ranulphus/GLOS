@@ -68,6 +68,12 @@ struct skirun {
         unsigned char speed;            /* 256ths of a pixel a step, from 128 */
         unsigned short start;           /* the step it set off (0: not yet: it waits for the skier to come near) */
     } other[SKI_OTHERS];
+    struct {                            /* (phase F) a piste groomer a piece, at most (worked out as the others) */
+        short y, x0;                    /* the line it crosses on; where it waits, beyond the piste's edge */
+        signed char dir;                /* +1 rightwards, -1 leftwards */
+        unsigned char known, has;
+        unsigned short start, travel;   /* the step it set off (0: not yet); how far it goes */
+    } groomer[SKI_OTHERS];
 };
 
 void skirun_start(struct skirun *r, unsigned seed, int grade, int mode);
@@ -84,6 +90,14 @@ int skirun_speed(const struct skirun *r);       /* pixels a second */
    within 400 pixels above it, and stopping at the side at its lane's end. 1 and where it is (pixels), whether it
    moves, its heading (32nds of a turn, as the skier's); 0: none. Skied into, it is a fall (flown over, nothing). */
 int skirun_other(struct skirun *r, int c, int *x, int *y, int *moving, int *heading);
+/* (phase F) Piece c's piste groomer, if it has one: a snowcat that crosses the piste slowly (18 pixels a second)
+   on a line where nothing stands, setting off from beyond the edge further from the clear line once the skier is
+   within 400 pixels above (a skier at speed is by before it nears the line), and parking beyond the other edge. 1 and its middle (pixels), its way (+1 rightwards,
+   -1 leftwards), whether it moves, how far it has come (the groomed snow behind it); 0: none. Skied into, it is
+   a fall; flown over, nothing. */
+#define SKI_GROOMER_W 44                /* its size, for the picture and for meeting it */
+#define SKI_GROOMER_H 20
+int skirun_groomer(struct skirun *r, int c, int *x, int *y, int *dir, int *moving, int *done);
 /* The wind's push across the slope at this step: 1/256 pixel a step, rightwards (0: calm, or no wind). */
 int skirun_gust(const struct skirun *r);
 int skirun_height(const struct skirun *r);      /* in the air: pixels off the ground */

@@ -236,14 +236,70 @@ int skirun_other(struct skirun *r, int c, int *x, int *y, int *moving, int *head
     return 1;
 }
 
+int skirun_groomer(struct skirun *r, int c, int *x, int *y, int *dir, int *moving, int *done)
+{
+    int along;
+    if (c < 0 || c >= SKI_OTHERS)
+        return 0;
+    if (!r->groomer[c].known) {         /* (one piece in ten, and only on a line nothing stands near) */
+        unsigned h = other_dice(r, c + 1000);
+        int gy = c * SKI_CHUNK + 32 + (int)((h >> 8) % 64), cc, i, n, ok = 1;
+        r->groomer[c].known = 1;
+        if (h % 10 != 3 || c < 4 || gy > r->m.length - 300)
+            return 0;
+        for (cc = (gy - 60) / SKI_CHUNK; cc <= (gy + 60) / SKI_CHUNK && ok; cc++) {
+            const struct ski_thing *t = skirun_piece(r, cc, &n);
+            for (i = 0; i < n && ok; i++) {
+                int dy = t[i].y - gy, half = skimount_half(&r->m, gy) + 40, dx = t[i].x - skimount_centre(&r->m, gy);
+                if ((dx < 0 ? -dx : dx) < half && (dy < 0 ? -dy : dy) < SKI_GROOMER_H / 2 + (t[i].r ? t[i].r : 5) + 16)
+                    ok = 0;
+            }
+        }
+        if (!ok)
+            return 0;
+        {
+            int centre = skimount_centre(&r->m, gy), half = skimount_half(&r->m, gy);
+            int d = skimount_line(&r->m, gy) > centre ? 1 : -1;        /* (the line's side: it sets off from the
+                                                   other edge, towards it) */
+            r->groomer[c].has = 1, r->groomer[c].y = (short)gy, r->groomer[c].dir = (signed char)d;
+            r->groomer[c].x0 = (short)(centre - d * (half + 36));
+            r->groomer[c].travel = (unsigned short)(2 * (half + 36));
+        }
+    }
+    if (!r->groomer[c].has)
+        return 0;
+    along = r->groomer[c].start ? (int)((long)(r->steps - r->groomer[c].start) * 77 / 256) : 0;   /* (18 pixels a second) */
+    if (along > r->groomer[c].travel)
+        along = r->groomer[c].travel;
+    *x = r->groomer[c].x0 + r->groomer[c].dir * along;
+    *y = r->groomer[c].y;
+    *dir = r->groomer[c].dir;
+    *moving = r->groomer[c].start && along < r->groomer[c].travel;
+    *done = along;
+    return 1;
+}
+
 static void others_step(struct skirun *r)       /* those near set off; one skied into is a fall */
 {
     int px = r->x >> 8, py = r->y >> 8, c, x, y, moving, heading;
     for (c = py / SKI_CHUNK; c <= (py + 400) / SKI_CHUNK && c < SKI_OTHERS; c++)
         if (skirun_other(r, c, &x, &y, &moving, &heading) && !r->other[c].start && y - py <= 400)
             r->other[c].start = (unsigned short)(r->steps ? r->steps : 1);
+    for (c = py / SKI_CHUNK; c <= (py + 400) / SKI_CHUNK && c < SKI_OTHERS; c++) {   /* (and the groomers) */
+        int dir, done;
+        if (skirun_groomer(r, c, &x, &y, &dir, &moving, &done) && !r->groomer[c].start && y - py <= 400)
+            r->groomer[c].start = (unsigned short)(r->steps ? r->steps : 1);
+    }
     if (r->state != SKI_S_SKIING || r->grace)
         return;
+    for (c = py / SKI_CHUNK - 1; c <= py / SKI_CHUNK + 1 && c < SKI_OTHERS; c++) {
+        int dir, done;
+        if (c >= 0 && skirun_groomer(r, c, &x, &y, &dir, &moving, &done)
+            && (x - px < 0 ? px - x : x - px) < SKI_GROOMER_W / 2 + 5 && (y - py < 0 ? py - y : y - py) < SKI_GROOMER_H / 2 + 5) {
+            fall(r, 0);
+            return;
+        }
+    }
     for (c = (py - OTHER_LANE - 40) / SKI_CHUNK; c <= py / SKI_CHUNK + 1 && c < SKI_OTHERS; c++) {
         if (c < 0 || !skirun_other(r, c, &x, &y, &moving, &heading))
             continue;
