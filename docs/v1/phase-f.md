@@ -467,7 +467,12 @@ an MPU-401 with whatever is plugged into it. The Player is that port's first rea
   has the FM chip's own level.
 - **Files** opens MID and RMI files with the Player; the Player's dialog and its folders' listing know them. A
   file added to the list is asked what it is through the engine now (`eng_probe`), not played to find out.
-- **Not yet:** a choice of the MIDI device in the Player (FM first, as built); system exclusive messages to
+- **The MIDI device** (since built, 2026-11-23): GLOS.CFG's `[sound] midi = fm|port` (the Control Panel's
+  Sound page, "MIDI out") says which the Player and MIDI Studio open first, the card's FM synthesiser or its
+  MIDI port (an MPU-401: whatever is plugged in), the other where that one is not there (`mp_open_out`,
+  apps/shared/midiplay.c; Studio's played notes too). `cfg_test` takes fm and port and refuses another; the
+  config and Control Panel suites take it from the schema as every setting.
+- **Not yet:** system exclusive messages to
   an MPU-401; the software synthesiser with a SoundFont (a fast Pentium's); karaoke words.
 - **Tests.** `smf_test` on the host: files written byte by byte (`tests/host/smf_cases.py`) held to every
   message and its time (two tempos, three tracks together in their order, film-time ticks, the wrapper, a file

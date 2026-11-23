@@ -59,6 +59,9 @@ const struct cfg_key cfg_schema[] = {
       "GLOS's mixer plays nothing" },
     { "sound", "rate", CFG_CHOICE, CFG_NOW, 0, 0, "11025|22050|44100", "22050", "Mixing &rate (Hz)",
       "Samples a second the mixer plays" },
+    { "sound", "midi", CFG_CHOICE, CFG_NOW, 0, 0, "fm|port", "fm", "MI&DI out",
+      "Where the Player and MIDI Studio play MIDI: the card's FM synthesiser, or its MIDI port (an MPU-401: a "
+      "synthesiser plugged into it); the other where that one is not there" },
     { "sound", "blaster", CFG_BLASTER, CFG_RESTART, 0, 40, 0, "", "&Card (BLASTER)",
       "Where the Sound Blaster is, as BLASTER says it (A220 I5 D1 H5); empty: BLASTER's" },
     { "sound", "virtual", CFG_CHOICE, CFG_RESTART, 0, 0, "on|off", "on", "Virtual &Sound Blaster",

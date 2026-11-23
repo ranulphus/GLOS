@@ -4,7 +4,9 @@ GLOS plays every program's sound at once through the PC's sound card: a Sound Bl
 one to DOS), or a Crystal CS423x chip, as many PCs of the late 1990s have on the main board.
 
 - The **loudspeaker on the task bar** and the [Mixer](MIXER.MD) set the volume.
-- The Control Panel's **Sound** page chooses the card and the mixing rate, and plays a test sound.
+- The Control Panel's **Sound** page chooses the card and the mixing rate, and plays a test sound. Its **MIDI
+  out** says where the Player and MIDI Studio play music: the card's FM synthesiser (fm), or a synthesiser
+  plugged into its MIDI port (port).
 - With no card that GLOS knows, GLOS's programs are silent; a DOS program can still use the card directly.
 
 ## DOS programs and games

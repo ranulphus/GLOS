@@ -34,5 +34,9 @@ void mp_seek(struct midiplay *p, unsigned long ms);     /* (while it plays: it g
 /* The messages of the next 400 ms sent. 1 when it has played out: stopped then, at its start again. */
 int mp_feed(struct midiplay *p);
 unsigned long mp_where(const struct midiplay *p);       /* milliseconds */
+/* (2026-11-23) A MIDI port out opened, the one GLOS.CFG's [sound] midi prefers (fm: the card's FM chip; port: its
+   MPU-401), else the other: its handle, or 0 (none, or another program has it). The player's, and an app's own
+   notes (MIDI Studio's played keys). */
+glos_handle mp_open_out(void);
 
 #endif

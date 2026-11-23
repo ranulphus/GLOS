@@ -775,7 +775,7 @@ static void rec_start(void)
     else if (song_ticks(song))
         song_waits = 1;                 /* (... after the count-in) */
     if (!playing && !demo)
-        rec_out = glos_midi_out(GLOS_MIDI_PORT_FM);
+        rec_out = mp_open_out();
     rec_t0 = glos_ticks();
     rec_demo_ms = 0;
     recording = 1;
@@ -900,7 +900,7 @@ static void step_toggle(void)
         rec_stop();
         stop_playing();
         if (!demo) {
-            step_out = glos_midi_out(GLOS_MIDI_PORT_FM);
+            step_out = mp_open_out();
             step_in = glos_midi_in(GLOS_MIDI_PORT_MPU);     /* (none: the PC's keys alone) */
         }
         say("step on at=%lu len=%lu", step_at, step_ticks());

@@ -89,12 +89,25 @@ static void go(struct midiplay *p)      /* on from p->at: the port told how thin
     p->base = glos_ticks() - (unsigned)p->at;
 }
 
+glos_handle mp_open_out(void)
+{
+    char v[16] = "";
+    int set = 0;
+    unsigned first = GLOS_MIDI_PORT_FM, other = GLOS_MIDI_PORT_MPU;
+    glos_handle h;
+    if (glos_setting_get("sound", "midi", v, sizeof v, &set) == 0 && !strcmp(v, "port"))
+        first = GLOS_MIDI_PORT_MPU, other = GLOS_MIDI_PORT_FM;
+    if (!(h = glos_midi_out(first)))
+        h = glos_midi_out(other);
+    return h;
+}
+
 int mp_play(struct midiplay *p)
 {
     if (p->playing)
         return 0;
-    if (!p->port && !(p->port = glos_midi_out(GLOS_MIDI_PORT_FM)))      /* (the FM chip where there is one) */
-        p->port = glos_midi_out(GLOS_MIDI_PORT_MPU);
+    if (!p->port)
+        p->port = mp_open_out();        /* (the one the settings prefer, else the other) */
     if (!p->port)
         return -1;
     go(p);
