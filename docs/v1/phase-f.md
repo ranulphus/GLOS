@@ -1989,4 +1989,7 @@ takes the notes of the bars chosen away (each one step of the history). F4 again
   arrangement (their times by the tempo's changes) played over and over: Play starts at the loop's start, and the
   loop's end seeks back to it (as far past it as playing had got), said `looped N`. `studio-arrange` loops bar 3
   of WALTZ.MID (4.5 s to 7.5 s) and hears it go round once.
-- **Not yet:** regions moved by dragging; controller lanes.
+- **Bars moved by dragging** (later the same afternoon): a press inside the bars chosen and a drag takes them
+  along (the choice shows where they would go, onto another track too); at the release their notes move there,
+  one step of the history (`bars moved ...`). `studio-arrange` drags bar 3 to bar 4.
+- **Not yet:** controller lanes.

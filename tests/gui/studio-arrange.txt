@@ -2,7 +2,8 @@
 # bar 2) seen as View, Arrangement (F4): its track a row of bars, each bar's notes small in it (a picture); bar 1
 # chosen by a press and copied (Ctrl+C), bar 3 chosen and pasted (Ctrl+V: the C and the D there too); bars 1 to 2
 # chosen by a drag and deleted (Del); Undo gives them back; F4: the roll again. Bar 3 looped (Ctrl+R): played from
-# its start (4.5 s: bar 1 at 120 a minute, bar 2 at 60), at its end (7.5 s) from its start again.
+# its start (4.5 s: bar 1 at 120 a minute, bar 2 at 60), at its end (7.5 s) from its start again. Bar 3, chosen,
+# dragged to bar 4: its notes moved there.
 run STUDIO.EXE -demo
 wait "MIDI Studio"
 key ctrl+o
@@ -32,6 +33,9 @@ said STUDIO looped 1
 key f6
 key ctrl+r
 said STUDIO loop off from=4500 to=7500
+drag "MIDI Studio" 380 220 560 220
+said STUDIO bars moved track=1 at=3 to track=1 at=4 notes=2
+shot moved "MIDI Studio"
 drag "MIDI Studio" 30 220 300 220
 said STUDIO bars chosen track=1 from=1 to=2
 key del

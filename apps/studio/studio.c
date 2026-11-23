@@ -164,7 +164,9 @@ static void show_clock(void)            /* where the playing is: bar, beat */
    small in it; bars of a track chosen (a press, a drag along) are copied (Ctrl+C), pasted from a bar chosen
    (Ctrl+V: onto that track, at that bar) or deleted (Del). View, Arrangement (F4) and back. */
 #define AROW 24                         /* a track's row: pixels */
-static int arrange, asel_t = -1, adrag;
+static int arrange, asel_t = -1, adrag, amove, amove_t;    /* (amove: the bars chosen being moved: from track
+                                                   amove_t, their first bar amove_a) */
+static unsigned long amove_a, amove_grab;
 static unsigned long asel_a, asel_b, adrag_from;        /* the bars chosen: from, to (both in it) */
 static struct song_note *bclip;         /* (Copy Bars) their notes, from the first bar's start */
 static unsigned long nbclip, bclip_bars;
@@ -397,6 +399,50 @@ static int arrange_event(struct gui_widget *w, struct gui_ev *e, int x, int y)
 {
     unsigned long b = x < 0 ? 0 : (unsigned long)x / bar_ticks();
     int tr = y < 0 ? -1 : y / (AROW * zoom);
+    if (e->type == GUI_EV_PRESS && e->button == 1 && tr == asel_t && b >= asel_a && b <= asel_b) {
+        amove = 1, amove_t = asel_t, amove_a = asel_a, amove_grab = b;       /* (in the bars chosen: they move) */
+        return 1;
+    }
+    if (e->type == GUI_EV_MOVE && amove) {      /* (the choice where they would go) */
+        long to = (long)amove_a + (long)b - (long)amove_grab;
+        unsigned long len = asel_b - asel_a;
+        if (to < 0)
+            to = 0;
+        if (tr >= 0 && tr < (int)song->ntracks)
+            asel_t = tr;
+        asel_a = (unsigned long)to, asel_b = asel_a + len;
+        gui_damage(w);
+        return 1;
+    }
+    if (e->type == GUI_EV_RELEASE && amove) {   /* the notes moved there (one step of the history) */
+        unsigned long bar = bar_ticks(), from = amove_a * bar, to = (amove_a + asel_b - asel_a + 1) * bar, i, n = 0;
+        amove = 0;
+        if (asel_t != amove_t || asel_a != amove_a) {
+            struct song_track *a = &song->track[amove_t], *z = &song->track[asel_t];
+            struct song_note *keep = NULL;
+            unsigned long nk = 0;
+            struct step *st;
+            for (i = 0; i < a->nnotes; i++)
+                nk += a->notes[i].at >= from && a->notes[i].at < to;
+            if (nk && !(keep = malloc(nk * sizeof *keep)))
+                return 1;
+            st = step_begin();
+            for (i = a->nnotes, nk = 0; i-- > 0; )
+                if (a->notes[i].at >= from && a->notes[i].at < to) {
+                    keep[nk++] = a->notes[i];
+                    song_note_remove(a, i);
+                }
+            for (i = 0; i < nk; i++)
+                if (song_note_add(z, keep[i].at - from + asel_a * bar, keep[i].len, keep[i].key, keep[i].force) >= 0)
+                    n++;
+            step_end(st, GUI_T("Move Bars"));
+            free(keep);
+            say("bars moved track=%d at=%lu to track=%d at=%lu notes=%lu", amove_t + 1, amove_a + 1, asel_t + 1, asel_a + 1, n);
+            size_roll();
+        }
+        gui_damage(w);
+        return 1;
+    }
     if (e->type == GUI_EV_PRESS && e->button == 1 && tr >= 0 && tr < (int)song->ntracks) {
         asel_t = tr, asel_a = asel_b = adrag_from = b, adrag = 1;
         if (cur != tr) {
