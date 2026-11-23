@@ -1,6 +1,7 @@
 # The network
 
-With a network card GLOS knows (Realtek RTL8139, Intel 8255x, VIA Rhine, NE2000) and a cable to your router,
+With a network card GLOS knows (Realtek RTL8139, Intel 8255x, VIA Rhine, AMD PCnet-PCI, DEC 21140 and 21143,
+NE2000) and a cable to your router,
 GLOS asks the router for an address as it starts. The task bar's network icon shows the address; the Control
 Panel's **Network** page shows the rest and sets the PC's name. Other computers can reach the PC as
 *name*.local.
