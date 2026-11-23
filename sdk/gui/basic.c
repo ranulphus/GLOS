@@ -619,6 +619,8 @@ struct number {
     int min, max, value, slider, held, drag;
     unsigned char typing, minus;        /* a spin: a number is being typed (the next digit goes on its end; else the
                                            first digit is the number anew); a minus sign came before its digits */
+    long typed;                         /* (2026-11-23) the number as typed so far, shown while it is typed: the
+                                           value is it held to the limits (9 on the way to 90 in 20 to 400) */
     unsigned style;                     /* (toolkit 2) a slider's GUI_SLIDER_ flags */
     int marks;                          /* ... a mark every so many (0: none) */
     void (*fmt)(int value, char *out, int room);        /* ... its value as text (NULL: the number) */
@@ -729,7 +731,10 @@ static void number_draw(struct gui_widget *w, struct gfx_surface *s)
         struct gfx_rect up = { w->r.x + w->r.w - GUI_SB, w->r.y, GUI_SB, w->r.h / 2 + 1 };
         struct gfx_rect dn = { w->r.x + w->r.w - GUI_SB, w->r.y + w->r.h / 2, GUI_SB, w->r.h - w->r.h / 2 };
         gui_draw_field(s, &f, on);
-        sprintf(t, "%d", n->value);
+        if (n->typing && n->typed != n->value)  /* (the digits typed so far, not yet a value it may have) */
+            sprintf(t, "%ld", n->typed);
+        else
+            sprintf(t, "%d", n->value);
         gfx_text(s, f.x + 4, f.y + (f.h - gui_font->height) / 2, gui_font, t, -1, on ? GUI_FIELD_TEXT : GUI_DIM);
         gui_draw_box(s, &up, GUI_FACE, n->held == 1);
         gui_draw_box(s, &dn, GUI_FACE, n->held == 2);
@@ -763,6 +768,8 @@ static int number_event(struct gui_widget *w, struct gui_ev *e)
     switch (e->type) {
     case GUI_EV_FOCUS:
     case GUI_EV_BLUR:
+        if (n->typing)
+            gui_damage(w);                      /* (the value shown, not the digits typed) */
         n->typing = n->minus = 0;               /* (a number typed is typed from its first digit) */
         return 0;
     case GUI_EV_KEY:
@@ -776,27 +783,34 @@ static int number_event(struct gui_widget *w, struct gui_ev *e)
             long d = e->ch - '0', v;
             if (!n->typing) {
                 v = n->minus ? -d : d;
-            } else {
-                v = (long)n->value * 10 + (n->value < 0 || (n->minus && !n->value) ? -d : d);
-                if (v > n->max || v < n->min)
+            } else {                            /* (from the digits typed, not the value they were held to: a
+                                                   number past the far limit, which more digits only take further,
+                                                   starts again with this digit) */
+                v = n->typed * 10 + (n->typed < 0 || (n->minus && !n->typed) ? -d : d);
+                if ((v > 0 && v > n->max) || (v < 0 && v < n->min))
                     v = n->minus ? -d : d;
             }
-            n->typing = 1;
-            number_set(n, (int)v, 1);
+            n->typing = 1, n->typed = v;
+            number_set(n, v > n->max ? n->max : v < n->min ? n->min : (int)v, 1);
+            gui_damage(w);
             return 1;
         }
         if (!n->slider && e->ch == '-' && n->min < 0) {
-            if (n->typing && n->value) {        /* (among the digits: the sign of what is typed) */
-                number_set(n, -n->value, 1);
-                n->minus = n->value < 0;
+            if (n->typing && n->typed) {        /* (among the digits: the sign of what is typed) */
+                n->typed = -n->typed;
+                number_set(n, n->typed > n->max ? n->max : n->typed < n->min ? n->min : (int)n->typed, 1);
+                n->minus = n->typed < 0;
+                gui_damage(w);
             } else {
                 n->minus = !n->minus;
             }
             return 1;
         }
         if (!n->slider && e->key == GUI_K_BACK) {
-            number_set(n, n->value / 10, 1);
+            n->typed = (n->typing ? n->typed : n->value) / 10;
+            number_set(n, n->typed > n->max ? n->max : n->typed < n->min ? n->min : (int)n->typed, 1);
             n->typing = 1;
+            gui_damage(w);
             return 1;
         }
         n->typing = n->minus = 0;               /* (any other key: the next digit starts a number) */
