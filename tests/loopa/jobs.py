@@ -1882,7 +1882,7 @@ class Agent:
     """GLOS headless (the agent) in a background Loop A run with the test keys,
     and OpenSSH's ssh to it through SLiRP's forward of port 22 (on the host)."""
 
-    def __init__(self, name, profile, card, args, timeout=600, files=True):
+    def __init__(self, name, profile, card, args, timeout=600, files=True, idle=300):
         import socket
         import tempfile
         s = socket.socket()
@@ -1891,7 +1891,7 @@ class Agent:
         s.close()
         self.proc = run(name, os.environ.get("SSH_EXTRA", "").split() + [
             "--machine", profile, "--net", card, "--net-fwd", "%d:22" % self.port, "--timeout", str(timeout),
-            "--idle", "300"] + (GLOS_FILES + KEYS if files else []) + args, background=True)   # (files: a native
+            "--idle", str(idle)] + (GLOS_FILES + KEYS if files else []) + args, background=True)   # (files: a native
                                                                     # boot's disk has them: --hdd takes none)
         self.autoexec = NATIVE and files        # (a native run's RUN.BAT is run by GLOS, after it starts: listening)
         self.serial = os.path.join(ROOT, "out", self.proc.run_name, "serial.log")
@@ -7874,7 +7874,9 @@ def nboot_setup_case(profile, card):
     checks, info = {"image": mk.returncode == 0}, ""
     if not checks["image"]:
         return "  %-22s FAIL image=%r" % (tag, (mk.stdout + mk.stderr).decode("latin-1")[-300:]), False
-    agent = Agent(tag + "a-" + card, profile, card, ["--hdd", disk, "--floppy", fimg], timeout=3000, files=False)
+    # (idle: the programs' copy by SFTP writes nothing to the serial line, and takes 8 minutes on the 486)
+    agent = Agent(tag + "a-" + card, profile, card, ["--hdd", disk, "--floppy", fimg], timeout=3000, files=False,
+                  idle=1500)
     out, copied = "", ""
     try:
         checks["listen"] = agent.listening()
@@ -13298,7 +13300,7 @@ def main():
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
         res += matrix(nboot_floppy_case, cases, a.jobs)         # (from a drive of the floppies' numbers)
         res += matrix(nboot_fda_case, cases, a.jobs)            # (from the disk, a floppy drive as A: beside it)
-        res += matrix(nboot_setup_case, [c for c in cases if c[0] == "bf6"], a.jobs)  # (the setup floppy, no DOS)
+        res += matrix(nboot_setup_case, cases, a.jobs)          # (the setup floppy with no DOS: the 486 for 13 min)
         res += matrix(nboot_dual_case, cases, a.jobs)           # (GLOS beside another system: the start-up menu)
         res += matrix(nboot_dual_case, [c + (True,) for c in cases if c[0] == "bf6"], a.jobs)  # (... beside MS-DOS 7.1)
         return 0 if all(r[1] for r in res) else 1
