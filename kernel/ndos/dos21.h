@@ -71,6 +71,7 @@ struct dos_m {
     unsigned exit_code;                 /* 4Dh's: the last child's AL, AH its kind (00h normal) */
     unsigned last_error;                /* 59h's */
     unsigned temp_n;                    /* 5Ah's: names made so far */
+    unsigned boot_drive;                /* 3305h's: 1 A:, 3 C: (0: C:) */
     unsigned unanswered;
     int ended;                          /* the root's child has ended: the machine with it */
     int root_runs;                      /* the root is a program that runs on (the system VM's stub): its children's

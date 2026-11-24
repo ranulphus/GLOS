@@ -1,6 +1,37 @@
-/* Drive letters in MS-DOS's order (letters.h). */
+/* Drive letters in MS-DOS's order (letters.h). Nothing else of the kernel's is needed: GLOS's loader links
+   this too (16-bit, Open Watcom), and gives the letters before the kernel is read. */
 #include "letters.h"
-#include "disk.h"
+
+struct part {
+    unsigned char active, type;
+    unsigned long start, sectors;
+};
+
+static unsigned long rd32(const unsigned char *p)
+{
+    return (unsigned long)p[0] | (unsigned long)p[1] << 8 | (unsigned long)p[2] << 16 | (unsigned long)p[3] << 24;
+}
+
+/* A sector's table of four entries: 0, or -1 if it has none (no 55AAh). */
+static int table(const unsigned char *s, struct part p[4])
+{
+    int i;
+
+    if (s[510] != 0x55 || s[511] != 0xAA)
+        return -1;
+    for (i = 0; i < 4; i++) {
+        const unsigned char *e = s + 446 + i * 16;
+
+        p[i].active = e[0] == 0x80;
+        p[i].type = e[4];
+        p[i].start = rd32(e + 8);
+        p[i].sectors = rd32(e + 12);
+    }
+    return 0;
+}
+
+/* The types DOS reads: FAT12, FAT16 and FAT32, with or without LBA. */
+static int is_fat(unsigned t) { return t == 0x01 || t == 0x04 || t == 0x06 || t == 0x0B || t == 0x0C || t == 0x0E; }
 
 static int is_extended(unsigned type) { return type == 0x05 || type == 0x0F; }
 
@@ -36,8 +67,8 @@ static int add(struct let_vol *vols, int n, int max, unsigned disk, unsigned kin
 
 int let_scan(unsigned disk, unsigned long sectors, let_read_fn read, void *ctx, struct let_vol *vols, int n, int max)
 {
-    unsigned char s[512];
-    struct mbr_part p[4];
+    static unsigned char s[512];        /* (not on the stack: the loader's is small) */
+    struct part p[4];
     unsigned long ext = 0, ebr, next;
     unsigned i, links;
 
@@ -45,10 +76,10 @@ int let_scan(unsigned disk, unsigned long sectors, let_read_fn read, void *ctx, 
         return n;
     if (fat_first(s))                           /* (a volume's own first sector has no table to trust) */
         return add(vols, n, max, disk, LET_WHOLE, 0, 0, 0, 0, sectors ? sectors : 0xFFFFFFFFUL, 0);
-    if (mbr_parse(s, p) < 0)
+    if (table(s, p) < 0)
         return n;
     for (i = 0; i < 4; i++) {
-        if (mbr_is_fat(p[i].type))
+        if (is_fat(p[i].type))
             n = add(vols, n, max, disk, LET_PRIMARY, i, p[i].type, p[i].active, p[i].start, p[i].sectors, sectors);
         else if (is_extended(p[i].type) && !ext && p[i].start)
             ext = p[i].start;                   /* (DOS follows the first one) */
@@ -57,10 +88,10 @@ int let_scan(unsigned disk, unsigned long sectors, let_read_fn read, void *ctx, 
        table) and the next table (counted from the extended partition's start). */
     for (ebr = ext, links = 0; ebr && links < 32; ebr = next, links++) {
         next = 0;
-        if ((sectors && ebr >= sectors) || read(ctx, ebr, s) != 0 || mbr_parse(s, p) < 0)
+        if ((sectors && ebr >= sectors) || read(ctx, ebr, s) != 0 || table(s, p) < 0)
             break;
         for (i = 0; i < 4; i++) {
-            if (mbr_is_fat(p[i].type) && p[i].start)
+            if (is_fat(p[i].type) && p[i].start)
                 n = add(vols, n, max, disk, LET_LOGICAL, links, p[i].type, 0, ebr + p[i].start, p[i].sectors, sectors);
             else if (is_extended(p[i].type) && p[i].start && !next)
                 next = ext + p[i].start;

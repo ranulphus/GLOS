@@ -7801,10 +7801,11 @@ def nboot_floppy_case(profile, card):
         checks["listen"] = agent.listening()
         if checks["listen"]:
             ver = agent.ssh("ver")
-            ls = agent.ssh("dir C:\\GLOS")
-            wr = agent.ssh("echo written on the floppy > C:\\FLOPPY.TXT")
-            rd = agent.ssh("type C:\\FLOPPY.TXT")
-            job = agent.ssh("C:\\GLOS\\COMMAND.COM /C VER")
+            # (GLOS started from a floppy is on A:, as a DOS started from one is: stage 3's letters)
+            ls = agent.ssh("dir A:\\GLOS")
+            wr = agent.ssh("echo written on the floppy > A:\\FLOPPY.TXT")
+            rd = agent.ssh("type A:\\FLOPPY.TXT")
+            job = agent.ssh("A:\\GLOS\\COMMAND.COM /C VER")
             checks["ver"] = ver[0] == 0 and "GLOS" in ver[1]
             checks["dir"] = ls[0] == 0 and "GLOSK" in ls[1] and "COMMAND" in ls[1]
             checks["write-read"] = wr[0] == 0 and rd[0] == 0 and "written on the floppy" in rd[1]
@@ -7821,7 +7822,7 @@ def nboot_floppy_case(profile, card):
     text = agent.log()
     m = re.search(r"GLOS-BOOT step=disk dl=00 if=(\d) chs=(\d+)/2/18 ", text)
     checks["loader"] = m is not None and m.group(1) == "3"      # (a floppy drive: not a USB disk's)
-    checks["c"] = re.search(r"GLOS-NATIVE step=c dl=00 disk=bios .* base=0 mount=0", text) is not None
+    checks["c"] = re.search(r"GLOS-NATIVE step=c dl=00 disk=bios .* base=0 mount=0 drive=A", text) is not None
     if profile == "bf6":
         checks["usb"] = "GLOS-USB uhci" in text and "GLOS-USB left to the BIOS" not in text
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-REFUSE" not in text and "GLOS-WARN" not in text
@@ -7921,9 +7922,14 @@ def nboot_dual_case(profile, card, msdos=False):
             checks["asks"] = rc == 2 and "Nothing was done" in out and "stay as they are" in out
             rc, out = disk_cmd("1 install /free /y", 900)
             m = re.search(r"Done: (\d+) files, (\d+) KB, in (\d+) seconds", out)
-            checks["install"] = rc == 0 and m is not None and "after a menu" in out and "is kept in C:\\GLOS\\DISK1.MBR" in out
-            kept = subprocess.run(agent.opts + ["glos@127.0.0.1", "glos dd if=c:\\glos\\disk1.mbr of=-"], capture_output=True,
+            checks["install"] = rc == 0 and m is not None and "after a menu" in out and "is kept in A:\\GLOS\\DISK1.MBR" in out
+            kept = subprocess.run(agent.opts + ["glos@127.0.0.1", "glos dd if=a:\\glos\\disk1.mbr of=-"], capture_output=True,
                                   timeout=120).stdout
+            # (and the other system's volume is C: here already, as it is when that system runs)
+            other = agent.ssh("dir C:\\")
+            checks["c-other"] = other[0] == 0 and ("IO" in other[1] if msdos else "KERNEL" in other[1])
+            if not checks["c-other"]:
+                info += " c-other=%r" % (other[1] + other[2])[-200:]
             checks["first-saved"] = kept[:512] == sector0
             info += " install=%s" % (m.group(0) if m else repr(out[-300:]))
             rc, out = disk_cmd("1")
@@ -7948,16 +7954,25 @@ def nboot_dual_case(profile, card, msdos=False):
     try:
         checks["glos"] = agent.listening()
         if checks["glos"]:
-            ls = agent.ssh("dir C:\\GLOS")
-            job = agent.ssh("C:\\GLOS\\COMMAND.COM /C VER")
+            # (the letters are MS-DOS's: the other system's volume stays C:, GLOS's own is D:; a file written to C:
+            # by GLOS and read back, then removed: the other's volume is as it was, byte for byte, below)
+            ls = agent.ssh("dir D:\\GLOS")
+            job = agent.ssh("D:\\GLOS\\COMMAND.COM /C VER")
             checks["runs"] = ls[0] == 0 and "GLOSK" in ls[1] and job[0] == 0 and "GLOS" in job[1]
+            other = agent.ssh("dir C:\\")
+            cd = agent.ssh("cd")
+            checks["letters"] = other[0] == 0 and ("IO" in other[1] if msdos else "KERNEL" in other[1]) \
+                and "GLOSK" not in other[1] and cd[1].strip().upper().startswith("D:")
+            if not checks["letters"]:
+                info += " letters=%r cd=%r" % ((other[1] + other[2])[-200:], cd[1])
             agent.ssh("glos exit")
     except subprocess.TimeoutExpired:
         checks["timeout-2"] = False
     text = stopped(agent)
     checks["menu"] = "This disk can start:" in text and re.search(r"  2  .* \(partition 1, \d+ MB\)", text) is not None \
         and "GLOS-BOOT menu chosen=1 glos" in text
-    checks["volume"] = re.search(r"GLOS-NATIVE step=c dl=80 disk=\S+ .* base=%d mount=0" % start2, text) is not None
+    checks["volume"] = re.search(r"GLOS-NATIVE step=c dl=80 disk=\S+ .* base=%d mount=0 drive=D" % start2, text) is not None \
+        and re.search(r"GLOS-NATIVE step=drive C: dl=80 disk=\S+ base=\d+ type=\w+ mount=0", text) is not None
     checks["clean-2"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-REFUSE" not in text
     if not (checks["menu"] and checks["volume"]):
         info += " log=%r" % [l for l in text.split("\n") if "menu" in l or "step=c" in l or "step=disk" in l][:6]

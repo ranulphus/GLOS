@@ -31,6 +31,9 @@
 #include "glos/bootinfo.h"
 #include "glos/config.h"
 #include "inflate.h"
+#ifdef NATIVE
+#include "../kernel/disk/letters.h"
+#endif
 
 #ifndef GLOS_BUILD
 #define GLOS_BUILD "unknown"
@@ -488,6 +491,8 @@ static void disks_probe(void)
     unsigned n = *(unsigned char __far *)MK_FP(0x40, 0x75), i, fl;
     struct bi_disk *d;
 
+    if (bi.n_disks)                             /* (asked already: a native start's letters) */
+        return;
     memset(&r, 0, sizeof r);
 #ifndef NATIVE                                  /* (no DOS: no INT 2Fh, and no SMARTDRV) */
     r.x.ax = 0x4A10;
@@ -831,8 +836,8 @@ static int glos_main(int argc, char **argv)
     bi.authkeys_len = read_key_file(argv[0], "AUTHKEYS", bi.authkeys, sizeof bi.authkeys);
     say("GLOS-BOOT step=keys seed=%lu hostkey=%lu authkeys=%lu", bi.seed_len, bi.hostkey_len, bi.authkeys_len);
 #ifdef NATIVE
-    bi.indos = bi.sda = bi.lol = 0;             /* (the kernel's own DOS's, when it makes them) */
-    bi.boot_drive = 3;                          /* (C:: the volume GLOS started from) */
+    bi.indos = bi.sda = bi.lol = 0;             /* (the kernel's own DOS's, when it makes them; boot_drive is
+                                                   native_main's: the letter of the volume GLOS started from) */
     segread(&sr);
     bi.magic = BOOTINFO_MAGIC;
     bi.version = BOOTINFO_VERSION;
@@ -1398,6 +1403,107 @@ static void native_chain(unsigned char *table, unsigned entry, const unsigned ch
     native_far8000();
 }
 
+/* The system a volume's boot sector starts, by the sector's own words. */
+static const char *system_name(const unsigned char *bs)
+{
+    return !memcmp(bs + 3, "MSWIN4", 6) ? "Windows 95/98"
+           : !memcmp(bs + 3, "MSDOS", 5) || !memcmp(bs + 3, "IBM ", 4) ? "MS-DOS"
+           : !memcmp(bs + 3, "FRDOS", 5) || !memcmp(bs + 3, "FreeDOS", 7) || loads(bs, "KERNEL  SYS") ? "FreeDOS"
+           : loads(bs, "GLOSLDR SYS") ? "GLOS (another)"
+           : !memcmp(bs + 3, "NTFS", 4) ? "Windows NT" : "another system";
+}
+
+/* A sector of one of the BIOS's hard disks (ctx: its bi_disk), for the volumes' letters: by the LBA call where
+   the BIOS has it for that disk, else by cylinder, head and sector. */
+static int disk_sector(void *ctx, unsigned long lba, unsigned char *sector)
+{
+    static struct { unsigned char size, zero; unsigned n, off, seg; unsigned long lo, hi; } dap;
+    struct bi_disk *d = ctx;
+    union REGS r;
+    struct SREGS sr;
+    int tries;
+
+    for (tries = 0; tries < 3; tries++) {
+        segread(&sr);
+        memset(&r, 0, sizeof r);
+        if (d->flags & BI_DISK_EDD) {
+            dap.size = 16, dap.zero = 0, dap.n = 1, dap.off = (unsigned)sector, dap.seg = sr.ds;
+            dap.lo = lba, dap.hi = 0;
+            r.h.ah = 0x42;
+            r.x.si = (unsigned)&dap;
+        } else {
+            unsigned long track = d->heads * d->spt, c, t;
+
+            if (!track || (c = lba / track) > 1023)
+                return -1;
+            t = lba % track;
+            r.x.ax = 0x0201;
+            r.h.ch = (unsigned char)c;
+            r.h.cl = (unsigned char)(((c >> 2) & 0xC0) | (t % d->spt + 1));
+            r.h.dh = (unsigned char)(t / d->spt);
+            sr.es = sr.ds;
+            r.x.bx = (unsigned)sector;
+        }
+        r.h.dl = (unsigned char)d->dl;
+        int86x(0x13, &r, &r, &sr);
+        if (!r.x.cflag)
+            return 0;
+        memset(&r, 0, sizeof r);
+        r.h.dl = (unsigned char)d->dl;
+        int86(0x13, &r, &r);
+    }
+    return -1;
+}
+
+/* The drives of a native start (bootinfo's vols): every FAT volume of the BIOS's hard disks, lettered in
+   MS-DOS's order (kernel/disk/letters.c), a DOS's or a Windows's own volume told by its boot sector. The letter
+   of the volume GLOS started from: a floppy's (or a USB stick's that the BIOS starts as one) is A:. */
+static char native_letters(void)
+{
+    static struct let_vol v[BI_VOLS];
+    static unsigned char bs[512];
+    int n = 0, i, own = -1;
+
+    disks_probe();
+    for (i = 0; i < (int)bi.n_disks; i++)
+        n = let_scan((unsigned)i, (bi.disks[i].flags & BI_DISK_PARAMS) && !bi.disks[i].sectors_hi ? bi.disks[i].sectors_lo : 0,
+                     disk_sector, &bi.disks[i], v, n, BI_VOLS);
+    for (i = 0; i < n; i++) {
+        struct bi_disk *d = &bi.disks[v[i].disk];
+
+        if (d->dl == native_disk && v[i].start == native_vol_lba())
+            v[i].own = 1, own = i;
+        else if (disk_sector(d, v[i].start, bs) == 0 && bs[510] == 0x55 && bs[511] == 0xAA
+                 && (!memcmp(system_name(bs), "Windows 9", 9) || !memcmp(system_name(bs), "MS-DOS", 6)
+                     || !memcmp(system_name(bs), "FreeDOS", 7)))
+            v[i].dos = 1;
+    }
+    let_assign(v, n, 2);
+    bi.n_vols = (unsigned long)n;
+    for (i = 0; i < n; i++) {
+        bi.vols[i].dl = bi.disks[v[i].disk].dl;
+        bi.vols[i].letter = v[i].letter < 0 ? 0xFFFFFFFFUL : (unsigned long)v[i].letter;
+        bi.vols[i].type = v[i].type;
+        bi.vols[i].flags = (v[i].own ? BI_VOL_OWN : 0) | (v[i].dos ? BI_VOL_DOS : 0) | (v[i].active ? BI_VOL_ACTIVE : 0)
+                           | (v[i].kind == LET_LOGICAL ? BI_VOL_LOGICAL : 0);
+        bi.vols[i].start = v[i].start;
+        bi.vols[i].sectors = v[i].sectors;
+        say("GLOS-BOOT volume %c: dl=%02lx start=%lu sectors=%lu type=%02x%s%s%s", v[i].letter < 0 ? '-' : 'A' + v[i].letter,
+            bi.vols[i].dl, v[i].start, v[i].sectors, v[i].type, v[i].own ? " own" : "", v[i].dos ? " dos" : "",
+            v[i].active ? " active" : "");
+    }
+    if (own >= 0 && v[own].letter >= 0)
+        return (char)('A' + v[own].letter);
+    if (native_disk < 0x80)
+        return 'A';
+    /* (a hard disk's volume that its table doesn't show as a FAT one, or one too many: the letter after the
+       last given) */
+    for (i = 0, own = 2; i < n; i++)
+        if (v[i].letter >= own)
+            own = v[i].letter + 1;
+    return (char)('A' + (own > 25 ? 25 : own));
+}
+
 static void native_menu(void)
 {
     static unsigned char mbr[512], bs[4][512];
@@ -1419,12 +1525,7 @@ static void native_menu(void)
             continue;                           /* (nothing to start there) */
         entry[n] = i;
         mb[n] = *(unsigned long *)(e + 12) / 2048;
-        strcpy(names[n], !memcmp(bs[n] + 3, "MSWIN4", 6) ? "Windows 95/98"
-                         : !memcmp(bs[n] + 3, "MSDOS", 5) || !memcmp(bs[n] + 3, "IBM ", 4) ? "MS-DOS"
-                         : !memcmp(bs[n] + 3, "FRDOS", 5) || !memcmp(bs[n] + 3, "FreeDOS", 7)
-                           || loads(bs[n], "KERNEL  SYS") ? "FreeDOS"
-                         : loads(bs[n], "GLOSLDR SYS") ? "GLOS (another)"
-                         : !memcmp(bs[n] + 3, "NTFS", 4) ? "Windows NT" : "another system");
+        strcpy(names[n], system_name(bs[n]));
         n++;
     }
     if (!n)
@@ -1570,7 +1671,7 @@ void __cdecl native_main(void)
     static char *argv[2] = { self, 0 };
     unsigned char __far *t = (unsigned char __far *)MK_FP(native_psp, 0x80);
     unsigned n = t[0] < 127 ? t[0] : 126, i;
-    char *w;
+    char *w, letter;
 
     _psp = native_psp;
     outp(0x3FB, 0x80); outp(0x3F8, 1); outp(0x3F9, 0); outp(0x3FB, 0x03);
@@ -1598,6 +1699,11 @@ void __cdecl native_main(void)
     for (w = strtok(tail, " \t"); w; w = strtok(NULL, " \t"))
         if (w[0] == '\\' && strlen(w) < sizeof self - 12)
             sprintf(self, "C:%s\\GLOS.EXE", strupr(w));
+    /* The drives' letters, and this volume's in GLOS's own paths: it is C: only where MS-DOS would call it so. */
+    letter = native_letters();
+    self[0] = letter;
+    bi.boot_drive = (unsigned long)(letter - 'A' + 1);
+    say("GLOS-BOOT step=letters own=%c: volumes=%lu", letter, bi.n_vols);
     read_cfg(argv[0], 1);
     for (i = 0; i < n; i++)                     /* (strtok cut the tail up: the flags, a word at a time) */
         if (tail[i] == '/' && (i == 0 || !tail[i - 1]))
@@ -1613,8 +1719,10 @@ void __cdecl native_main(void)
             strcpy(bi.comspec, env);
         if (access(bi.comspec, 0) == 0)
             bi.flags |= BI_F_OWNCMD;
-        if (!bi.autoexec[0])
+        if (!bi.autoexec[0]) {
             strcpy(bi.autoexec, "C:\\AUTOEXEC.BAT");
+            bi.autoexec[0] = letter;
+        }
         if (access(bi.autoexec, 0) != 0)
             bi.autoexec[0] = 0;
         shell = own_shell = 1;
@@ -1624,6 +1732,7 @@ void __cdecl native_main(void)
         memmove(env + 5, env, strlen(env) + 1);
         memcpy(env, "PATH=", 5);
         strcat(env, ";C:\\");
+        env[strlen(env) - 3] = letter;
         n = strlen(env) + 1;
         n += (unsigned)sprintf(env + n, "COMSPEC=%s", bi.comspec) + 1;
         env[n++] = 0;                           /* (the strings' end, and no program's name after them) */

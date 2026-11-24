@@ -22,6 +22,7 @@
 #include "dpmi.h"
 #include "io.h"
 #include "kprintf.h"
+#include "mm.h"
 #include "timer.h"
 #include "vm.h"
 #include "../drv/ide.h"
@@ -37,7 +38,6 @@ static void vm_wr16(u32 lin, u32 v)
 }
 
 static struct dos_m vd;
-static struct fsv_vol cvol;
 static struct ata_dev *cdev;
 static unsigned long cbase;
 static int ready, mounted, unanswered;
@@ -88,7 +88,7 @@ static int bios13(struct rmregs *r)
 
 /* count sectors of the disk at lba: the BIOS's LBA calls where it has them, else cylinder, head and sector, a
    track's rest at a time; a call that fails is made again after a reset, three times. 0, or the BIOS's error. */
-static int bios_rw(int write, u32 lba, u8 *buf, u32 count)
+static int bios_rw(struct bi_disk *bdsk, int write, u32 lba, u8 *buf, u32 count)
 {
     struct rmregs r;
     int e = 0, tries;
@@ -156,25 +156,38 @@ int vdos_usb_bios(void)
     return cbios && vm.bi->boot_if != BI_IF_ATA && vm.bi->boot_if != BI_IF_OTHER;
 }
 
-/* ---- C: */
+/* ---- the drives
+
+   A volume: where it is (a disk GLOS's IDE driver has, else one of the BIOS's by its calls; its first sector
+   there) and the file system on it. The volume GLOS started from is the first, kept here; the others the loader
+   lettered (bootinfo's vols: stage 3) are made as they are mounted. */
+struct nvol {
+    struct fsv_vol v;
+    struct ata_dev *dev;                        /* 0: the BIOS's calls */
+    struct bi_disk *bd;                         /* the BIOS's disk (its number, its geometry) */
+    unsigned long base;
+};
+static struct nvol own;
 
 /* (through the disk cache, which a program's own INT 13h on the same disk goes through too) */
 static int c_read(void *ctx, unsigned long lba, unsigned char *buf, unsigned count)
 {
-    (void)ctx;
+    struct nvol *n = ctx;
+
     vd_window();
-    if (cbios)
-        return bios_rw(0, (u32)(cbase + lba), buf, count) != 0;
-    return cache_kread(0x80, cdev, (u32)(cbase + lba), count, buf) != 0;
+    if (!n->dev)
+        return bios_rw(n->bd, 0, (u32)(n->base + lba), buf, count) != 0;
+    return cache_kread(n->bd ? n->bd->dl : 0x80, n->dev, (u32)(n->base + lba), count, buf) != 0;
 }
 
 static int c_write(void *ctx, unsigned long lba, const unsigned char *buf, unsigned count)
 {
-    (void)ctx;
+    struct nvol *n = ctx;
+
     vd_window();
-    if (cbios)
-        return bios_rw(1, (u32)(cbase + lba), (u8 *)buf, count) != 0;
-    return cache_kwrite(0x80, cdev, (u32)(cbase + lba), count, buf) != 0;
+    if (!n->dev)
+        return bios_rw(n->bd, 1, (u32)(n->base + lba), (u8 *)buf, count) != 0;
+    return cache_kwrite(n->bd ? n->bd->dl : 0x80, n->dev, (u32)(n->base + lba), count, buf) != 0;
 }
 
 static unsigned long c_now(void *ctx)
@@ -220,7 +233,7 @@ static void mount_c(void)
     u32 dl = said ? bd->dl : 0x80;
     unsigned long want;
     struct ata_dev *d;
-    int i, r = -1, hits = 0, asked, differ = 0, failed = 0;
+    int i, r = -1, hits = 0, asked, differ = 0, failed = 0, letter, needs_bios = 0;
 
     mounted = 1;
     if (said)
@@ -235,7 +248,7 @@ static void mount_c(void)
        has lost what the BIOS set (the sectors a block of its READ MULTIPLE, its timing): 86Box's BIOS then read
        16 sectors of a longer call right and the rest wrong, and the owner's PCChips M925G gave a first sector
        that was none (2026-11-23). */
-    asked = bios_rw(0, 0, s0, 1) == 0;
+    asked = bios_rw(bdsk, 0, 0, s0, 1) == 0;
     ide_probe(0);
     for (i = 0; dl >= 0x80 && (d = ide_dev(i)) != 0; i++) {
         if (!d->present || d->atapi)
@@ -270,10 +283,6 @@ static void mount_c(void)
             "same=%d differ=%d failed=%d\n", dl, bdsk ? (u32)bdsk->cyls : 0, bdsk ? (u32)bdsk->heads : 0,
             bdsk ? (u32)bdsk->spt : 0, bdsk ? (u32)bdsk->flags : 0, asked, s0[0], s0[1], s0[2], s0[510], s0[511],
             hits, differ, failed);
-    if (!cbios && xseg) {                       /* (GLOS's own driver: the BIOS's calls' block back to DOS) */
-        dos_mem_free(&vd.mcb, xseg);
-        xseg = 0;
-    }
     if (cbios) {
         memcpy(s, s0, 512);
         r = 0;
@@ -293,12 +302,60 @@ static void mount_c(void)
                             | (unsigned long)s[446 + i * 16 + 10] << 16 | (unsigned long)s[446 + i * 16 + 11] << 24;
                     break;
                 }
-        r = fsv_mount(&cvol, c_read, c_write, c_now, 0, 437, 0);
+        own.dev = cbios ? 0 : cdev;
+        own.bd = bdsk;
+        own.base = cbase;
+        r = fsv_mount(&own.v, c_read, c_write, c_now, &own, 437, 0);
     }
-    vd.vol[2] = r == 0 ? &cvol : 0;
-    vd.cds.valid = r == 0 ? 1u << 2 : 0;
-    kprintf("GLOS-NATIVE step=c dl=%02x disk=%s if=%u base=%u mount=%d\n", dl, cbios ? "bios" : cdev ? cdev->model : "none",
-            (u32)vm.bi->boot_if, (u32)cbase, r);
+    letter = vm.bi->boot_drive >= 1 && vm.bi->boot_drive <= DOS_DRIVES ? (int)vm.bi->boot_drive - 1 : 2;
+    vd.vol[letter] = r == 0 ? &own.v : 0;
+    vd.cds.valid = r == 0 ? 1u << letter : 0;
+    kprintf("GLOS-NATIVE step=c dl=%02x disk=%s if=%u base=%u mount=%d drive=%c\n", dl,
+            cbios ? "bios" : cdev ? cdev->model : "none", (u32)vm.bi->boot_if, (u32)cbase, r, 'A' + letter);
+    /* The other volumes, by the letters the loader gave them (MS-DOS's order: kernel/disk/letters.c). A disk
+       other than the one GLOS started from is GLOS's IDE driver's if exactly one of its disks, not yet another's,
+       has the BIOS's first sector of it; else the BIOS's calls read it. A volume that doesn't mount (not
+       formatted, not a FAT volume after all) has no drive. */
+    for (i = 0; i < (int)vm.bi->n_vols && i < BI_VOLS; i++) {
+        struct bi_vol *bv = &vm.bi->vols[i];
+        struct bi_disk *bd = 0;
+        struct ata_dev *dev = 0;
+        struct nvol *n;
+        int k, m;
+
+        if ((bv->flags & BI_VOL_OWN) || bv->letter >= DOS_DRIVES || vd.vol[bv->letter])
+            continue;
+        if (bdsk && bv->dl == bdsk->dl) {
+            bd = bdsk, dev = cbios ? 0 : cdev;
+        } else {
+            for (k = 0; k < (int)vm.bi->n_disks; k++)
+                if (vm.bi->disks[k].dl == bv->dl && vm.bi->disks[k].bps == 512)
+                    bd = &vm.bi->disks[k];
+            if (!bd || bios_rw(bd, 0, 0, s0, 1) != 0)
+                continue;
+            for (k = 0, hits = 0; !(vm.bi->flags & BI_F_BIOSDISK) && (d = ide_dev(k)) != 0; k++)
+                if (d->present && !d->atapi && d != cdev && ata_read(d, 0, 0, 1, s, 0) == 0 && !memcmp(s, s0, 512))
+                    hits++, dev = d;
+            if (hits != 1)
+                dev = 0;
+        }
+        if (!(n = kmalloc(sizeof *n)))
+            break;
+        memset(n, 0, sizeof *n);
+        n->dev = dev, n->bd = bd, n->base = bv->start;
+        m = fsv_mount(&n->v, c_read, c_write, c_now, n, 437, 0);
+        kprintf("GLOS-NATIVE step=drive %c: dl=%02x disk=%s base=%u type=%02x mount=%d\n", 'A' + (int)bv->letter, (u32)bv->dl,
+                dev ? dev->model : "bios", (u32)bv->start, (u32)bv->type, m);
+        if (m != 0)
+            continue;                           /* (its memory stays: a few KB, once) */
+        vd.vol[bv->letter] = &n->v;
+        vd.cds.valid |= 1u << bv->letter;
+        needs_bios |= !dev;
+    }
+    if (!cbios && !needs_bios && xseg) {        /* (GLOS's own driver for all: the BIOS's calls' block back to DOS) */
+        dos_mem_free(&vd.mcb, xseg);
+        xseg = 0;
+    }
 }
 
 /* ---- the machine */
@@ -456,7 +513,9 @@ int vdos_init(struct bootinfo *bi)
     u8 *mem = vm_ptr(0);
     int i;
 
-    if (dos_m_init_vm(&vd, mem, (unsigned long)low_top * 16, psp, top, low_top, 0, 2, 437, X_PARAS, &xseg) != 0) {
+    if (dos_m_init_vm(&vd, mem, (unsigned long)low_top * 16, psp, top, low_top, 0,
+                      bi->boot_drive >= 1 && bi->boot_drive <= DOS_DRIVES ? (int)bi->boot_drive - 1 : 2, 437, X_PARAS,
+                      &xseg) != 0) {
         kprintf("GLOS-NATIVE step=dos error psp=%04x top=%04x low_top=%04x\n", psp, top, low_top);
         return -1;
     }
@@ -472,6 +531,7 @@ int vdos_init(struct bootinfo *bi)
         xdata = lin, xrun = (end - lin) / 512;
     }
     vd.out = vd_out, vd.now = vd_now, vd.wait = vd_wait, vd.fill = vd_fill;
+    vd.boot_drive = bi->boot_drive >= 1 && bi->boot_drive <= DOS_DRIVES ? bi->boot_drive : 3;
     bi->indos = vd.lay.sda + 1;
     bi->sda = vd.lay.sda;
     bi->lol = vd.lay.lol;

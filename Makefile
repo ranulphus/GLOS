@@ -254,7 +254,7 @@ host-test-run: build/host/libpdfbr32.a
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/telnet_test tests/host/telnet_test.c \
 	  apps/shared/telnet.c && build/host/telnet_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/letters_test tests/host/letters_test.c \
-	  kernel/disk/letters.c kernel/disk/mbr.c kernel/disk/mbrboot.S && build/host/letters_test
+	  kernel/disk/letters.c && build/host/letters_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/disk_test tests/host/disk_test.c kernel/disk/mbr.c \
 	  kernel/disk/fatfmt.c kernel/disk/mbrboot.S kernel/disk/fdboot.S \
 	  && tests/host/disk_test.sh build/host/disk_test build/host/disk
@@ -513,11 +513,12 @@ build/ow/GLOS.EXE: build/ow/obj16/main.obj build/ow/obj16/lowlevel.obj build/ow/
 # ---- GLOSLDR.SYS: the same loader with no DOS under it (-dNATIVE; docs/v1/native-dos.md, native boot): GLOS's
 # boot sector loads it at 0060:0000h; its first 512 bytes (loader/nprelude.S) run the .EXE after them in place.
 NATIVE_OBJS := build/ow/native/nstart.obj build/ow/native/main.obj build/ow/native/nlib.obj build/ow/native/fat.obj \
+               build/ow/native/letters.obj \
                build/ow/native/lowlevel.obj build/ow/native/stub.obj build/ow/native/cfg.obj build/ow/native/tz.obj \
                build/ow/native/inflate.obj build/ow/native/cp.obj build/ow/native/cp_tables.obj
-NATIVE_FILES := build/ow/native/nstart.obj,build/ow/native/main.obj,build/ow/native/nlib.obj,build/ow/native/fat.obj,build/ow/native/lowlevel.obj,build/ow/native/stub.obj,build/ow/native/cfg.obj,build/ow/native/tz.obj,build/ow/native/inflate.obj,build/ow/native/cp.obj,build/ow/native/cp_tables.obj
+NATIVE_FILES := build/ow/native/nstart.obj,build/ow/native/main.obj,build/ow/native/nlib.obj,build/ow/native/fat.obj,build/ow/native/letters.obj,build/ow/native/lowlevel.obj,build/ow/native/stub.obj,build/ow/native/cfg.obj,build/ow/native/tz.obj,build/ow/native/inflate.obj,build/ow/native/cp.obj,build/ow/native/cp_tables.obj
 NWCC := $(WCC16) -bt=dos -ms -3 -os -s -zq -we -iinclude -dNATIVE
-build/ow/native/main.obj: loader/main.c loader/inflate.h include/glos/bootinfo.h include/glos/config.h build/build_id
+build/ow/native/main.obj: loader/main.c loader/inflate.h include/glos/bootinfo.h include/glos/config.h kernel/disk/letters.h build/build_id
 	@mkdir -p $(dir $@)
 	$(Q)echo "  WCC16   $< (native)"
 	$(Q)$(NWCC) -dGLOS_BUILD="\"$(BUILD_ID)\"" -dINFL_FAR=far -fo=$@ $<
@@ -526,6 +527,10 @@ build/ow/native/nlib.obj build/ow/native/inflate.obj: build/ow/native/%.obj: loa
 	$(Q)echo "  WCC16   $< (native)"
 	$(Q)$(NWCC) -dINFL_FAR=far -fo=$@ $<
 build/ow/native/fat.obj: kernel/fs/fat.c kernel/fs/fat.h
+	@mkdir -p $(dir $@)
+	$(Q)echo "  WCC16   $< (native)"
+	$(Q)$(NWCC) -fo=$@ $<
+build/ow/native/letters.obj: kernel/disk/letters.c kernel/disk/letters.h
 	@mkdir -p $(dir $@)
 	$(Q)echo "  WCC16   $< (native)"
 	$(Q)$(NWCC) -fo=$@ $<

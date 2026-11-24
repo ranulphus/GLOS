@@ -11,7 +11,7 @@ typedef unsigned int   bi_u32;
 #endif
 
 #define BOOTINFO_MAGIC   0x4F4F4247UL           /* "GBOO" */
-#define BOOTINFO_VERSION 14
+#define BOOTINFO_VERSION 15
 
 #define KERNEL_MAGIC     0x4B4F4C47UL           /* "GLOK", first word of GLOSK.BIN */
 #define KERNEL_LINK      0xC0100000UL           /* where the kernel is linked */
@@ -82,6 +82,7 @@ struct bi_profile {
 
 /* Version 5: a hard disk as the BIOS describes it (INT 13h 08h, 41h, 48h), for the disk cache. */
 #define BI_DISKS         4
+#define BI_VOLS          16
 #define BI_DISK_EDD      0x0001                 /* 41h: the extended calls (42h-44h, 47h, 48h) */
 #define BI_DISK_REMOVE   0x0002                 /* 48h: removable media */
 #define BI_DISK_PARAMS   0x0004                 /* 48h answered: sectors and bps are its */
@@ -192,7 +193,22 @@ struct bootinfo {
     /* version 14: the first sector on that disk of the volume GLOS started from (its partition's start; 0: the disk
        is the volume), as the loader found it */
     bi_u32 boot_lba;
+    /* version 15: a native start's drives (docs/v1/native-dos.md, stage 3): the FAT volumes of the BIOS's hard
+       disks with the letters the loader gave them, MS-DOS's order (kernel/disk/letters.c), so that C:\GAMES is the
+       same folder under GLOS as under the DOS or the Windows on the same PC. boot_drive (version 9) is the letter
+       of the volume GLOS started from, and the loader's paths (comspec, autoexec, cfg_path) begin with it. */
+    bi_u32 n_vols;
+    struct bi_vol {
+        bi_u32 dl;                              /* the BIOS's number of its disk */
+        bi_u32 letter;                          /* 2: C:; FFFFFFFFh: none */
+        bi_u32 type, flags;                     /* the partition's type byte; BI_VOL_* */
+        bi_u32 start, sectors;                  /* on the disk */
+    } vols[BI_VOLS];
 };
+#define BI_VOL_OWN     1u                       /* the volume GLOS started from */
+#define BI_VOL_DOS     2u                       /* a DOS's or a Windows's own (by its boot sector) */
+#define BI_VOL_ACTIVE  4u
+#define BI_VOL_LOGICAL 8u                       /* a logical drive of the extended partition */
 #define BI_IF_UNKNOWN 0u
 #define BI_IF_ATA     1u                        /* "ATA", "ATAPI" */
 #define BI_IF_USB     2u

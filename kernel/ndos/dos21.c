@@ -2530,8 +2530,8 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
         case 0x01:
             m->ctrl_break = (unsigned char)((r->dx & 0xFF) != 0);
             return DOS21_DONE;
-        case 0x05:
-            r->dx = (r->dx & 0xFF00) | 3;       /* (it started from C:) */
+        case 0x05:                              /* (the drive it started from: C: unless the machine says) */
+            r->dx = (r->dx & 0xFF00) | (m->boot_drive ? m->boot_drive : 3);
             return DOS21_DONE;
         case 0x06:
             r->bx = 0x0A07, r->dx = 0;          /* (7.10, revision 0) */
