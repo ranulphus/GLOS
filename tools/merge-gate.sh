@@ -3,6 +3,7 @@
 #
 #   tools/merge-gate.sh                   here: one suite after another (the host to itself: other Loop A
 #                                         runs beside it slow the guests and fail its timings)
+#                                         (tools/merge-gate-lanes.sh runs it here in lanes, as fast as there)
 #   tools/merge-gate.sh remote [COMMIT]   on another machine: devserver by default (the owner's choice,
 #                                         2026-11-12: at most 8 emulators at once there, niced, in Docker)
 #
