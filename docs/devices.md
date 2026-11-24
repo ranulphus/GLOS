@@ -109,3 +109,22 @@ keyboard and mouse drivers (J4) stand in for the emulation while GLOS runs. At `
 as found; whether a BIOS's emulation then picks up again is still to be seen on a PC that has it on (bench-g400's
 BIOS doesn't use USB).
 
+## PCI sound cards and the line rule (phase H, 2026-11-24)
+
+GLOS's PCI sound drivers (`cmi8738.c`, `es1371.c`, `ich97.c`, `via686.c`) are found late, by the mixer, after the
+network card and the USB controllers have their lines. They took their interrupt line without asking until
+2026-11-24. A line has one handler (`vm_claim_irq` sets it), so on a PC whose sound card shares the network
+card's line the sound driver would have taken the network's interrupts away. No bench has that sharing: bench
+G's VIA sound shares IRQ 12 with a UHCI that is quiet, bench B's CMI8738 has IRQ 10 to itself.
+
+- **Now:** each of them asks first (`mixer_pci_line`, which is `dev_take_line`): with another function on the
+  line that isn't quiet, the sound card is refused (`GLOS-CMI refused shared-irq irq=11 with=00:0b.0`, and
+  `shared-irq:...` in Devices), and the line stays the other device's. Once found whole, the card is GLOS's
+  (`pci_claim`: DOS no longer finds it on the PCI bus while GLOS runs).
+- **Still so:** a network card that shares its line with a sound chip GLOS has not made quiet is refused, as
+  with any function nobody has quieted. Quiet drivers for the sound chips (interrupts off while no channel
+  runs) would lift that, and are not written: no bench needs them yet.
+- **Step D2** (chained handlers, above) is what lets the network card and the sound card both work on one line.
+  Bench G is where it could be proved: its sound shares IRQ 12 with a UHCI, its network card IRQ 11 with the
+  G550.
+

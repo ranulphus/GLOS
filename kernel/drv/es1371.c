@@ -254,6 +254,8 @@ int es1371_init(void)
         dev_note(pci_where(pd, w), "es1371", DEVS_REFUSED, "no-irq", 0);
         return -1;
     }
+    if (mixer_pci_line(pd, "es1371", "ES") != 0)
+        return -1;
     es.pci = pd;
     es.io = (u16)(pd->bar[0] & 0xFFFCu);
     es.irq = pd->irq;
@@ -286,6 +288,7 @@ int es1371_init(void)
         return -1;
     }
     es.found = 1;
+    pci_claim(pd);                              /* (GLOS's: DOS no longer finds it on the PCI bus) */
     kprintf("GLOS-ES found io=%x irq=%u id=%04x rev=%u\n", es.io, es.irq, pd->device, pd->rev);
     ksnprintf(r, sizeof r, "io=%04x-%04x irq=%u", es.io, es.io + 0x3F, es.irq);
     dev_note(pci_where(pd, w), "es1371", DEVS_ON, "", r);

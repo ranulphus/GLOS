@@ -175,6 +175,8 @@ int via686_init(void)
         dev_note(pci_where(pd, w), name, DEVS_REFUSED, "no-irq", 0);
         return -1;
     }
+    if (mixer_pci_line(pd, name, "VIA") != 0)
+        return -1;
     via.pci = pd;
     via.io = (u16)(pd->bar[0] & 0xFFFCu);
     via.irq = pd->irq;
@@ -205,6 +207,7 @@ int via686_init(void)
         return -1;
     }
     via.found = 1;
+    pci_claim(pd);                              /* (GLOS's: DOS no longer finds it on the PCI bus) */
     kprintf("GLOS-VIA found io=%x irq=%u rev=%u chip=%s\n", via.io, via.irq, pd->rev, name);
     ksnprintf(r, sizeof r, "io=%04x-%04x irq=%u", via.io, via.io + 0xFF, via.irq);
     dev_note(pci_where(pd, w), name, DEVS_ON, "", r);

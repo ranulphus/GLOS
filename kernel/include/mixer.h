@@ -46,6 +46,8 @@ struct sound_card {                             /* what the mixer plays through 
     void (*kick)(void);
 };
 void mixer_tick(void);                          /* every kernel tick (vdev.c): the card's watchdog */
+struct pci_dev;
+int mixer_pci_line(struct pci_dev *pd, const char *name, const char *tag);     /* its line taken (devices.md D1): 0 */
 enum { MX_CH_MASTER, MX_CH_WAVE, MX_CH_FM, MX_CH_CD, MX_CH_LINE, MX_CH_MIC, MX_CHANNELS };
 enum { MX_IN_MIC, MX_IN_LINE, MX_IN_CD, MX_IN_MIX };
 enum { MX_VOLUME, MX_BALANCE, MX_MUTE, MX_PAUSE, MX_THRESHOLD, MX_POSITION, MX_QUEUED };

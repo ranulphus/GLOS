@@ -134,6 +134,8 @@ int ich97_init(void)
         dev_note(pci_where(pd, w), "ich97", DEVS_REFUSED, "no-irq", 0);
         return -1;
     }
+    if (mixer_pci_line(pd, "ich97", "ICH") != 0)
+        return -1;
     ich.pci = pd;
     ich.mix = (u16)(pd->bar[0] & 0xFFFCu);
     ich.bm = (u16)(pd->bar[1] & 0xFFFCu);
@@ -155,6 +157,7 @@ int ich97_init(void)
         return -1;
     }
     ich.found = 1;
+    pci_claim(pd);                              /* (GLOS's: DOS no longer finds it on the PCI bus) */
     kprintf("GLOS-ICH found io=%x,%x irq=%u id=%04x\n", ich.mix, ich.bm, ich.irq, pd->device);
     ksnprintf(r, sizeof r, "io=%04x-%04x,%04x-%04x irq=%u", ich.mix, ich.mix + 0xFF, ich.bm, ich.bm + 0x3F, ich.irq);
     dev_note(pci_where(pd, w), "ich97", DEVS_ON, "", r);

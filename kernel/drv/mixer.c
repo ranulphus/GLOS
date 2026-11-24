@@ -28,6 +28,7 @@
  * whatever the graphics card). */
 #include <string.h>
 
+#include "dev.h"
 #include "devlist.h"
 #include "kapi.h"
 #include "glos/bootinfo.h"
@@ -41,6 +42,7 @@
 #include "mixer.h"
 #include "mixgain.h"
 #include "mm.h"
+#include "pci.h"
 #include "sched.h"
 #include "timer.h"
 #include "vsbdev.h"
@@ -168,6 +170,23 @@ static void late(void)
     mx.found = mx.on = 1;
     if (mx.desk)
         mixer_desktop(1);
+}
+
+/* A PCI sound card's interrupt line, by docs/devices.md's rule (step D1): GLOS takes a line only if every other
+   function on it is quiet. A line has one handler: a sound driver that took one shared with the network card
+   would take the network's interrupts away with it (the four PCI drivers of phase H took theirs unasked until
+   2026-11-24; bench G's shares IRQ 12 with a USB controller, a quiet one). 0, or -1 with the refusal said and
+   listed. (The driver claims the card, pci_claim, once it has found it whole.) */
+int mixer_pci_line(struct pci_dev *pd, const char *name, const char *tag)
+{
+    char with[16], why[32], w[8];
+    if (dev_take_line(pd, with, sizeof with) != 0) {
+        kprintf("GLOS-%s refused shared-irq irq=%u with=%s\n", tag, pd->irq, with);
+        ksnprintf(why, sizeof why, "shared-irq:%s", with);
+        dev_note(pci_where(pd, w), name, DEVS_REFUSED, why, 0);
+        return -1;
+    }
+    return 0;
 }
 
 static int listed_off_sb16(void) { return dev_turned_off("sb16"); }

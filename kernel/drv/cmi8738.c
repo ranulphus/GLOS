@@ -104,6 +104,8 @@ int cmi8738_init(void)
         dev_note(pci_where(pd, w), "cmi8738", DEVS_REFUSED, "no-irq", 0);
         return -1;
     }
+    if (mixer_pci_line(pd, "cmi8738", "CMI") != 0)
+        return -1;
     cm.pci = pd;
     cm.io = (u16)(pd->bar[0] & 0xFFFCu);
     cm.irq = pd->irq;
@@ -122,6 +124,7 @@ int cmi8738_init(void)
     cm.legacy_was = rd32(0x14);
     wr32(0x14, cm.legacy_was & ~((3u << 29) | (3u << 24)));
     cm.found = 1;
+    pci_claim(pd);                              /* (GLOS's: DOS no longer finds it on the PCI bus) */
     kprintf("GLOS-CMI found io=%x irq=%u rev=%u\n", cm.io, cm.irq, pd->rev);
     ksnprintf(r, sizeof r, "io=%04x-%04x irq=%u", cm.io, cm.io + 0xFF, cm.irq);
     dev_note(pci_where(pd, w), "cmi8738", DEVS_ON, "", r);
