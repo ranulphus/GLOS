@@ -33,20 +33,24 @@ struct dos_layout {
                                            01h InDOS (34h), 0Ch the DTA, 10h the current PSP, 16h the current drive */
     unsigned long misc;                 /* DOS_MISC bytes: an empty DBCS table (63h), +2 a RETF (38h's case map),
                                            +4 two bytes the machine may use (ndm.c: its INT 23h's ARPL; the
-                                           system VM's to +1Eh: vdos.c), +1Fh a drive's media byte (1Bh, 1Ch),
-                                           +20h a drive's parameter block (1Fh, 32h), +60h the country's
-                                           tables (65h: upper case, file names' upper case, file names' ends) */
+                                           system VM's to +1Fh: vdos.c). (A machine's ends where its vectors'
+                                           ARPLs begin, 0600h: nothing more fits there.) */
     unsigned long sft;                  /* the file table: DOS_FILES entries */
     unsigned root_psp;                  /* the root process's PSP (its own parent) */
     unsigned first_mcb, low_top;        /* the memory chain: its first MCB, its end (A000h) */
+    unsigned long tables;               /* DOS_TABLES bytes: TAB_MEDIA a drive's media byte (1Bh, 1Ch), TAB_DPB a
+                                           drive's parameter block (1Fh, 32h), TAB_UCASE on the country's tables
+                                           (65h: upper case, file names' upper case, file names' ends). 0 in a
+                                           layout given: a block of DOS's own memory, the chain's first */
 };
 extern const struct dos_layout dos_layout_machine;
-#define DOS_MISC    0x180
-#define MISC_MEDIA  0x1F
-#define MISC_DPB    0x20
-#define MISC_UCASE  0x60                /* (a word 128, 128 bytes) */
-#define MISC_FUCASE 0xE2
-#define MISC_FTERM  0x164               /* (24 bytes) */
+#define DOS_MISC    0x20
+#define DOS_TABLES  0x160
+#define TAB_MEDIA   0x00
+#define TAB_DPB     0x02                /* (3Dh bytes) */
+#define TAB_UCASE   0x40                /* (a word 128, 128 bytes) */
+#define TAB_FUCASE  0xC2
+#define TAB_FTERM   0x144               /* (24 bytes) */
 
 #define DOS_LFN_FINDS 8                 /* long-name searches open at once (the oldest gives way to a ninth) */
 

@@ -13,7 +13,7 @@
 
 #define CF      0x0001u
 #define ZF      0x0040u
-const struct dos_layout dos_layout_machine = { 0x0540, 0x05A0, 0x05E0, 0x0800, 0x0118, 0x0128, 0xA000 };
+const struct dos_layout dos_layout_machine = { 0x0540, 0x05A0, 0x05E0, 0x0800, 0x0118, 0x0128, 0xA000, 0 };
 
 /* ---- the machine's memory: nothing outside it is read (0) or written */
 
@@ -734,12 +734,23 @@ void dos_m_init(struct dos_m *m, unsigned char *mem, unsigned long size, const s
     for (i = 0; i < DOS_DRIVES; i++)
         strcpy(m->cds.cwd[i], "\\");
     memset(mem + lay->sda, 0, DOS_SDA_SIZE);
-    memset(mem + lay->misc, 0, DOS_MISC);
+    memset(mem + lay->misc, 0, 6);
     mem[lay->misc + 2] = 0xCB;                  /* (RETF) */
     lol_make(m);
-    nls_make(m);
     dos_files_init(&m->files, mem, m->lay.sft, DOS_FILES);
     dos_mem_init(&m->mcb, mem, size, m->lay.first_mcb, m->lay.low_top, 0, 0);
+    if (!m->lay.tables) {                       /* (DOS's own block, "SD", the chain's first) */
+        unsigned tseg;
+
+        if (dos_mem_alloc(&m->mcb, DOS_TABLES / 16, 0x0008, &tseg, &largest) == 0) {
+            m->lay.tables = lin(tseg, 0);
+            for (i = 0; i < 8; i++)
+                mem[lin(tseg - 1, 8) + i] = (unsigned char)"SD\0\0\0\0\0\0"[i];
+        }
+    }
+    if (m->lay.tables)
+        memset(mem + m->lay.tables, 0, DOS_TABLES);
+    nls_make(m);
     dos_mem_alloc(&m->mcb, (sizeof env + 1 + 15) / 16, m->lay.root_psp, &envseg, &largest);
     memcpy(mem + lin(envseg, 0), env, sizeof env);      /* (its strings, then the 0 that ends them) */
     mem[lin(envseg, 0) + sizeof env] = 0;
@@ -760,7 +771,7 @@ void dos_m_init(struct dos_m *m, unsigned char *mem, unsigned long size, const s
 int dos_m_init_vm(struct dos_m *m, unsigned char *mem, unsigned long size, unsigned psp, unsigned top,
                   unsigned low_top, struct fsv_vol *v, int drive, int cp, unsigned extra, unsigned *extra_seg)
 {
-    unsigned long bytes = 0x12 + 0x70 + DOS_SDA_SIZE + DOS_MISC + 6 + (unsigned long)DOS_FILES * DOS_SFT_SIZE;
+    unsigned long bytes = 0x12 + 0x70 + DOS_SDA_SIZE + DOS_MISC + DOS_TABLES + 6 + (unsigned long)DOS_FILES * DOS_SFT_SIZE;
     unsigned paras = (unsigned)((bytes + 15) / 16), seg, largest, i;
     struct dos_psp_init pin;
     unsigned long base;
@@ -788,7 +799,8 @@ int dos_m_init_vm(struct dos_m *m, unsigned char *mem, unsigned long size, unsig
     m->lay.lol = base + 0x12;
     m->lay.sda = m->lay.lol + 0x70;
     m->lay.misc = m->lay.sda + DOS_SDA_SIZE;
-    m->lay.sft = m->lay.misc + DOS_MISC;        /* (misc: 10h on, the system VM's own: vdos.c) */
+    m->lay.tables = m->lay.misc + DOS_MISC;     /* (misc: 10h on, the system VM's own: vdos.c) */
+    m->lay.sft = m->lay.tables + DOS_TABLES;
     m->lay.root_psp = psp;
     m->lay.first_mcb = psp - 1;
     m->lay.low_top = low_top;
@@ -1250,7 +1262,7 @@ static int country(struct dos_m *m, struct dos_regs86 *r)
     return ok(r);
 }
 
-/* The country's tables in the machine's memory (65h's: the layout's misc, MISC_UCASE on): upper case for the
+/* The country's tables in the machine's memory (65h's: the layout's tables, TAB_UCASE on): upper case for the
    bytes 80h-FFh, the same for file names (GLOS folds both by dos_upper: MS-DOS 7.1's COUNTRY.SYS tables where it
    has the code page), and the characters a file name ends at (RBIL table 01750, as MS-DOS 7.1 has it). */
 static void nls_make(struct dos_m *m)
@@ -1259,14 +1271,16 @@ static void nls_make(struct dos_m *m)
                                              '.', '"', '/', '\\', '[', ']', ':', '|', '<', '>', '+', '=', ';', ',' };
     unsigned i;
 
-    wr16(m, m->lay.misc + MISC_UCASE, 128);
-    wr16(m, m->lay.misc + MISC_FUCASE, 128);
+    if (!m->lay.tables)
+        return;
+    wr16(m, m->lay.tables + TAB_UCASE, 128);
+    wr16(m, m->lay.tables + TAB_FUCASE, 128);
     for (i = 0; i < 128; i++) {
-        wr8(m, m->lay.misc + MISC_UCASE + 2 + i, dos_upper(m->cp, (unsigned char)(0x80 + i)));
-        wr8(m, m->lay.misc + MISC_FUCASE + 2 + i, dos_upper(m->cp, (unsigned char)(0x80 + i)));
+        wr8(m, m->lay.tables + TAB_UCASE + 2 + i, dos_upper(m->cp, (unsigned char)(0x80 + i)));
+        wr8(m, m->lay.tables + TAB_FUCASE + 2 + i, dos_upper(m->cp, (unsigned char)(0x80 + i)));
     }
     for (i = 0; i < sizeof fterm; i++)
-        wr8(m, m->lay.misc + MISC_FTERM + i, fterm[i]);
+        wr8(m, m->lay.tables + TAB_FTERM + i, fterm[i]);
 }
 
 /* 65h, as MS-DOS 7.1 answers with no COUNTRY.SYS loaded (DOSDIFF's S65 lines): 01h the country's information
@@ -1313,7 +1327,9 @@ static int nls(struct dos_m *m, struct dos_regs86 *r, unsigned al)
         r->cx = n;
         return ok(r);
     }
-    t = m->lay.misc + (al == 2 ? MISC_UCASE : al == 4 ? MISC_FUCASE : al == 5 ? MISC_FTERM : 0);
+    if (al != 7 && !m->lay.tables)
+        return err(m, r, 0x01);
+    t = al == 7 ? m->lay.misc : m->lay.tables + (al == 2 ? TAB_UCASE : al == 4 ? TAB_FUCASE : TAB_FTERM);
     wr8(m, b, al);
     wr16(m, b + 1, (unsigned)(t & 0xF)), wr16(m, b + 3, (unsigned)(t >> 4));
     r->cx = 5;
@@ -2402,8 +2418,12 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
             set_al(r, 0xFF);                    /* (a FAT32 drive's is 7302h's, as in MS-DOS 7.1) */
             return DOS21_DONE;
         }
-        dpb_fill(m, d, m->lay.misc + MISC_DPB);
-        r->ds = (unsigned)(m->lay.misc >> 4), r->bx = (unsigned)(m->lay.misc & 0xF) + MISC_DPB;
+        if (!m->lay.tables) {
+            set_al(r, 0xFF);
+            return DOS21_DONE;
+        }
+        dpb_fill(m, d, m->lay.tables + TAB_DPB);
+        r->ds = (unsigned)(m->lay.tables >> 4), r->bx = (unsigned)(m->lay.tables & 0xF) + TAB_DPB;
         set_al(r, 0);
         return DOS21_DONE;
     case 0x26:                                  /* a PSP made at DX by the program: 256 bytes of its code
@@ -2445,11 +2465,15 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
             set_al(r, 0xFF);
             return DOS21_DONE;
         }
-        wr8(m, m->lay.misc + MISC_MEDIA, d < 2 ? 0xF0 : 0xF8);
+        if (!m->lay.tables) {
+            set_al(r, 0xFF);
+            return DOS21_DONE;
+        }
+        wr8(m, m->lay.tables + TAB_MEDIA, d < 2 ? 0xF0 : 0xF8);
         set_al(r, v->fat.spc);                  /* (FAT32's large counts cut, as 36h's) */
         r->cx = 512;
         r->dx = (unsigned)(v->fat.clusters > 0xFFFF ? 0xFFFF : v->fat.clusters);
-        r->ds = (unsigned)(m->lay.misc >> 4), r->bx = (unsigned)(m->lay.misc & 0xF) + MISC_MEDIA;
+        r->ds = (unsigned)(m->lay.tables >> 4), r->bx = (unsigned)(m->lay.tables & 0xF) + TAB_MEDIA;
         return DOS21_DONE;
     case 0x0F: case 0x10: case 0x11: case 0x12: case 0x13: case 0x14: case 0x15: case 0x16: case 0x17:
     case 0x21: case 0x22: case 0x23: case 0x24: case 0x27: case 0x28:

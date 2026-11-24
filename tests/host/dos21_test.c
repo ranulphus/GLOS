@@ -107,7 +107,14 @@ int main(void)
         put16(i * 4, i * 2);
         put16(i * 4 + 2, 0x0060);
     }
+    for (i = 0x600; i < 0x800; i++)             /* (a machine's vectors' ARPLs, ndm.c's: DOS's tables end before) */
+        mem[i] = (unsigned char)(i * 7);
     dos_m_init(&m, mem, SIZE, &dos_layout_machine, &vol, 2, 437);
+    for (i = 0x600; i < 0x800 && mem[i] == (unsigned char)(i * 7); i++)
+        ;
+    CHECK(i == 0x800, "dos_m_init wrote over the machine's vectors' ARPLs at %x", i);
+    CHECK(m.lay.tables >= 0x1280 && m.lay.tables + DOS_TABLES <= SIZE && mem[m.lay.tables + TAB_UCASE] == 128,
+          "the tables' block at %lx", m.lay.tables);
     m.out = con;
     m.now = now;
     m.wait = no_more;
