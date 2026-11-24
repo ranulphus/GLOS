@@ -166,8 +166,34 @@ struct nvol {
     struct ata_dev *dev;                        /* 0: the BIOS's calls */
     struct bi_disk *bd;                         /* the BIOS's disk (its number, its geometry) */
     unsigned long base;
+    /* a floppy drive's (removable): its geometry the disk's own (its boot sector's), the disk in it mounted when
+       the drive is used and again when the BIOS says it changed */
+    int removable, mounted, line;               /* line: 1 the drive has a change line, 0 not, -1 not asked */
+    u32 used_at, failed_at;
+    struct bi_disk geo;
 };
 static struct nvol own;
+static struct nvol *flop[2];                    /* A:, B: */
+
+/* Whether the disk in a floppy drive may have changed since it was last used: the BIOS's change line (INT 13h
+   16h); a drive without one, after two seconds unused (DOS's rule). */
+static int flop_changed(struct nvol *n)
+{
+    struct rmregs r;
+    int e;
+
+    if (n->line < 0) {                          /* (asked once: 15h's type, 2 a drive that has the line) */
+        memset(&r, 0, sizeof r);
+        r.eax = 0x1500, r.edx = n->geo.dl;
+        n->line = bios13(&r) == 0 && ((r.eax >> 8) & 0xFF) == 2;
+    }
+    if (!n->line)
+        return timer_ticks() - n->used_at > 2048;
+    memset(&r, 0, sizeof r);
+    r.eax = 0x1600, r.edx = n->geo.dl;
+    e = bios13(&r);
+    return e != 0;                              /* (06h: changed; 80h: no disk, not ready) */
+}
 
 /* (through the disk cache, which a program's own INT 13h on the same disk goes through too) */
 static int c_read(void *ctx, unsigned long lba, unsigned char *buf, unsigned count)
@@ -185,6 +211,10 @@ static int c_write(void *ctx, unsigned long lba, const unsigned char *buf, unsig
     struct nvol *n = ctx;
 
     vd_window();
+    if (n->removable && flop_changed(n)) {      /* (what was meant for the disk taken out: not onto another) */
+        n->mounted = 0;
+        return 1;
+    }
     if (!n->dev)
         return bios_rw(n->bd, 1, (u32)(n->base + lba), (u8 *)buf, count) != 0;
     return cache_kwrite(n->bd ? n->bd->dl : 0x80, n->dev, (u32)(n->base + lba), count, buf) != 0;
@@ -201,6 +231,54 @@ static unsigned long c_now(void *ctx)
         return 0;
     dos_from_seconds(local - 315532800u, &d, &t);
     return (unsigned long)dos_pack_date(&d) << 16 | dos_pack_time(&t);
+}
+
+static int fat_first(const unsigned char *s);
+
+/* GLOS's own DOS asks which volume is in floppy drive `drive` now (dos21.h: media): the one mounted while the
+   disk hasn't changed, or while files are open on it (DOS's "invalid disk change": they stay that disk's); else
+   the disk there now, mounted afresh, its geometry its boot sector's. 15h: no disk, or none that is a FAT
+   volume. */
+static struct fsv_vol *vd_media(void *ctx, int drive, unsigned *err)
+{
+    struct nvol *n = drive >= 0 && drive < 2 ? flop[drive] : 0;
+    static unsigned char bs[512];
+    int i, open = 0;
+
+    (void)ctx;
+    *err = 0x0F;
+    if (!n)
+        return 0;
+    *err = 0x15;
+    if (n->mounted && !flop_changed(n)) {
+        n->used_at = timer_ticks();
+        return &n->v;
+    }
+    if (n->mounted) {
+        for (i = 0; i < FSV_NODES; i++)
+            open |= n->v.node[i].refs != 0;
+        if (open) {
+            n->used_at = timer_ticks();
+            return &n->v;
+        }
+    }
+    if (!n->mounted && n->failed_at && timer_ticks() - n->failed_at < 2048 && flop_changed(n))
+        return 0;                               /* (still no disk: no new wait for one) */
+    n->mounted = 0;
+    n->geo.heads = n->geo.spt = 1;              /* (sector 0 is the first of track 0, whatever the disk) */
+    if (bios_rw(&n->geo, 0, 0, bs, 1) != 0 || !fat_first(bs) || !bs[0x18] || !bs[0x1A]) {
+        n->failed_at = timer_ticks() | 1;
+        return 0;
+    }
+    n->geo.spt = bs[0x18] | (u32)bs[0x19] << 8;
+    n->geo.heads = bs[0x1A] | (u32)bs[0x1B] << 8;
+    if (fsv_mount(&n->v, c_read, c_write, c_now, n, 437, 0) != 0) {
+        n->failed_at = timer_ticks() | 1;
+        return 0;
+    }
+    kprintf("GLOS-NATIVE step=floppy %c: mounted spt=%u heads=%u line=%d\n", 'A' + drive, n->geo.spt, n->geo.heads, n->line);
+    n->mounted = 1, n->failed_at = 0, n->used_at = timer_ticks();
+    return &n->v;
 }
 
 static int is_fat(unsigned t)
@@ -325,6 +403,20 @@ static void mount_c(void)
 
         if ((bv->flags & BI_VOL_OWN) || bv->letter >= DOS_DRIVES || vd.vol[bv->letter])
             continue;
+        if (bv->flags & BI_VOL_REMOVABLE) {     /* (a floppy drive: its disk looked at when it is used) */
+            if (bv->letter > 1 || !(n = kmalloc(sizeof *n)))
+                continue;
+            memset(n, 0, sizeof *n);
+            n->removable = 1, n->line = -1, n->bd = &n->geo;
+            n->geo.dl = bv->dl, n->geo.bps = 512;
+            flop[bv->letter] = n;
+            vd.removable |= 1u << bv->letter;
+            vd.cds.valid |= 1u << bv->letter;
+            vd.media = vd_media;
+            needs_bios = 1;
+            kprintf("GLOS-NATIVE step=drive %c: dl=%02x removable\n", 'A' + (int)bv->letter, (u32)bv->dl);
+            continue;
+        }
         if (bdsk && bv->dl == bdsk->dl) {
             bd = bdsk, dev = cbios ? 0 : cdev;
         } else {

@@ -810,6 +810,47 @@ them. DOSDIFF's 71A0h line is the one answer that knowingly differs from MS-DOS 
   the CDS's 64 bytes, and the kernel's own shell and SFTP, which still list and take short names when they go
   through DOS.
 
+### Every hard disk's volumes, lettered as MS-DOS letters them (stage 3, 2026-11-24)
+
+The first part of stage 3. Until now a native GLOS had one drive, C:, the volume it started from, whatever
+MS-DOS would have called it: beside Windows 98 on bench G, GLOS's own partition was C: and Windows's had no
+letter, the opposite of what the owner decided (2026-11-20, "Drive letters as the DOS beside GLOS sees them").
+
+- **The loader gives the letters** (`loader/main.c`, `native_letters`), since it has the BIOS's INT 13h for every
+  hard disk: `kernel/disk/letters.c` (plain C, built 16-bit for the loader and for the host's test) finds each
+  disk's FAT volumes from its partition table and its extended partition's chain of logical drives (a disk
+  formatted whole is one volume), and letters them in MS-DOS's order: each disk's first primary (the active
+  one, else the first in the table), then each disk's logical drives, then the other primaries. Where GLOS's
+  own partition is the active one and the disk has a DOS's or a Windows's volume too (told by its boot
+  sector: `system_name`, the start-up menu's), that one is C:, as it is when that system runs. Partitions DOS
+  gives no letter (hidden ones, other systems') get none; past Z: none, but GLOS's own volume always has one.
+- **GLOS's own paths begin with its volume's letter**: GLOS.EXE's (and so GLOS.CFG's, the keys', COMMAND.COM's),
+  AUTOEXEC.BAT's, PATH's. From a floppy, or a USB stick the BIOS starts as one, it is A:.
+- **bootinfo 15** carries the list (`vols[]`: the BIOS's disk, the letter, the type, the flags own / dos /
+  active / logical, where it is) and `boot_drive`, the letter of GLOS's own volume (3305h says it).
+- **The kernel mounts them all** (`kernel/vm/vdos.c`): GLOS's own volume as before (the BIOS's first sector of
+  its disk matched to one IDE disk, else the BIOS's calls), then each other volume at its letter, its disk
+  matched the same way. A volume that doesn't mount has no drive. Log lines: `GLOS-BOOT volume X: ...` (the
+  loader), `GLOS-NATIVE step=c ... drive=X` (its own), `GLOS-NATIVE step=drive X: ...` (each other).
+- **Tested:** `tests/host/letters_test.c` (one partition; Windows 98 beside GLOS with either active; a data
+  partition beside GLOS; two disks with primaries, logical drives and second primaries; hidden and other
+  systems' partitions; a disk formatted whole; a chain that turns back on itself; a partition past the disk's
+  end; more volumes than letters); `loopa-nboot`: nfloppy's GLOS is on A:, ndual's on D: beside the other
+  system's C: (FreeDOS's, and MS-DOS 7.1's on FAT32), which it lists.
+- **Floppy drives, A: and B:** the BIOS's (INT 11h's equipment word), listed by the loader as removable
+  volumes (`BI_VOL_REMOVABLE`), but the one GLOS started from, which is its own volume. GLOS's DOS asks the
+  machine about a removable drive's disk at each use (`dos_m`'s `removable` and `media`, `vol_err` in
+  `dos21.c`); `vdos.c`'s `vd_media` mounts the disk in it by the BIOS's calls, its geometry its boot sector's,
+  and again when the BIOS's change line (INT 13h 16h) says it changed, or, for a drive without one (15h's
+  answer), after two seconds unused, as DOS does. While files are open on it the disk stays the one they
+  are on (DOS's "invalid disk change"); a write meant for a disk that was taken out is refused, never made on
+  the next one. No disk: 15h (not ready), at once for two seconds after one was looked for. 4408h says a
+  floppy drive is removable. Tested: `dos21_test` (a removable B: with a disk, without, and again),
+  `loopa-nboot`'s nfda (GLOS from its disk, a data floppy in A: read, written and read back).
+- **Still to come in stage 3:** CD drives after the disks (with N4's CD-ROM), USB drives as they are plugged in,
+  a one-drive PC's B: as the phantom of A: (DOS's "insert the disk for drive B:"), and the same letters for a
+  hosted GLOS's disks that DOS doesn't see (none today).
+
 ### Old programs' files: FCBs (2026-11-24)
 
 Programs written for DOS 1, and for CP/M before it, have no handles and no paths: a File Control Block of the

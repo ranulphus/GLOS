@@ -209,6 +209,7 @@ struct bootinfo {
 #define BI_VOL_DOS     2u                       /* a DOS's or a Windows's own (by its boot sector) */
 #define BI_VOL_ACTIVE  4u
 #define BI_VOL_LOGICAL 8u                       /* a logical drive of the extended partition */
+#define BI_VOL_REMOVABLE 16u                    /* a floppy drive (A:, B:): its disk is looked at when it is used */
 #define BI_IF_UNKNOWN 0u
 #define BI_IF_ATA     1u                        /* "ATA", "ATAPI" */
 #define BI_IF_USB     2u

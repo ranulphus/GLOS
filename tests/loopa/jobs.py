@@ -7769,6 +7769,89 @@ def nboot_install_case(profile, card, bios=False):
         not bad
 
 
+# A floppy's boot code that starts the hard disk instead (itself moved to 0000:0600h, the disk's first sector read
+# to 0000:7C00h and started with DL 80h, as the BIOS would): a data floppy in A: while the PC starts from its disk
+# (Loop A's BIOS tries the floppy first). The same bytes as tools/ndos/msdos-ref.sh's.
+CHAIN_TO_HDD = bytes([
+    0xFA, 0x31, 0xC0, 0x8E, 0xD0, 0xBC, 0x00, 0x7C, 0x8E, 0xD8, 0x8E, 0xC0, 0xFB, 0xFC,
+    0xBE, 0x00, 0x7C, 0xBF, 0x00, 0x06, 0xB9, 0x00, 0x01, 0xF3, 0xA5,
+    0xEA, 0x5C, 0x06, 0x00, 0x00,
+    0xB8, 0x01, 0x02, 0xBB, 0x00, 0x7C, 0xB9, 0x01, 0x00, 0xBA, 0x80, 0x00, 0xCD, 0x13,
+    0x72, 0xFE,
+    0xEA, 0x00, 0x7C, 0x00, 0x00,
+])
+
+
+def chain_to_hdd(img):
+    """CHAIN_TO_HDD into a FAT12 floppy image's boot sector (its parameters kept; its code at 3Eh)."""
+    with open(img, "r+b") as f:
+        b = bytearray(f.read(512))
+        assert b[0] == 0xEB and b[1] == 0x3C and b[510] == 0x55 and b[511] == 0xAA, "a FAT12 boot sector, code at 3Eh"
+        b[0x3E:0x3E + len(CHAIN_TO_HDD)] = CHAIN_TO_HDD
+        f.seek(0)
+        f.write(b)
+
+
+def nboot_fda_case(profile, card):
+    """A real floppy drive as A: under a native GLOS (stage 3: docs/v1/native-dos.md, "Every hard disk's
+    volumes"): GLOS starts from its hard disk (C:) with a data floppy in A:, whose boot code hands the start on to
+    the disk. The loader lists the BIOS's floppy drive as a removable A:; GLOS's DOS mounts the disk in it when A:
+    is first used (its geometry its boot sector's, read by the BIOS's calls). A file of the floppy's is read, one
+    is written and read back, the folder listed."""
+    tag = "nfda-" + profile
+    d = os.path.join(ROOT, "out", tag + "-img")
+    os.makedirs(d, exist_ok=True)
+    img, fimg = os.path.join(d, "c.img"), os.path.join(d, "a.img")
+    cfg = batfile(tag + "/GLOS.CFG", ["; jobs.py nboot: a floppy drive beside a native GLOS"])
+    mk = subprocess.run(["sh", "tools/ndos/native-image.sh", img, cfg + "=\\GLOS\\GLOS.CFG",
+                         "build/glos/COMMAND.COM=\\GLOS\\COMMAND.COM", "tests/keys/hostkey=\\GLOS\\KEYS\\HOSTKEY",
+                         "tests/keys/AUTHKEYS=\\GLOS\\KEYS\\AUTHKEYS"], cwd=ROOT, capture_output=True)
+    script = "\n".join([
+        "set -e", "rm -f %s" % fimg, "mkfs.fat -C -n DATAFLOPPY %s 1440 > /dev/null" % fimg, "export MTOOLS_SKIP_CHECK=1",
+        "printf 'on the floppy in A:' > %s/on.flp" % d, "mcopy -i %s %s/on.flp ::ON.FLP" % (fimg, d)])
+    mf = subprocess.run(["sh", "-c", script], cwd=ROOT, capture_output=True)
+    checks, info = {"image": mk.returncode == 0 and mf.returncode == 0}, ""
+    if not checks["image"]:
+        return "  %-22s FAIL image=%r" % (tag, (mk.stderr + mf.stderr).decode("latin-1")[-300:]), False
+    chain_to_hdd(fimg)
+    agent = Agent(tag + "-" + card, profile, card, ["--hdd", img, "--floppy", fimg], timeout=900, files=False)
+    try:
+        checks["listen"] = agent.listening()
+        if checks["listen"]:
+            ls = agent.ssh("dir A:\\")
+            rd = agent.ssh("type A:\\ON.FLP")
+            wr = agent.ssh("echo written to A: > A:\\W.TXT")
+            back = agent.ssh("type A:\\W.TXT")
+            own = agent.ssh("dir C:\\GLOS")
+            checks["dir"] = ls[0] == 0 and "ON" in ls[1] and "FLP" in ls[1]
+            checks["read"] = rd[0] == 0 and "on the floppy in A:" in rd[1]
+            checks["write-read"] = wr[0] == 0 and back[0] == 0 and "written to A:" in back[1]
+            checks["own-c"] = own[0] == 0 and "GLOSK" in own[1]
+            info += " dir=%r rd=%r back=%r" % (ls[1][-160:], rd[1][:60], (back[1] + back[2])[:80])
+            agent.ssh("glos exit")
+            import time
+            t0 = time.time()
+            while time.time() - t0 < 60 and "GLOS-EXIT code=" not in agent.log():
+                time.sleep(0.5)                 # (a native end stops the PC: the run is ended here)
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    agent.proc.kill()
+    agent.proc.wait()
+    text = agent.log()
+    checks["listed"] = re.search(r"GLOS-BOOT volume A: dl=00 removable", text) is not None \
+        and re.search(r"GLOS-NATIVE step=drive A: dl=00 removable", text) is not None
+    checks["mounted"] = re.search(r"GLOS-NATIVE step=floppy A: mounted spt=18 heads=2", text) is not None
+    checks["own"] = re.search(r"GLOS-NATIVE step=c dl=80 \S+ .* mount=0 drive=C", text) is not None \
+        or re.search(r"GLOS-NATIVE step=c dl=80 disk=\S+ .* mount=0 drive=C", text) is not None
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-REFUSE" not in text
+    bad = [k for k, v in checks.items() if not v]
+    if bad:
+        info += " log=%r" % [l for l in text.split("\n") if "volume" in l or "step=floppy" in l or "step=drive" in l
+                              or "WARN" in l][:8]
+    return "  %-22s %s%s%s" % (tag, "PASS" if not bad else "FAIL", info if bad else "",
+                               "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 def nboot_floppy_case(profile, card):
     """A native start from a drive of the floppies' numbers (docs/v1/native-dos.md, the BIOS's disks): a 1.44 MB
     floppy of GLOS's own formatter with GLOS's boot code naming GLOSLDR.SYS, the kernel and GLOS's COMMAND.COM on
@@ -13119,6 +13202,9 @@ def main():
         if os.environ.get("NBOOT_MSDOS"):
             cases = [c + (True,) for c in cases if c[0] == "bf6"]
         return 0 if all(r[1] for r in matrix(nboot_dual_case, cases, a.jobs)) else 1
+    if a.suite == "nboot" and os.environ.get("NBOOT_ONLY") == "fda":      # (a floppy drive as A: alone)
+        cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
+        return 0 if all(r[1] for r in matrix(nboot_fda_case, cases, a.jobs)) else 1
     if a.suite == "nboot" and os.environ.get("NBOOT_ONLY") == "dos":      # (GLOS's own DOS alone: DOSDIFF, NDOSTEST)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(nboot_dos_case, cases, a.jobs)) else 1
@@ -13133,6 +13219,7 @@ def main():
         res += matrix(nboot_install_case, cases, a.jobs)        # (DISK n INSTALL, and a start from what it made)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
         res += matrix(nboot_floppy_case, cases, a.jobs)         # (from a drive of the floppies' numbers)
+        res += matrix(nboot_fda_case, cases, a.jobs)            # (from the disk, a floppy drive as A: beside it)
         res += matrix(nboot_dual_case, cases, a.jobs)           # (GLOS beside another system: the start-up menu)
         res += matrix(nboot_dual_case, [c + (True,) for c in cases if c[0] == "bf6"], a.jobs)  # (... beside MS-DOS 7.1)
         return 0 if all(r[1] for r in res) else 1

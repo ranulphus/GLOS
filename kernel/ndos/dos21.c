@@ -150,15 +150,35 @@ static int no_file(struct fsv_vol *v, const char *path, int e)
     return fsv_lookup(v, dir, &fe) == 0 && (fe.attr & FAT_A_DIR) ? e : 0x03;
 }
 
+/* Drive d's volume now (a removable drive's disk asked about first: m->media), or 0 with *err (0Fh: no such
+   drive; 15h: not ready). */
+static struct fsv_vol *vol_err(struct dos_m *m, int d, unsigned *err)
+{
+    *err = 0x0F;
+    if (d < 0 || d >= DOS_DRIVES)
+        return 0;
+    if ((m->removable >> d & 1) && m->media)
+        m->vol[d] = m->media(m->ctx, d, err);
+    return m->vol[d];
+}
+
+static struct fsv_vol *vol_of(struct dos_m *m, int d)
+{
+    unsigned e;
+
+    return vol_err(m, d, &e);
+}
+
 /* A path made a drive's volume and its whole path there (out: 128 bytes): 0, or a DOS error. */
 static int resolve_str(struct dos_m *m, const char *p, struct fsv_vol **v, int *drive, char *out)
 {
+    unsigned e;
     int r = dos_resolve(&m->cds, m->cp, p, drive, out, 128);
 
     if (r)
         return r;
-    if (!(*v = m->vol[*drive]))
-        return 0x0F;
+    if (!(*v = vol_err(m, *drive, &e)))
+        return (int)e;
     return 0;
 }
 
@@ -964,10 +984,10 @@ static int ioctl(struct dos_m *m, struct dos_regs86 *r, unsigned al)
     case 0x09:
     case 0x0E:
         d = (r->bx & 0xFF) ? (int)(r->bx & 0xFF) - 1 : m->cds.current;
-        if (d < 0 || d >= DOS_DRIVES || !m->vol[d])
+        if (d < 0 || d >= DOS_DRIVES || !(m->vol[d] || (m->removable >> d & 1)))
             return err(m, r, 0x0F);
         if (al == 0x08)
-            r->ax = 1;                          /* (fixed) */
+            r->ax = (m->removable >> d & 1) ? 0 : 1;    /* (removable 0, fixed 1) */
         else if (al == 0x09)
             r->dx = 0;                          /* (local) */
         else
@@ -989,7 +1009,7 @@ static int find(struct dos_m *m, struct dos_regs86 *r, unsigned ah)
     if (dl + DOS_DTA_FIND > m->size)
         return err(m, r, 0x09);
     if (ah == 0x4F) {
-        if (dta[0] >= DOS_DRIVES || !(v = m->vol[dta[0]]))
+        if (dta[0] >= DOS_DRIVES || !(v = vol_of(m, dta[0])))
             return err(m, r, 0x12);
         return done(m, r, dos_findnext(v, dta));
     }
@@ -1143,7 +1163,7 @@ static int free32(struct dos_m *m, struct dos_regs86 *r)
     if (str_in(m, r->ds, r->dx, p, sizeof p) != 0 || r->cx < 0x2C)
         return err(m, r, 0x18);
     d = p[0] && p[1] == ':' ? (int)(dos_upper(m->cp, (unsigned char)p[0]) - 'A') : m->cds.current;
-    if (d < 0 || d >= DOS_DRIVES || !(v = m->vol[d]) || fsv_free(v, &fr) != 0)
+    if (d < 0 || d >= DOS_DRIVES || !(v = vol_of(m, d)) || fsv_free(v, &fr) != 0)
         return err(m, r, 0x0F);
     tot = v->fat.clusters;
     wr16(m, b, 0x24), wr16(m, b + 2, 0);
@@ -1168,7 +1188,7 @@ static int serial(struct dos_m *m, struct dos_regs86 *r)
     struct fsv_vol *v;
     unsigned i;
 
-    if (d < 0 || d >= DOS_DRIVES || !(v = m->vol[d]))
+    if (d < 0 || d >= DOS_DRIVES || !(v = vol_of(m, d)))
         return err(m, r, 0x0F);
     wr16(m, b, 0);                              /* (info level 0) */
     wr16(m, b + 2, (unsigned)v->fat.serial), wr16(m, b + 4, (unsigned)(v->fat.serial >> 16));
@@ -1223,7 +1243,7 @@ static int ext_dpb(struct dos_m *m, struct dos_regs86 *r)
 
     if (r->cx < 0x3F)
         return err(m, r, 0x18);
-    if (d < 0 || d >= DOS_DRIVES || !m->vol[d])
+    if (d < 0 || d >= DOS_DRIVES || !vol_of(m, d))
         return err(m, r, 0x0F);
     wr16(m, b, 0x3D);
     dpb_fill(m, d, b + 2);
@@ -1402,14 +1422,15 @@ static int lfn_refuse(struct dos_m *m, struct dos_regs86 *r)
 /* The path at seg:off resolved: its volume, drive, and the whole path as UTF-8 in out (2 * DOS_LONG_PATH). */
 static int lfn_path(struct dos_m *m, unsigned seg, unsigned off, struct fsv_vol **v, int *drive, char *out)
 {
+    unsigned u;
     int e;
 
     if (str_in(m, seg, off, m->lfn_in, sizeof m->lfn_in) != 0)
         return 0x03;
     if ((e = dos_resolve_long(&m->cds, m->lfn_in, drive, m->lfn_res, sizeof m->lfn_res)) != 0)
         return e;
-    if (!(*v = m->vol[*drive]))
-        return 0x0F;
+    if (!(*v = vol_err(m, *drive, &u)))
+        return (int)u;
     cp_to_utf8(m->cp, m->lfn_res, out, DOS_LONG_PATH * 2);
     return 0;
 }
@@ -1677,7 +1698,7 @@ static int lfn(struct dos_m *m, struct dos_regs86 *r, unsigned al)
     }
     case 0x47:
         d = (r->dx & 0xFF) ? (int)(r->dx & 0xFF) - 1 : m->cds.current;
-        if (d < 0 || d >= DOS_DRIVES || !(v = m->vol[d]))
+        if (d < 0 || d >= DOS_DRIVES || !(v = vol_of(m, d)))
             return err(m, r, 0x0F);
         cp_to_utf8(m->cp, m->cds.cwd[d], p, DOS_LONG_PATH * 2);
         if (lfn_names(m, v, p, 1, m->lfn_res, sizeof m->lfn_res) != 0)
@@ -2130,7 +2151,7 @@ static int fcb_find(struct dos_m *m, struct dos_regs86 *r, int first)
     } else {
         memset(dta, 0, sizeof dta);
         drive = rd8(m, f + F_FOUND) & 0x1F;
-        if (!(rd8(m, f + F_FOUND) & 0x80) || drive >= DOS_DRIVES || !(v = m->vol[drive])
+        if (!(rd8(m, f + F_FOUND) & 0x80) || drive >= DOS_DRIVES || !(v = vol_of(m, drive))
             || dos_template(m->cp, name + 2, dta + 1) < 0)
             return DOS21_DONE;
         dta[0] = (unsigned char)drive;
@@ -2414,7 +2435,7 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
                                                    place for every drive: made at each call) */
     case 0x32:
         d = ah == 0x32 && (r->dx & 0xFF) ? (int)(r->dx & 0xFF) - 1 : m->cds.current;
-        if (d < 0 || d >= DOS_DRIVES || !m->vol[d] || m->vol[d]->fat.fat == 32) {
+        if (d < 0 || d >= DOS_DRIVES || !vol_of(m, d) || m->vol[d]->fat.fat == 32) {
             set_al(r, 0xFF);                    /* (a FAT32 drive's is 7302h's, as in MS-DOS 7.1) */
             return DOS21_DONE;
         }
@@ -2461,7 +2482,7 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
     case 0x1B:                                  /* the current drive's clusters, a drive's: DS:BX its media byte */
     case 0x1C:
         d = ah == 0x1C && (r->dx & 0xFF) ? (int)(r->dx & 0xFF) - 1 : m->cds.current;
-        if (d < 0 || d >= DOS_DRIVES || !(v = m->vol[d])) {
+        if (d < 0 || d >= DOS_DRIVES || !(v = vol_of(m, d))) {
             set_al(r, 0xFF);
             return DOS21_DONE;
         }
@@ -2553,7 +2574,7 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
         unsigned long fr;
 
         d = (r->dx & 0xFF) ? (int)(r->dx & 0xFF) - 1 : m->cds.current;
-        if (d < 0 || d >= DOS_DRIVES || !(v = m->vol[d]) || fsv_free(v, &fr) != 0) {
+        if (d < 0 || d >= DOS_DRIVES || !(v = vol_of(m, d)) || fsv_free(v, &fr) != 0) {
             r->ax = 0xFFFF;
             return DOS21_DONE;
         }

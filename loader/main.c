@@ -1480,6 +1480,25 @@ static char native_letters(void)
     }
     let_assign(v, n, 2);
     bi.n_vols = (unsigned long)n;
+    {
+        /* The floppy drives the BIOS has (INT 11h's equipment word), as A: and B:: each a removable volume the
+           kernel looks at when it is used, but the one GLOS started from, which is its own. */
+        union REGS e;
+        unsigned k, drives;
+
+        int86(0x11, &e, &e);
+        drives = (e.x.ax & 1) ? ((e.x.ax >> 6) & 3) + 1 : 0;
+        for (k = 0; k < drives && k < 2 && bi.n_vols < BI_VOLS; k++) {
+            struct bi_vol *f = &bi.vols[bi.n_vols];
+
+            if (native_disk == k)
+                continue;
+            memset(f, 0, sizeof *f);
+            f->dl = k, f->letter = k, f->flags = BI_VOL_REMOVABLE;
+            bi.n_vols++;
+            say("GLOS-BOOT volume %c: dl=%02x removable", 'A' + k, k);
+        }
+    }
     for (i = 0; i < n; i++) {
         bi.vols[i].dl = bi.disks[v[i].disk].dl;
         bi.vols[i].letter = v[i].letter < 0 ? 0xFFFFFFFFUL : (unsigned long)v[i].letter;
@@ -1495,7 +1514,7 @@ static char native_letters(void)
     if (own >= 0 && v[own].letter >= 0)
         return (char)('A' + v[own].letter);
     if (native_disk < 0x80)
-        return 'A';
+        return (char)('A' + (native_disk & 1));
     /* (a hard disk's volume that its table doesn't show as a FAT one, or one too many: the letter after the
        last given) */
     for (i = 0, own = 2; i < n; i++)

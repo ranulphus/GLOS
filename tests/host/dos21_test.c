@@ -27,6 +27,21 @@ static int wr(void *c, unsigned long lba, const unsigned char *b, unsigned n) { 
 static void con(void *c, const char *s, unsigned n) { (void)c; memcpy(out + outn, s, n); outn += n; out[outn] = 0; }
 static unsigned long now(void *c) { (void)c; return now_secs; }
 static int no_more(void *c) { (void)c; return -1; }      /* (nothing else will be typed: a wait is told to end) */
+
+/* A floppy drive's disk (a removable drive's media callback): there or not. */
+static unsigned char *disk2_p;
+static struct fsv_vol *flop_vol;
+static int flop_in;
+static unsigned media_calls;
+static int rd2(void *c, unsigned long lba, unsigned char *b, unsigned n) { (void)c; memcpy(b, disk2_p + lba * 512, n * 512UL); return 0; }
+static int wr2(void *c, unsigned long lba, const unsigned char *b, unsigned n) { (void)c; memcpy(disk2_p + lba * 512, b, n * 512UL); return 0; }
+static struct fsv_vol *media(void *c, int drive, unsigned *err)
+{
+    (void)c;
+    media_calls++;
+    *err = 0x15;
+    return drive == 1 && flop_in ? flop_vol : 0;
+}
 static int idles;
 static void idle(void *c) { (void)c; idles++; }
 static void type(const char *s) { dos_type(&m, (const unsigned char *)s, (unsigned)strlen(s)); }
@@ -1157,6 +1172,68 @@ int main(void)
         call(&r, 0x5C00);
         CHECK((r.flags & 1) && r.ax == 6, "5C00h of no handle: %x", r.ax);
         r.ds = tp;
+    }
+
+    /* ---- a removable drive (a floppy's: B: here), asked about at each use: a disk in it, none, another */
+    {
+        static unsigned char *disk2;
+        static struct fsv_vol vol2;
+        struct fat_geo g2 = { 2880, 0, 2, 18, 0x00, 2, "FLOPPY", 12 };
+        unsigned tp = dos_cur_psp(&m), th;
+
+        disk2 = calloc(2880, 512);
+        disk2_p = disk2;
+        if (disk2) {
+            struct fsv_file ff;
+
+            fat_format(&g2, wr2, 0, &fm);
+            fsv_mount(&vol2, rd2, wr2, 0, 0, 437, 0);
+            fsv_create(&vol2, "\\ON.FLP", 0, 1, FSV_RW, FSV_DENY_NONE, &ff);
+            fsv_write(&ff, "on the floppy", 13);
+            fsv_close(&ff);
+        }
+        flop_vol = &vol2;
+        m.removable = 1u << 1;
+        m.cds.valid |= 1u << 1;
+        m.media = media;
+        flop_in = 1, media_calls = 0;
+        str(tp, 0x300, "B:\\ON.FLP");
+        r.ds = tp, r.dx = 0x300, r.flags = 0;
+        call(&r, 0x3D00);
+        th = r.ax;
+        CHECK(!(r.flags & 1) && media_calls == 1, "3Dh on B: with a disk: cf %u ax %x calls %u", r.flags & 1, r.ax, media_calls);
+        r.bx = th, r.cx = 13, r.ds = tp, r.dx = 0x400;
+        call(&r, 0x3F00);
+        CHECK(!(r.flags & 1) && r.ax == 13 && !memcmp(mem + lin(tp, 0x400), "on the floppy", 13), "3Fh from B:");
+        r.bx = th;
+        call(&r, 0x3E00);
+        r.bx = 2;
+        call(&r, 0x4408);
+        CHECK(!(r.flags & 1) && r.ax == 0, "4408h B:: removable (%x)", r.ax);
+        r.bx = 3;
+        call(&r, 0x4408);
+        CHECK(!(r.flags & 1) && r.ax == 1, "4408h C:: fixed (%x)", r.ax);
+        flop_in = 0;                            /* (the disk taken out) */
+        str(tp, 0x300, "B:\\ON.FLP");
+        r.ds = tp, r.dx = 0x300, r.flags = 0;
+        call(&r, 0x3D00);
+        CHECK((r.flags & 1) && r.ax == 0x15, "3Dh on B: with no disk: %x (15h, not ready)", r.ax);
+        str(tp, 0x300, "B:\\*.*");
+        r.ds = tp, r.dx = 0x300, r.cx = 0;
+        call(&r, 0x4E00);
+        CHECK((r.flags & 1) && r.ax == 0x15, "4Eh on B: with no disk: %x", r.ax);
+        r.dx = 2;
+        call(&r, 0x3600);
+        CHECK(r.ax == 0xFFFF, "36h of B: with no disk: %x", r.ax);
+        r.bx = 2;
+        call(&r, 0x4408);
+        CHECK(!(r.flags & 1) && r.ax == 0, "4408h B: with no disk: still a removable drive (%x)", r.ax);
+        flop_in = 1;
+        r.dx = 2;
+        call(&r, 0x3600);
+        CHECK(r.ax != 0xFFFF && r.cx == 512, "36h of B: with the disk back: ax %x", r.ax);
+        m.removable = 0, m.media = 0, m.vol[1] = 0, m.cds.valid &= ~(1u << 1);
+        free(disk2);
     }
 
     /* ---- what isn't there */

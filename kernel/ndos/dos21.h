@@ -72,6 +72,10 @@ struct dos_m {
     unsigned last_error;                /* 59h's */
     unsigned temp_n;                    /* 5Ah's: names made so far */
     unsigned boot_drive;                /* 3305h's: 1 A:, 3 C: (0: C:) */
+    /* Drives whose disk may change (a floppy drive: bit 0 A:): at each use the machine's media() says which
+       volume is in it now (vol[] is set from its answer), or 0 and *err (15h: not ready, no disk; 0Fh). */
+    unsigned removable;
+    struct fsv_vol *(*media)(void *ctx, int drive, unsigned *err);
     unsigned unanswered;
     int ended;                          /* the root's child has ended: the machine with it */
     int root_runs;                      /* the root is a program that runs on (the system VM's stub): its children's
