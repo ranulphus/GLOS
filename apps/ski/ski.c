@@ -215,9 +215,14 @@ static void time_text(unsigned long ms, char *out, size_t room)
     snprintf(out, room, "%lu:%02lu.%02lu", ms / 60000, ms / 1000 % 60, ms / 10 % 100);
 }
 
+static unsigned keys_now;               /* (the keys of the step drawn: the skier's pose) */
+
 static void ready(void)                 /* at the summit of the mountain chosen */
 {
     skirun_start(&run, seed, grade, mode);
+    keys_now = 0;                       /* (the skier standing: the last run's keys were left, and a demonstration
+                                           stopped while its skier braked gave the game back with the skier in a
+                                           snowplough at the summit; seen as 82 pixels in one gate, 2026-11-24) */
     phase = P_READY;
     watching = 0;
     stopped = 0;
@@ -435,7 +440,6 @@ static unsigned keys_held(void)
     return mouse_on ? mouse_keys() : 0;
 }
 
-static unsigned keys_now;               /* (the keys of the step drawn: the skier's pose) */
 
 static void step(void)
 {

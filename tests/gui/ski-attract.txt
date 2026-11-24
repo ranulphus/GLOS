@@ -5,6 +5,8 @@
 # gives it back there. (-attracts 2: it starts by itself twice and no more, so that the last picture is of a game
 # that stays as it is: with a third start two seconds on, a picture taken late was of the skier under way, as
 # in one gate on a busy machine, 2026-11-24.)
+# (The last Esc comes a second and a half into the next demonstration, with its skier braking: the game given
+# back has the skier standing again. The last run's keys were once left for the picture: a snowplough at the summit.)
 run SKI.EXE -demo 7 -grade 2 -attract 2000 -attracts 2 -speed 4 -table C:\\OUT\\SKIATT.DAT -day 20261121
 wait "Fall Line"
 said SKI ready seed=7 grade=2 mode=0 day=0
@@ -25,6 +27,7 @@ pause 7000
 within 120
 said SKI demonstration next seed=160163
 said SKI ready seed=160163 grade=2 mode=0 day=0
+pause 1500
 key esc
 said SKI demonstration stopped
 shot back "Fall Line"
