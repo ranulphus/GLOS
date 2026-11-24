@@ -144,6 +144,33 @@ void watch_path(const char *path)
     irq_restore(f);
 }
 
+/* Whether path (as a DOS call has it) is a whole one, "X:\..." with every part a short name (8.3, no wildcard):
+   then it names its folder as the watches' (TRUENAME's) do, long-name call or not. */
+static int short_whole(u32 lin)
+{
+    u32 i, part = 0, ext = 0, dot = 0;
+    char c;
+
+    if (!vm_rd8(lin) || vm_rd8(lin + 1) != ':' || (vm_rd8(lin + 2) != '\\' && vm_rd8(lin + 2) != '/'))
+        return 0;
+    for (i = 3; i < 79 && (c = (char)vm_rd8(lin + i)) != 0; i++) {
+        if (c == '\\' || c == '/') {
+            if (!part)
+                return 0;
+            part = ext = dot = 0;
+        } else if (c == '.') {
+            if (dot++ || !part)
+                return 0;               /* (two dots, or a part that begins with one: not a short name) */
+        } else if (c == ' ' || c == '*' || c == '?' || c == '+' || c == ',' || c == ';' || c == '=' || c == '['
+                   || c == ']' || (unsigned char)c < 0x20) {
+            return 0;
+        } else if (dot ? ++ext > 3 : ++part > 8) {
+            return 0;
+        }
+    }
+    return i < 79 && part;
+}
+
 /* A DOS call about to be made (the VM thread's, trap context): a path at DS:DX (or DS:SI for 6Ch). */
 void watch_int21(u16 ax, u16 bx, u16 cx, u16 dx, u32 dx_lin, u32 si_lin)
 {
@@ -189,6 +216,25 @@ void watch_int21(u16 ax, u16 bx, u16 cx, u16 dx, u32 dx_lin, u32 si_lin)
             if ((bx & 0xFF) != 1)
                 return;
         } else if (al != 0x39 && al != 0x3A && al != 0x41 && al != 0x56) {
+            return;
+        }
+        /* (a whole path of short names, as a DJGPP program gives on a native GLOS, whose own DOS has long names:
+           the watches its folder's and file's alone, as for the short-name calls. A pattern (7141h, SI 1) or a
+           rename: every watch on the drive, as before.) */
+        if (al != 0x56 && short_whole(lin)) {   /* (a pattern has a wildcard: not one) */
+            u32 k;
+
+            for (k = 0; k < WATCHES && !w[k].app; k++)
+                ;
+            if (k == WATCHES)
+                return;
+            for (i = 0; i < sizeof p - 1; i++) {
+                p[i] = (char)vm_rd8(lin + i);
+                if (!p[i])
+                    break;
+            }
+            p[i] = 0;
+            watch_path(p);
             return;
         }
         if (al != 0x56 && vm_rd8(lin) && vm_rd8(lin + 1) == ':')

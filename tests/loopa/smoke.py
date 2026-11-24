@@ -42,9 +42,7 @@ GUI_SCRIPT = "calc"                             # (a short one: the Calculator o
 FLOPPY_ROOM = 607232                            # (GLOSK.PAK on the 720 KB setup floppy: loopa-floppy's room)
 # APITEST's cases that fail natively for a reason known and owed, shown on the step's line (never hidden): a case
 # that starts to pass is said too, so the entry goes.
-APITEST_KNOWN_NATIVE = {
-    "fs-watch": "a folder's watch isn't told of GLOS's own DOS's changes yet (native work owed)",
-}
+APITEST_KNOWN_NATIVE = {}               # (fs-watch, until 2026-11-24's kernel/dos/watch.c: long-name calls' paths)
 SILENT_FAULTS = re.compile(r"GLOS-PANIC|GLOS-WARN pmm-|GLOS-WARN mm-kernel-lin|vif-stuck")
 
 
