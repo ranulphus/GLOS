@@ -16,6 +16,8 @@ struct ata_io {
     void (*out16s)(void *ctx, unsigned port, const unsigned short *buf, unsigned count);
     unsigned long (*ms)(void *ctx);     /* a millisecond clock that runs with interrupts off (wraps) */
     void *ctx;
+    void (*hold)(void *ctx, int on);    /* a call's length (probe, read, write, verify, flush): no other thread's
+                                           meanwhile, where the clock lets other threads run (ide.c); 0: none */
 };
 
 enum {

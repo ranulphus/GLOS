@@ -797,6 +797,46 @@ them. DOSDIFF's 71A0h line is the one answer that knowingly differs from MS-DOS 
   flags), a longer current folder than the CDS's 64 bytes, and the kernel's own shell and SFTP, which still list
   and take short names when they go through DOS.
 
+### Interrupts during a call (2026-11-24)
+
+A DOS under GLOS does a call's work in the system VM, as any program's code: interrupts on, the PC's own taken
+by their handlers there, the other threads given their turns. GLOS's own DOS does that work in the kernel, and
+as first built it did it the way a trap is served, with interrupts off but at the disk's waits. Three things
+followed, all found by one case of Loop A's `thr` suite on the 486 (`interrupts`: an app's first thread counts
+its timer's signals while two more threads write files; 22 of 27 under FreeDOS, 7 to 14 natively):
+
+- the clock stood still for a call's length, and a timer's tick that came stayed unacknowledged, the line with
+  it, until the VM ran its own code again, which between an app's calls, one after another, is hardly ever;
+- the virtual interrupt flag came back from a call as the call's entry left it, off, so the VM took nothing
+  after it either;
+- the IDE driver's wait gave its turn away at every look at the clock and came straight back: beside busy
+  threads the thread serving DOS took a full share of the processor for a wait, and an app's timer handler
+  ran late by as many turns.
+
+So (`kernel/vm/vdos.c`, "interrupts during a call"; `kernel/drv/ide.c`):
+
+- **A call's work runs with interrupts on** (`vdos_int`: `sti` to `cli` around `dos21`). What it calls that
+  keeps its state by having them off turns them off for itself: the console's output and its keys, the clock's
+  reading, the BIOS's disk calls (`bios13`), the window below.
+- **The VM's waiting interrupts are taken during a call**, as a DOS takes them at its own `STI`: when a call
+  begins, at each run of sectors read or written, and at each look of a disk wait (`ide_wait_hook`). Three
+  bytes among DOS's tables (STI, NOP, RETF, at the layout's misc + 10h: the misc area is 20h bytes now) run in
+  the VM as a nested real-mode call, on the DPMI host's stack where a client runs, else on the caller's own a
+  little below its top. A handler that calls DOS from there is refused with the carry flag (InDOS or not: DOS
+  isn't entered twice), with a `GLOS-WARN` line.
+- **The virtual interrupt flag** is on for a call's length, and at the call's return it is the caller's again,
+  from the IRET frame.
+- **A disk wait** by the thread that serves DOS (`ide_patient`, a thread's own now) looks at the clock 64 times
+  in a tick and then sleeps to the next one, as the BIOS waits with the processor halted. Other threads' waits
+  are as they were (a moment with interrupts in, no other thread).
+- **One ATA call at a time** across threads (`struct ata_io`'s `hold`, the kernel's `k_hold`): a wait that
+  sleeps lets another thread run in the middle of a command, and that thread may want a disk too. The same
+  thread again passes. `tests/host/ata_test.c` checks that every port access comes under it and that each call
+  gives it back.
+
+What this doesn't do yet: DOS's own data is still one thread's (every call comes through the system VM's
+thread), so nothing here makes two machines' calls run at once; that is N6's.
+
 ## N3: booting and the boot manager
 
 ### GLOS's own start

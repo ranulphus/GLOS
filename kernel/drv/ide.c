@@ -45,18 +45,43 @@ static void k_out16s(void *ctx, unsigned port, const unsigned short *buf, unsign
     __asm__ volatile("cld; rep outsw" : "+S"(buf), "+c"(count) : "d"((u16)port) : "memory");
 }
 
-static int patient;
+static struct thread *patient;          /* the thread whose calls run with interrupts on (ide_patient): its waits
+                                           take no moment of their own */
 
-void ide_patient(int on) { patient = on; }
+static void (*wait_hook)(void);
+
+void ide_patient(int on) { patient = on ? current : 0; }
+
+void ide_wait_hook(void (*fn)(void)) { wait_hook = fn; }
 
 static unsigned long k_ms(void *ctx)
 {
     (void)ctx;
-    if (patient) {                      /* (other threads meanwhile: ide.h) */
+    if (patient == current) {
+        /* The system VM's DOS at work (kernel/vm/vdos.c): its call runs with interrupts on, as a program's wait
+           for its disk does in the VM, so the clock ticks and other threads have their turns by the scheduler's
+           own choice. (Until 2026-11-24 each look at the clock here gave the rest of the turn away, thread_yield:
+           a wait looks hundreds of times, and beside one busy thread a DOS call took as many of that thread's
+           turns.) The VM's own interrupts that wait are taken here too (the hook). */
+        static struct waitq nap;
+        static u32 at, looks;
+        u32 now;
+
         sti();
-        thread_yield();
-        cli();
-        return timer_ticks();
+        if (wait_hook)
+            wait_hook();
+        /* A wait that goes on is slept through a tick at a time after the first looks: the BIOS waits for a
+           disk with the processor halted, and a wait that kept looking took this thread's full share of it
+           from the others (an app's timer handler came late by the other threads' turns). */
+        now = timer_ticks();
+        if (now != at)
+            at = now, looks = 0;
+        else if (++looks >= 64) {
+            thread_wait(&nap, now + 1 ? now + 1 : 1);       /* (0 would be no end to it) */
+            looks = 0;
+            now = timer_ticks();
+        }
+        return now;
     }
     preempt_disable();                  /* (interrupts in for a moment, no other thread) */
     sti();
@@ -66,7 +91,31 @@ static unsigned long k_ms(void *ctx)
     return timer_ticks();
 }
 
-static const struct ata_io kio = { k_in8, k_out8, k_in16s, k_out16s, k_ms, 0 };
+/* One thread's call at a time: a patient wait lets other threads run in the middle of a command (ide_patient), and
+   one of them may want a disk too (a native machine's volume beside the system VM's DOS). The same thread again
+   passes (a call made within a call's wait would be its own fault). */
+static struct thread *holder;
+static struct waitq holdq;
+static u32 held;
+
+static void k_hold(void *ctx, int on)
+{
+    u32 f = irq_save();
+
+    (void)ctx;
+    if (on) {
+        while (holder && holder != current)
+            thread_block(&holdq);
+        holder = current;
+        held++;
+    } else if (held && !--held) {
+        holder = 0;
+        thread_wake(&holdq);
+    }
+    irq_restore(f);
+}
+
+static const struct ata_io kio = { k_in8, k_out8, k_in16s, k_out16s, k_ms, 0, k_hold };
 
 static void add_chan(unsigned base, unsigned ctl)
 {

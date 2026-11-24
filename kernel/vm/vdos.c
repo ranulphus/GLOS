@@ -20,6 +20,7 @@
 #include "arch.h"
 #include "clock.h"
 #include "dpmi.h"
+#include "io.h"
 #include "kprintf.h"
 #include "timer.h"
 #include "vm.h"
@@ -41,6 +42,17 @@ static struct ata_dev *cdev;
 static unsigned long cbase;
 static int ready, mounted, unanswered;
 
+static void vd_window(void);
+
+/* GLOS's clock, read with interrupts off (a call's work runs with them on: vdos_int). */
+static u32 local_now(void)
+{
+    u32 f = irq_save(), t = clock_local();
+
+    irq_restore(f);
+    return t;
+}
+
 /* ---- the BIOS's disks
 
    A disk GLOS has no driver for is read and written by the BIOS's INT 13h, as nested real-mode calls from the
@@ -59,10 +71,15 @@ static int cbios;                               /* C: is read by the BIOS's call
 /* INT 13h: 0, or the BIOS's error (FFh: none said). */
 static int bios13(struct rmregs *r)
 {
+    u32 f = irq_save();                         /* (a call's work runs with interrupts on: vdos_int) */
+    int made;
+
     r->ss = (u16)xseg;
     r->sp = X_HEAD;
     r->flags = 2;
-    if (rm_call(0, r, RM_INT, 0x13, 0, 0) != 0)
+    made = rm_call(0, r, RM_INT, 0x13, 0, 0) == 0;
+    irq_restore(f);
+    if (!made)
         return 0xFF;
     if (!(r->flags & 1))
         return 0;
@@ -145,6 +162,7 @@ int vdos_usb_bios(void)
 static int c_read(void *ctx, unsigned long lba, unsigned char *buf, unsigned count)
 {
     (void)ctx;
+    vd_window();
     if (cbios)
         return bios_rw(0, (u32)(cbase + lba), buf, count) != 0;
     return cache_kread(0x80, cdev, (u32)(cbase + lba), count, buf) != 0;
@@ -153,6 +171,7 @@ static int c_read(void *ctx, unsigned long lba, unsigned char *buf, unsigned cou
 static int c_write(void *ctx, unsigned long lba, const unsigned char *buf, unsigned count)
 {
     (void)ctx;
+    vd_window();
     if (cbios)
         return bios_rw(1, (u32)(cbase + lba), (u8 *)buf, count) != 0;
     return cache_kwrite(0x80, cdev, (u32)(cbase + lba), count, buf) != 0;
@@ -162,7 +181,7 @@ static unsigned long c_now(void *ctx)
 {
     struct dos_date d;
     struct dos_time t;
-    u32 local = clock_local();
+    u32 local = local_now();
 
     (void)ctx;
     if (local < 315532800u)
@@ -290,6 +309,8 @@ static void mount_c(void)
 static void vd_out(void *ctx, const char *s, unsigned n)
 {
     struct trapframe f;
+    u32 fl = irq_save();                        /* (the agent's and the console's own state: interrupts off, as in
+                                                   every trap's path; the call's work runs with them on) */
 
     (void)ctx;
     for (; n; n--, s++) {
@@ -297,11 +318,12 @@ static void vd_out(void *ctx, const char *s, unsigned n)
         if (!agent_vm_int29(&f))
             vcon_tty(s, 1);
     }
+    irq_restore(fl);
 }
 
 static unsigned long vd_now(void *ctx)
 {
-    u32 local = clock_local();
+    u32 local = local_now();
 
     (void)ctx;
     return local > 315532800u ? local - 315532800u : 0;
@@ -311,11 +333,21 @@ static unsigned long vd_now(void *ctx)
    type's) into GLOS's DOS's ring when it is empty, one at a time, as DOS takes them through INT 16h: so a program
    that reads a line through DOS and then a key through INT 16h finds that key still in the BIOS's buffer. For a
    call that isn't input, only Ctrl-C is taken. */
+static void vd_fill1(int input);
+
 static void vd_fill(void *ctx, int input)
+{
+    u32 f = irq_save();
+
+    (void)ctx;
+    vd_fill1(input);
+    irq_restore(f);
+}
+
+static void vd_fill1(int input)
 {
     u32 head = vm_rd16(0x41A), tail = vm_rd16(0x41C), start = vm_rd16(0x480), end = vm_rd16(0x482), key;
 
-    (void)ctx;
     if (head == tail || dos_key_peek(&vd) >= 0)
         return;
     if (start < 0x1E || end > 0x100 || start >= end)
@@ -340,6 +372,52 @@ static int vd_wait(void *ctx)
    handler), one a program's INT 23h returns to, and an IRET that ends INT 2Fh's chain. */
 enum { V21, V20, V29, V23, VC23, NV };
 static u32 arpl[NV];                            /* (seg << 16 | off) */
+
+/* ---- interrupts during a call
+
+   A DOS under GLOS does a call's work in the VM, as any program's code: interrupts on, the PC's own taken by
+   their handlers there, other threads given their turns by the scheduler. GLOS's own DOS does that work in the
+   kernel, in a trap's path, where interrupts are off: the clock stood still for a call's length, no other thread
+   ran but at the disk's waits, and a timer's tick that came stayed unacknowledged (the line with it) until the
+   VM was back in its own code, which for an app's calls, one after another, is hardly ever. An app's first thread
+   got 7 to 14 of 27 alarms on the 486 while two others wrote files (thr's `interrupts`; 22 under a DOS). So:
+
+   - a call's work runs with interrupts on (vdos_int: sti to cli; the IDE driver's waits take no moment of their
+     own then, ide_patient); what it calls that keeps its own state by having them off turns them off for
+     itself (the console's output and keys, the BIOS's disk calls, the windows below);
+   - an interrupt of the VM's that waits is taken, as DOS takes it, when a call begins, at each sector read or
+     written and at each turn of a disk wait (ide_wait_hook): three bytes of code among DOS's tables (STI, NOP,
+     RETF) run in the VM, a nested real-mode call, on the DPMI host's stack where a client runs, else on the
+     caller's own a little below its top. A program's handler that calls DOS from there, InDOS set or not, is
+     refused (vdos_int): DOS is not entered twice. */
+static struct trapframe *call_tf;               /* the caller's frame while a call is at work */
+static u32 win;                                 /* the three bytes (seg << 16 | off) */
+static u8 in_window;
+static u32 reentered;
+
+static void vd_window(void)
+{
+    struct rmregs r;
+    u32 f;
+
+    if (current != vm.thread || !call_tf || in_window || !vpic_pending(&vm.pic))
+        return;
+    memset(&r, 0, sizeof r);
+    if (!dctx) {
+        u32 sp = call_tf->esp & 0xFFFF;
+
+        if (sp < 0x180)
+            return;
+        r.ss = (u16)call_tf->ss, r.sp = (u16)(sp - 0x40);
+    }
+    r.cs = (u16)(win >> 16), r.ip = (u16)win;
+    r.flags = 2;
+    f = irq_save();
+    in_window = 1;
+    rm_call(0, &r, RM_FAR, 0, 0, 0);
+    in_window = 0;
+    irq_restore(f);
+}
 static struct dos_regs86 c23;                   /* the call Ctrl-C stopped: its registers, where its INT was (a */
 static u32 c23_sp, c23_at;                      /* call made again may wait), whether it came through the vector */
 static int c23_via;
@@ -385,6 +463,10 @@ int vdos_init(struct bootinfo *bi)
         arpl[i] = (u32)(a >> 4) << 16 | (u32)((a & 0xF) + 2 * i);
     }
     mem[a + 2 * NV] = 0xCF;                     /* (IRET) */
+    a = vd.lay.misc + 0x10;                     /* the window: STI, NOP, RETF */
+    mem[a] = 0xFB, mem[a + 1] = 0x90, mem[a + 2] = 0xCB;
+    win = (u32)(a >> 4) << 16 | (u32)(a & 0xF);
+    ide_wait_hook(vd_window);
     set_vec(0x21, arpl[V21]), set_vec(0x20, arpl[V20]), set_vec(0x29, arpl[V29]), set_vec(0x23, arpl[V23]);
     set_vec(0x2F, arpl[V21] + 2 * NV);          /* (INT 2Fh's chain ends here: GLOS's int2f_hook answers before it) */
     ready = 1;
@@ -438,6 +520,13 @@ void vdos_int(struct trapframe *tf, u8 n, u32 ret, u32 at, int via_arpl)
     u32 vif0 = vm.thread->vif;
     int res;
 
+    if (call_tf) {                              /* from an interrupt taken in a call's window: not twice */
+        if (reentered++ < 8)
+            kprintf("GLOS-WARN native: INT %02xh ax=%04x from an interrupt while DOS is in a call: refused\n", n,
+                    tf->eax & 0xFFFF);
+        tf->eflags |= 1;
+        return;
+    }
     if (!mounted)
         mount_c();
     to_regs(tf, &r, ret);
@@ -448,18 +537,25 @@ void vdos_int(struct trapframe *tf, u8 n, u32 ret, u32 at, int via_arpl)
        95 of the 163 jobs on the owner's bench G (2026-11-23), none on the hosted benches. The caller's own flag
        comes back at the call's end. */
     vm.thread->vif = 1;
-    /* The call, its disk's waits giving the processor to other threads (ide_patient): an app's own threads, the
-       mixer and the network go on while a program is in DOS, as they do while a DOS under GLOS is in the BIOS. */
+    call_tf = tf;
+    vd_window();                                /* (one that waits now is taken at once, as at DOS's own STI: a call
+                                                   with no disk wait in it has no other moment, and an app's calls
+                                                   come one after another with the VM never back in its own code) */
+    /* The call, its work with interrupts on ("interrupts during a call", above): an app's own threads, the mixer
+       and the network go on while a program is in DOS, as they do while a DOS under GLOS runs in the VM. */
     ide_patient(1);
     vm_wr8(vm.indos, (u8)(vm_rd8(vm.indos) + 1));        /* (InDOS, as a DOS has it during a call: the agent's hooks
                                                            and the kill look at it) */
+    sti();
     res = n == 0x20 ? dos20(&vd, &r) : dos21(&vd, &r);
+    cli();
     vm_wr8(vm.indos, (u8)(vm_rd8(vm.indos) - 1));
     ide_patient(0);
+    call_tf = 0;
     vm.thread->vif = vif0;
     if (res == DOS21_GONE) {                    /* a key waited for: back to the INT, the VM idling meanwhile */
         if (via_arpl) {
-            push16(tf, tf->eflags & 0xFFFF);
+            push16(tf, (tf->eflags & 0xFDFF) | vif0 << 9);     /* (the caller's own interrupt flag in the frame) */
             push16(tf, tf->cs & 0xFFFF);
             push16(tf, ret & 0xFFFF);
             tf->cs = arpl[n == 0x20 ? V20 : V21] >> 16;
@@ -529,6 +625,8 @@ int vdos_arpl(struct trapframe *tf)
     tf->cs = cs;
     tf->eip = ip;
     tf->eflags = (tf->eflags & ~0x0FD5u) | (f & 0x0FD5u);
+    vm.thread->vif = (f >> 9) & 1;              /* (the IRET's: the caller's interrupt flag, as the frame has it;
+                                                   left off until 2026-11-24 for a call chained to by a far jump) */
     switch (i) {
     case V21:
     case V20:

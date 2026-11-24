@@ -253,7 +253,7 @@ static void probe_as_is(struct ata_chan *ch, struct ata_dev *d)
         d->multiple = d->id[59] & 0xFF;     /* (what the BIOS set; 0: single sectors) */
 }
 
-int ata_probe(struct ata_chan *ch, struct ata_dev d[2], int flags)
+static int probe_(struct ata_chan *ch, struct ata_dev d[2], int flags)
 {
     unsigned char s0, s1;
     unsigned long t0;
@@ -342,6 +342,19 @@ int ata_probe(struct ata_chan *ch, struct ata_dev d[2], int flags)
     }
     control(ch, 0);
     return ATA_OK;
+}
+
+int ata_probe(struct ata_chan *ch, struct ata_dev d[2], int flags)
+{
+    const struct ata_io *io = ch->io;
+    int r;
+
+    if (io->hold)
+        io->hold(io->ctx, 1);
+    r = probe_(ch, d, flags);
+    if (io->hold)
+        io->hold(io->ctx, 0);
+    return r;
 }
 
 /* ---- reading and writing */
@@ -461,19 +474,47 @@ static int transfer(struct ata_dev *d, unsigned long lo, unsigned long hi, unsig
     return r;
 }
 
-int ata_read(struct ata_dev *d, unsigned long lba_lo, unsigned long lba_hi, unsigned long n, void *buf,
+static int read_(struct ata_dev *d, unsigned long lba_lo, unsigned long lba_hi, unsigned long n, void *buf,
              unsigned long *done)
 {
     return transfer(d, lba_lo, lba_hi, n, (unsigned char *)buf, done, 0);
 }
 
-int ata_write(struct ata_dev *d, unsigned long lba_lo, unsigned long lba_hi, unsigned long n, const void *buf,
+int ata_read(struct ata_dev *d, unsigned long lba_lo, unsigned long lba_hi, unsigned long n, void *buf,
+             unsigned long *done)
+{
+    const struct ata_io *io = d->ch->io;
+    int r;
+
+    if (io->hold)
+        io->hold(io->ctx, 1);
+    r = read_(d, lba_lo, lba_hi, n, buf, done);
+    if (io->hold)
+        io->hold(io->ctx, 0);
+    return r;
+}
+
+static int write_(struct ata_dev *d, unsigned long lba_lo, unsigned long lba_hi, unsigned long n, const void *buf,
               unsigned long *done)
 {
     return transfer(d, lba_lo, lba_hi, n, (unsigned char *)buf, done, 1);
 }
 
-int ata_verify(struct ata_dev *d, unsigned long lba_lo, unsigned long lba_hi, unsigned long n, unsigned long *done)
+int ata_write(struct ata_dev *d, unsigned long lba_lo, unsigned long lba_hi, unsigned long n, const void *buf,
+              unsigned long *done)
+{
+    const struct ata_io *io = d->ch->io;
+    int r;
+
+    if (io->hold)
+        io->hold(io->ctx, 1);
+    r = write_(d, lba_lo, lba_hi, n, buf, done);
+    if (io->hold)
+        io->hold(io->ctx, 0);
+    return r;
+}
+
+static int verify_(struct ata_dev *d, unsigned long lba_lo, unsigned long lba_hi, unsigned long n, unsigned long *done)
 {
     struct ata_chan *ch = d->ch;
     unsigned long did = 0;
@@ -512,7 +553,20 @@ int ata_verify(struct ata_dev *d, unsigned long lba_lo, unsigned long lba_hi, un
     return r;
 }
 
-int ata_flush(struct ata_dev *d)
+int ata_verify(struct ata_dev *d, unsigned long lba_lo, unsigned long lba_hi, unsigned long n, unsigned long *done)
+{
+    const struct ata_io *io = d->ch->io;
+    int r;
+
+    if (io->hold)
+        io->hold(io->ctx, 1);
+    r = verify_(d, lba_lo, lba_hi, n, done);
+    if (io->hold)
+        io->hold(io->ctx, 0);
+    return r;
+}
+
+static int flush_(struct ata_dev *d)
 {
     struct ata_chan *ch = d->ch;
     int r;
@@ -527,4 +581,17 @@ int ata_flush(struct ata_dev *d)
         r = block_ready(d, ATA_T_CMD * 3, 0);   /* (a big cache takes a while) */
     }
     return finish(d, r);
+}
+
+int ata_flush(struct ata_dev *d)
+{
+    const struct ata_io *io = d->ch->io;
+    int r;
+
+    if (io->hold)
+        io->hold(io->ctx, 1);
+    r = flush_(d);
+    if (io->hold)
+        io->hold(io->ctx, 0);
+    return r;
 }

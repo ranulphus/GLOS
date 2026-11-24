@@ -287,7 +287,8 @@ def native_args(name, args):
     work = os.path.join(ROOT, "out", "native-img", name)
     os.makedirs(work, exist_ok=True)
     with open(os.path.join(work, "AUTOEXEC.BAT"), "w", newline="") as f:
-        f.write("@ECHO OFF\r\nSET PATH=C:\\HX;C:\\FREEDOS\\BIN\r\nIF EXIST C:\\RUN.BAT CALL C:\\RUN.BAT\r\n"
+        # (C:\OUT: the harness's tools keep their files there, VECCHK's saved vectors for one; Loop A's own disk has it)
+        f.write("@ECHO OFF\r\nSET PATH=C:\\HX;C:\\FREEDOS\\BIN\r\nMD C:\\OUT\r\nIF EXIST C:\\RUN.BAT CALL C:\\RUN.BAT\r\n"
                 + ("IF EXIST C:\\RUN.BAT C:\\HX\\UTEXIT 125\r\n" if boot == "glosshell" else ""))
     mouse = "--mouse" in rest and rest[rest.index("--mouse") + 1] != "none"
     with open(os.path.join(work, "RUN.BAT"), "w", newline="") as f:
@@ -3725,12 +3726,15 @@ def sess_agent(profile, card):
     checks["ran"] = "HX-SESS done" in text and left is not None
     checks.update({"kept-" + k: v for k, v in (left or {}).items()})
     checks.update(sess_checks(text))
-    checks["one-each"] = len(re.findall(r"GLOS-SESSION begin ", text)) == len(SESS_STEPS) + 5   # no failed EXECs
+    # (natively RUN.BAT's own lines are sessions too, before the case's: counted from AUTOEXEC.BAT's end)
+    mine = text[text.find("GLOS-SHELL autoexec done"):] if NATIVE else text
+    checks["one-each"] = len(re.findall(r"GLOS-SESSION begin ", mine)) == len(SESS_STEPS) + 5   # no failed EXECs
     checks["kill-reason"] = bool(re.search(r"GLOS-KILL psp=\w+ at=\S+ ticks=\d+ reason=agent", text))
     checks["run-sessions"] = bool(re.search(r"GLOS-SESSION begin n=\d+ prog=ENABLE.EXE \S+ mode=03 direct=1", text)) \
         and bool(re.search(r"GLOS-SESSION begin n=\d+ prog=NOPROF.EXE \S+ mode=03 profile=PROFCHK.EXE\n", text)) \
         and "HX-PROF var=yes path=C:\\PROF" in text and text.count("GLOS-SESSION direct-end") == 1
-    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text) and text.count("HX-VECCHK ok") == 2
+    # (VECCHK check: the case's own, and RUN.BAT's after GLOS.EXE where a DOS runs it)
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text) and text.count("HX-VECCHK ok") == (1 if NATIVE else 2)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s" % ("sess-" + tag, "PASS" if not bad else "FAIL",
                              "" if not bad else " failed: " + " ".join(bad)), not bad

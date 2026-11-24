@@ -754,7 +754,7 @@ void dos_m_init(struct dos_m *m, unsigned char *mem, unsigned long size, const s
 int dos_m_init_vm(struct dos_m *m, unsigned char *mem, unsigned long size, unsigned psp, unsigned top,
                   unsigned low_top, struct fsv_vol *v, int drive, int cp, unsigned extra, unsigned *extra_seg)
 {
-    unsigned long bytes = 0x12 + 0x70 + DOS_SDA_SIZE + 0x10 + 6 + (unsigned long)DOS_FILES * DOS_SFT_SIZE;
+    unsigned long bytes = 0x12 + 0x70 + DOS_SDA_SIZE + 0x20 + 6 + (unsigned long)DOS_FILES * DOS_SFT_SIZE;
     unsigned paras = (unsigned)((bytes + 15) / 16), seg, largest, i;
     struct dos_psp_init pin;
     unsigned long base;
@@ -782,7 +782,7 @@ int dos_m_init_vm(struct dos_m *m, unsigned char *mem, unsigned long size, unsig
     m->lay.lol = base + 0x12;
     m->lay.sda = m->lay.lol + 0x70;
     m->lay.misc = m->lay.sda + DOS_SDA_SIZE;
-    m->lay.sft = m->lay.misc + 0x10;
+    m->lay.sft = m->lay.misc + 0x20;            /* (misc: 32 bytes here, the last 16 the system VM's own: vdos.c) */
     m->lay.root_psp = psp;
     m->lay.first_mcb = psp - 1;
     m->lay.low_top = low_top;

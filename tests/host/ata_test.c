@@ -327,10 +327,23 @@ static struct drive *selected(void)
     return &ch.d[ch.sel];
 }
 
+/* The kernel's lock around a call (ata_io's hold: one thread's call at a time): every access to the ports
+   must come while it is held, and each call must give it back. */
+static int hold_depth, hold_calls, hold_outside;
+
+static void m_hold(void *ctx, int on)
+{
+    (void)ctx;
+    hold_depth += on ? 1 : -1;
+    hold_calls += on != 0;
+}
+
 static unsigned char m_in8(void *ctx, unsigned port)
 {
     struct drive *d = selected(), *o = &ch.d[!ch.sel];
     unsigned r;
+
+    hold_outside += hold_depth != 1;
 
     (void)ctx;
     ch.us++;
@@ -390,6 +403,7 @@ static void m_out8(void *ctx, unsigned port, unsigned char v)
     int i;
 
     (void)ctx;
+    hold_outside += hold_depth != 1;
     ch.us++;
     if (port == 0x3F6) {
         if ((ch.ctl & 0x04) && !(v & 0x04))
@@ -424,6 +438,8 @@ static void m_in16s(void *ctx, unsigned port, unsigned short *buf, unsigned coun
     struct drive *d = selected();
     unsigned i;
 
+    hold_outside += hold_depth != 1;
+
     (void)ctx;
     ch.us += count;
     if (port != 0x1F0 || !d->present || d->dir != 1 || !(d->status & 0x08) || d->busy) {
@@ -454,6 +470,8 @@ static void m_out16s(void *ctx, unsigned port, const unsigned short *buf, unsign
 {
     struct drive *d = selected();
     unsigned i;
+
+    hold_outside += hold_depth != 1;
 
     (void)ctx;
     ch.us += count;
@@ -498,7 +516,7 @@ static unsigned long m_ms(void *ctx)
     return (unsigned long)(ch.us / 1000);
 }
 
-static const struct ata_io io = { m_in8, m_out8, m_in16s, m_out16s, m_ms, 0 };
+static const struct ata_io io = { m_in8, m_out8, m_in16s, m_out16s, m_ms, 0, m_hold };
 
 static void setup(void)
 {
@@ -821,6 +839,8 @@ int main(void)
     t_rw("LBA48", 300000, 1, 1, 16);
     t_lba48();
     t_faults();
+    CHECK(hold_calls > 100 && !hold_depth && !hold_outside, "the lock: %d calls, depth %d at the end, %d accesses outside it",
+          hold_calls, hold_depth, hold_outside);
     printf("ata_test: %d failures\n", fails);
     return fails != 0;
 }
