@@ -105,6 +105,19 @@ Each driver's head names its source and its SHA-256.
   - **The FM test was too fast for a PCI chip** (found on the way): it waited for the chip's 80-microsecond
     timer by 200 reads of the status port, which on a PCI port take well under that. It now polls for the
     timer's flags, paced by port 80h, for up to 4 ms; the MPU-401's waits are paced the same way.
+- **Bench G's VIA VT8235 (2026-11-24 morning; the native-dos session ran it):** the driver's first silicon.
+  - **First run, refused:** the codec was found (its ID read as 434D434Dh) and `via_start` then refused
+    ("error=rate-or-size"). The controller's valid flag, left set by the codec read before, answered the next read
+    at once with old data: the rate read back after it was set was wrong, and so was that first ID. No emulator
+    models this controller.
+  - **Fixed:** every codec command carries the valid flag, which clears it, and a write is waited out before the
+    next access (as FreeBSD's VIA drivers do; the 686's path has the same change).
+  - **Second run:** the codec is a C-Media CMI9761 (434D4983h) with no variable rates, the case the DXS channel's
+    own rate converter is for. Playback starts at 22050 Hz: 86 interrupts a second, level with the mixer's
+    periods, no watchdog kick, on IRQ 12 shared with a UHCI the BIOS still holds. Not yet listened to.
+  - **Recording there** wants `[sound] rate = 48000` (the codec records at 48 kHz only).
+  - A refused "crystal" chip was listed in Devices on this PC, which has none: with `crystal = auto` a conflict
+    of the chip's default resources is now only logged.
 - **Bench A (the Rage 128 Pro since that evening), same build:** `write_combining = auto` turned its aperture
   on by itself (MTRR range 3, 32 MB at F0000000h).
 - **Owed:**
