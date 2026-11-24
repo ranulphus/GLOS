@@ -338,11 +338,49 @@ static int via_quiet(struct pci_dev *d, const char **how)
     return 0;
 }
 
+/* Intel's SMBus controllers (the ICH's, class 0C 05: bench F's ICH6 shares IRQ 5 with its CT5880, which was
+   refused for it on 2026-11-24). Its host interrupts only with HST_CNT's INTREN (I/O base + 2, bit 0) or the
+   host-notify enable (SLV_CMD, + 11h, bit 0) set; with HOSTC's SMB_SMI_EN (configuration 40h, bit 1) its
+   interrupts are an SMI's, never the line's. Quiet if none can come; a transfer under way with INTREN set is
+   somebody's (a DOS driver's); else the enables are cleared. Its I/O base is BAR 4 (configuration 20h). From
+   Intel's ICH data sheets (the SMBus controller's registers). */
+static int smb_match(const struct pci_dev *d) { return d->vendor == 0x8086 && d->class == 0x0C && d->subclass == 0x05; }
+
+static int smb_quiet(struct pci_dev *d, const char **how)
+{
+    u32 hostc = pci_read32(d->bus, d->dev, d->fn, 0x40);
+    u16 io = snd_io(d, 4);
+    u8 cnt, slv;
+    if (!io || !(hostc & 1)) {                  /* (its I/O not decoded, or the host off: it can't interrupt) */
+        *how = "off";
+        return 0;
+    }
+    if (hostc & 2) {
+        *how = "smi";
+        return 0;
+    }
+    cnt = inb((u16)(io + 2));
+    slv = inb((u16)(io + 0x11));
+    if (!(cnt & 1) && !(slv & 1)) {
+        *how = "no-intr";
+        return 0;
+    }
+    if ((cnt & 1) && (inb(io) & 1)) {           /* (HST_STS's HOST_BUSY: a transfer of somebody's) */
+        *how = "driven";
+        return -1;
+    }
+    outb((u16)(io + 2), (u8)(cnt & ~1));
+    outb((u16)(io + 0x11), (u8)(slv & ~1));
+    *how = "intr";
+    return 0;
+}
+
 static const struct quiet quiets[] = {
     { "uhci", uhci_match, uhci_quiet },
     { "ohci", ohci_match, ohci_quiet },
     { "mga", mga_match, mga_quiet },
     { "ehci", ehci_match, ehci_quiet },
+    { "smbus", smb_match, smb_quiet },
     { "cmi8738", cmi_match, cmi_quiet },
     { "es1371", es_match, es_quiet },
     { "ich97", ich_match, ich_quiet },

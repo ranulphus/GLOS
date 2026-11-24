@@ -18,6 +18,7 @@ u16 fake_ports[65536];
 static struct pci_dev fn[8];
 static int nfn;
 static u32 legsup[8];                           /* config C0h of each function */
+static u32 cfg40[8];                            /* config 40h (an SMBus controller's HOSTC) */
 static u32 command[8];                          /* config 04h: I/O and memory decoded unless a case says not */
 static u32 ohci[4096];                          /* an OHCI's registers (a Matrox card's 16 KB), where mm_dev_map leads */
 static u32 mapped;                              /* the address mm_dev_map was last asked for */
@@ -69,7 +70,8 @@ static int find(u32 bus, u32 dev, u32 f)
 u32 pci_read32(u32 bus, u32 dev, u32 f, u32 reg)
 {
     int i = find(bus, dev, f);
-    return i >= 0 && reg == 0xC0 ? legsup[i] : i >= 0 && reg == 4 ? command[i] : 0xFFFFFFFFu;
+    return i >= 0 && reg == 0xC0 ? legsup[i] : i >= 0 && reg == 4 ? command[i] : i >= 0 && reg == 0x40 ? cfg40[i]
+           : 0xFFFFFFFFu;
 }
 
 void pci_write32(u32 bus, u32 dev, u32 f, u32 reg, u32 v)
@@ -95,6 +97,7 @@ static struct pci_dev *add(u8 dev, u8 f, u16 vendor, u16 device, u8 cls, u8 sub,
     d->class = cls, d->subclass = sub, d->progif = progif, d->pin = pin, d->irq = irq;
     d->bar[4] = io ? (u32)io | 1u : 0;
     legsup[nfn] = 0;
+    cfg40[nfn] = 0;
     command[nfn] = 7;
     nfn++;
     return d;
@@ -303,6 +306,40 @@ int main(void)
     ohci[0] = 0x20, ohci[0x20 / 4] = 1, ohci[0x28 / 4] = 0x3F;
     CHECK(dev_take_line(nic, with, sizeof with) == -1 && other->keeper == DEV_DOS && ohci[0x28 / 4] == 0x3F);
     CHECK(strstr(logbuf, "class=ehci irq=10 why=driven") != NULL);
+
+    /* Intel's SMBus controller on a sound chip's line (bench F: the ICH6's and its CT5880 on IRQ 5). Its I/O at
+       BAR 4 (here 0500h): the host on, no interrupt enabled, quiet as it is; HOSTC's SMI routing, quiet; INTREN
+       left on with nothing under way, cleared; a transfer under way with it, somebody's */
+    reset();
+    other = add(31, 3, 0x8086, 0x266A, 0x0C, 0x05, 0x00, 2, 5, 0);
+    other->bar[4] = 0x0500 | 1;
+    cfg40[0] = 1;
+    nic = add(2, 1, 0x1274, 0x5880, 0x04, 0x01, 0x00, 1, 5, 0);
+    CHECK(dev_take_line(nic, with, sizeof with) == 0 && other->keeper == DEV_QUIET);
+    CHECK(strstr(logbuf, "GLOS-DEV quiet 00:1f.3 id=8086:266a class=smbus irq=5 how=no-intr\n") != NULL);
+    reset();
+    other = add(31, 3, 0x8086, 0x266A, 0x0C, 0x05, 0x00, 2, 5, 0);
+    other->bar[4] = 0x0500 | 1;
+    cfg40[0] = 3;
+    fake_ports[0x502] = 0x01;
+    nic = add(2, 1, 0x1274, 0x5880, 0x04, 0x01, 0x00, 1, 5, 0);
+    CHECK(dev_take_line(nic, with, sizeof with) == 0 && strstr(logbuf, "how=smi") != NULL && fake_ports[0x502] == 0x01);
+    reset();
+    other = add(31, 3, 0x8086, 0x266A, 0x0C, 0x05, 0x00, 2, 5, 0);
+    other->bar[4] = 0x0500 | 1;
+    cfg40[0] = 1;
+    fake_ports[0x502] = 0x41, fake_ports[0x511] = 0x01;
+    nic = add(2, 1, 0x1274, 0x5880, 0x04, 0x01, 0x00, 1, 5, 0);
+    CHECK(dev_take_line(nic, with, sizeof with) == 0 && strstr(logbuf, "how=intr") != NULL && fake_ports[0x502] == 0x40
+          && fake_ports[0x511] == 0x00);
+    reset();
+    other = add(31, 3, 0x8086, 0x266A, 0x0C, 0x05, 0x00, 2, 5, 0);
+    other->bar[4] = 0x0500 | 1;
+    cfg40[0] = 1;
+    fake_ports[0x500] = 0x01, fake_ports[0x502] = 0x01;
+    nic = add(2, 1, 0x1274, 0x5880, 0x04, 0x01, 0x00, 1, 5, 0);
+    CHECK(dev_take_line(nic, with, sizeof with) == -1 && other->keeper == DEV_DOS && fake_ports[0x502] == 0x01);
+    CHECK(strstr(logbuf, "class=smbus irq=5 why=driven") != NULL);
 
     /* The sound chips GLOS has drivers for (step D2), on the network card's line.
        An ES1371 with nothing enabled: quiet as it is, nothing written */

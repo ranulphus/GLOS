@@ -42,6 +42,12 @@ int ac97_start(struct ac97 *c)
         return -1;
     }
     c->vendor = ((u32)c->rd(c->ctx, R_VENDOR1) << 16) | c->rd(c->ctx, R_VENDOR2);
+    if (c->vendor == 0xFFFFFFFFu || c->vendor == 0) {   /* (nobody answering: reads all ones or all zeros, the
+                                                           power register's "ready" with them; bench F's CT5880
+                                                           held in reset, 2026-11-24) */
+        kprintf("GLOS-AC97 none vendor=%08x\n", c->vendor);
+        return -1;
+    }
     c->vra = (c->rd(c->ctx, R_EXTID) & 1) != 0;
     c->wr(c->ctx, R_MASTER, 0x0000);            /* the master at 0 dB, ... */
     c->wr(c->ctx, R_PCM, 0x0808);               /* ... the PCM out at 0 dB, ... */

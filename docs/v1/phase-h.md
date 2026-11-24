@@ -275,3 +275,31 @@ stays VBE on them; what changes is GLOS's GL programs and full-screen DOS-GL pro
 | A (IBM 300PL) | Rage 128 Pro | The OBJECTS saver (a full-screen GLOS window) drew right, and the desktop came back whole after the wake. Cushion in its desktop window drew right at 7 fps (the software renderer, as for any window). Echoes' ECHB, a full-screen DOS-GL program, ran nine runs on the card's CCE ring under GLOS. |
 | B (P3) | Radeon 7500 LE | write_combining = auto took the 64 MB range by itself. TEXCUBE (linked from 8148677) ran full screen on the card's command processor for a minute, then GLOS killed it (no close of DOS-GL's ran); DOS-GL's DPROBE (it only reads registers) then showed the case is real: surface 0 still set over the tiled depth buffer (`info=00030050 lower=0012c000 upper=001c1fff`). After GLOS's desktop mode set (`glos display on`, whose `radeon_surfaces_off` runs first) it read `info=00000000 lower=00000000`, as the untouched surfaces do. The desktop at 1024x768x16, over that range, was clean. The CMI8738 plays: the NEC EHCI on its line is quiet (a quiet driver for EHCI, after main a39561b refused the sound chip for it). |
 
+## Bench F's new cards: the CT5880 on a real chip (2026-11-24)
+
+The owner had fitted a CT5880 (1274:5880 rev 2) in bench F, whose G450 has given way to a Radeon X550 (PCIe;
+RV370, 1002:5b63; GeCube's HM550L, subsystem 18bc:1070, as its BIOS names it). Its GLOS (16 November's) refused the network card for a shared line; today's build took it (RTL8139
+on IRQ 11) and showed what was left:
+
+- **The sound card refused for the ICH6's SMBus controller** (8086:266a, on IRQ 5 with it and a UHCI), which had
+  no quiet driver. One now (`kernel/drv/dev.c`, `smb_quiet`, from Intel's ICH data sheets): quiet when neither
+  HST_CNT's INTREN nor SLV_CMD's host-notify enable is set, or when HOSTC routes it to SMI; a transfer under way
+  with INTREN set is somebody's. Bench F's: `how=no-intr`.
+- **The CT5880 found but silent**, not one interrupt, its DAC2 never moving. Three faults of the driver's that
+  86Box's ES1371 model hides:
+  1. *The codec was never answering.* Its "ready" read all ones (vendor `ffffffff`): STATUS bit 29 is the
+     CT5880's AC'97 reset line, 0 at power-on. Now pulsed (0, then 1, 20 ms) at every start, for revisions 2-4;
+     `ac97_start` takes a codec reading all ones or all zeros as none (`GLOS-AC97 none`).
+  2. *The converter's disables were read back*, and the chip reads `00470000` there whatever was written: every
+     write that kept them as read (the codec window's among them) turned the converter off. They are the
+     driver's own copy now.
+  3. *The converter was turned on before every rate was set* (DAC1's never was), which FreeBSD's es137x warns can
+     lock the chip until its power is cut: it did (a constant `00470000`, no progress after GLOS's restarts). Now
+     every rate (ADC, DAC1, DAC2) is set with the converter off, then it is turned on.
+- After a power cycle the TriTech codec answered (`vendor=54524123`) and the card played. Eight GLOS restarts in
+  a row since: all played, six at once and two after one more codec reset (about one start in three finds the
+  codec's ready bits still clear after half a second: it is reset again with a longer wake, up to three tries).
+  One of the eight read the codec's first vendor word as `ffff`: a codec read can still be lost now and then.
+- The watchdog's kick of an ES1371 now says the chip's registers every 64th time (`GLOS-ES kick n=...`).
+- Not yet: listening to it; recording on it; MIDI.
+

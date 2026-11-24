@@ -79,6 +79,7 @@ static struct {
     u16 io;
     u8 irq, claimed;
     u32 control, serial;
+    u32 srcdis;                         /* the converter's disable bits as last written (never read back: see below) */
     struct ac97 ac;
     u8 *buf, *rbuf;
     u32 phys, rphys, frames, rframes, irqs, half, rhalf;
@@ -95,14 +96,16 @@ static void us(u32 n)                   /* about n microseconds (a port read tak
         inb(0x80);
 }
 
-/* ---- the sample rate converter's RAM */
+/* ---- the sample rate converter's RAM
+   Its disable bits (22-19) are kept here, as last written, not read back from the register: a real CT5880 (bench
+   F, 2026-11-24, 1274:5880 rev 2) read 00470000h whatever was written (bit 22 among them), and every write that
+   kept the disables as read turned the converter off: DAC2 never ran, not one interrupt. 86Box reads 0 there. */
 static int src_ready(void)
 {
     u32 i;
     for (i = 0; i < 4096; i++) {
-        u32 v = rd32(SRC);
-        if (!(v & SRC_BUSY))
-            return (int)(v & SRC_KEEP) | 1;     /* (the disables, as they are; 1: ready) */
+        if (!(rd32(SRC) & SRC_BUSY))
+            return 1;
         us(1);
     }
     kprintf("GLOS-ES src busy\n");
@@ -111,33 +114,38 @@ static int src_ready(void)
 
 static void src_wr(u32 addr, u32 data)
 {
-    int r = src_ready();
-    wr32(SRC, ((u32)r & SRC_KEEP) | ((addr & 0x7F) << 25) | SRC_WE | (data & 0xFFFF));
+    src_ready();
+    wr32(SRC, es.srcdis | ((addr & 0x7F) << 25) | SRC_WE | (data & 0xFFFF));
 }
 
 static u32 src_rd(u32 addr)
 {
-    int r = src_ready();
-    wr32(SRC, ((u32)r & SRC_KEEP) | ((addr & 0x7F) << 25));
+    src_ready();
+    wr32(SRC, es.srcdis | ((addr & 0x7F) << 25));
     src_ready();
     return rd32(SRC) & 0xFFFF;
 }
 
 static void src_disables(u32 keep)      /* the disable bits set to these */
 {
+    es.srcdis = keep & SRC_KEEP;
     src_ready();
-    wr32(SRC, keep & SRC_KEEP);
+    wr32(SRC, es.srcdis);
 }
 
-/* DAC2's rate: its frequency in 1/32768ths of 3000 Hz. */
-static void dac2_rate(u32 rate)
+/* A DAC's rate (DAC1's at SR_DAC1, DAC2's at SR_DAC2): its frequency in 1/32768ths of 3000 Hz, set with that
+   DAC's conversion paused; the converter's other disables, the global one among them, left as they were (at
+   set-up it stays off until every rate is set). */
+static void dac_rate(u32 base, u32 dis, u32 rate)
 {
-    u32 freq = ((rate << 15) + 1500) / 3000;
-    src_disables(SRC_DIS_P1 | SRC_DIS_P2 | SRC_DIS_R1);
-    src_wr(SR_DAC2 + 1, (src_rd(SR_DAC2 + 1) & 0x00FF) | ((freq >> 5) & 0xFC00));
-    src_wr(SR_DAC2 + 3, freq & 0x7FFF);
-    src_disables(SRC_DIS_P1 | SRC_DIS_R1);      /* (DAC2's own disable cleared) */
+    u32 freq = ((rate << 15) + 1500) / 3000, was = es.srcdis;
+    src_disables(was | dis);
+    src_wr(base + 1, (src_rd(base + 1) & 0x00FF) | ((freq >> 5) & 0xFC00));
+    src_wr(base + 3, freq & 0x7FFF);
+    src_disables(was & ~dis);                   /* (its own disable cleared) */
 }
+
+static void dac2_rate(u32 rate) { dac_rate(SR_DAC2, SRC_DIS_P2, rate); }
 
 /* The ADC's rate: N (the 48 kHz input's step, odd ones of 3, 9, 11, 13 and 15 avoided), the truncation, the
    frequency; its volume N's. */
@@ -187,7 +195,7 @@ static u32 codec_window(void)
     u32 orig, i;
     src_ready();
     orig = rd32(SRC);
-    wr32(SRC, (orig & SRC_KEEP) | 0x00010000u);
+    wr32(SRC, es.srcdis | 0x00010000u);
     for (i = 0; i < 4096 && (rd32(SRC) & 0x00870000u) != 0; i++)
         ;
     for (i = 0; i < 4096 && (rd32(SRC) & 0x00870000u) != 0x00010000u; i++)
@@ -197,8 +205,9 @@ static u32 codec_window(void)
 
 static void codec_window_end(u32 orig)
 {
+    (void)orig;                                 /* (its disables as written, not as read: src_ready's note) */
     src_ready();
-    wr32(SRC, orig & SRC_KEEP);
+    wr32(SRC, es.srcdis);
 }
 
 static u16 codec_rd(void *ctx, u8 reg)
@@ -240,6 +249,7 @@ int es1371_init(void)
     struct pci_dev *pd = 0;
     char w[8], r[48];
     u32 cmd, i;
+    int ct5880, ok;
     for (i = 0; i < sizeof ids / sizeof ids[0] && !pd; i++)
         pd = pci_find(0x1274, ids[i], 0);
     if (!pd || dev_pci_off(pd, "es1371"))
@@ -265,6 +275,17 @@ int es1371_init(void)
     wr32(CONTROL, 0);                           /* every channel stopped, ... */
     wr32(SERIAL, 0);
     wr32(LEGACY, 0);                            /* ... no SB trapping */
+    if (pd->device == 0x5880 && pd->rev >= 2 && pd->rev <= 4) {
+        /* The CT5880's revisions C to E: STATUS bit 29 is their AC'97 codec's reset line, 0 (as at power-on) holding
+           it in reset. Pulsed on every start, then 20 ms for the codec to wake, before the link's warm reset (as
+           Linux's ens1371 sets it, its behaviour, not its code). Bench F, 2026-11-24: never set, the codec never
+           answered (all ones); set once, it answered after a power cycle but not after GLOS's own restart, with
+           the bit already set (no edge: all zeros). */
+        wr32(STATUS, 0);
+        us(100);
+        wr32(STATUS, 1u << 29);
+        us(20000);
+    }
     wr32(CONTROL, C_SYNCRES);                   /* the AC'97 link's warm reset */
     us(20);
     wr32(CONTROL, 0);
@@ -278,11 +299,33 @@ int es1371_init(void)
     src_wr(SR_VOL_ADC, 1 << 12), src_wr(SR_VOL_ADC + 1, 1 << 12);
     src_wr(SR_VOL_DAC1, 1 << 12), src_wr(SR_VOL_DAC1 + 1, 1 << 12);
     src_wr(SR_VOL_DAC2, 1 << 12), src_wr(SR_VOL_DAC2 + 1, 1 << 12);
-    adc_rate(22050);
+    adc_rate(22050);                            /* (every rate set before the converter runs: on with one unset it
+                                                   can stop the chip until the PC's power is cut, FreeBSD's
+                                                   es137x says) */
+    dac_rate(SR_DAC1, SRC_DIS_P1, 22050);
     dac2_rate(22050);
     src_disables(SRC_DIS_P1 | SRC_DIS_R1);      /* on: DAC2 only (DAC1 and the ADC until they are used) */
     es.ac.rd = codec_rd, es.ac.wr = codec_wr, es.ac.pause = codec_pause, es.ac.ctx = 0;
-    if (ac97_start(&es.ac) != 0) {
+    ct5880 = pd->device == 0x5880 && pd->rev >= 2 && pd->rev <= 4;
+    ok = 0;
+    for (i = 0; ct5880 && i < 3 && !(ok = ac97_start(&es.ac) == 0); i++)
+        if (i < 2) {
+            /* (bench F's CT5880, about one GLOS start in three: the codec answers, its ready bits still clear
+               after the half second ac97_start waits. Its reset pulsed again, a longer wake, the link reset
+               again, and another try: three in all) */
+            kprintf("GLOS-ES codec again try=%u\n", i + 2);
+            wr32(STATUS, 0);
+            us(1000);
+            wr32(STATUS, 1u << 29);
+            us(100000);
+            wr32(CONTROL, C_SYNCRES);
+            us(20);
+            wr32(CONTROL, 0);
+            us(2000);
+        }
+    if (!ct5880)
+        ok = ac97_start(&es.ac) == 0;
+    if (!ok) {
         kprintf("GLOS-ES refused no-codec\n");
         dev_note(pci_where(pd, w), "es1371", DEVS_REFUSED, "no-codec", 0);
         return -1;
@@ -383,7 +426,23 @@ static void es_stop(void)
 }
 
 static int es_running(void) { return es.running; }
-static void es_kick(void) { irq(0); }
+/* The mixer's watchdog (mixer_tick: silent for 128 ticks): the status looked at as an interrupt would, and every
+   64th time the chip's own words said, so that a card that never interrupts says why (bench F's CT5880,
+   2026-11-24: not one interrupt, and none seen by looking either). DAC2's frame register (page 0Ch, 3Ch) and its
+   sample count (28h) have the counts in their upper halves: still, DAC2 has not run. */
+static void es_kick(void)
+{
+    static u32 n;
+    irq(0);
+    if (n++ % 64 == 0) {
+        u32 page = rd32(MEMPAGE) & 0x0F, fsz;
+        wr32(MEMPAGE, 0x0C);
+        fsz = rd32(0x3C);
+        wr32(MEMPAGE, page);
+        kprintf("GLOS-ES kick n=%u st=%08x ctl=%08x ser=%08x src=%08x frame=%08x count=%08x\n", n, rd32(STATUS),
+                rd32(CONTROL), rd32(SERIAL), rd32(SRC), fsz, rd32(DAC2_SCOUNT));
+    }
+}
 
 static u32 es_irqs(void) { return es.irqs; }
 static u32 es_errors(void) { return 0; }

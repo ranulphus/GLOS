@@ -134,6 +134,9 @@ share a line with one. So the first half of D2 was built the same morning:
   nothing). Four at most. With one driver on a line its handler is the line's, as before:
   `GLOS-DEV line irq=11 drivers=2` is said when a chain is made.
 - **The rule:** another function of GLOS's own on the line is not in the way (`dev_take_line`).
+- **Quiet drivers for EHCI controllers and Intel's SMBus controllers** (2026-11-24: bench B's CMI8738 was refused
+  for a NEC EHCI on its line, bench F's CT5880 for the ICH6's SMBus): quiet while none of their interrupt enables
+  is set (the SMBus's routed to SMI counts as quiet too).
 - **Quiet drivers for the sound chips GLOS drives** (CMI8738, ES1371 family, Intel ICH AC'97, VIA AC'97): a
   network card that shares its line with one takes the line if no channel of the chip runs with its
   interrupt enabled (`how=no-intr`, or `how=intr` when an enable had been left on and was cleared); a chip
