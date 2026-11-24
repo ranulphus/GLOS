@@ -17,7 +17,8 @@ struct dos_psp_init {
     const char *tail;                   /* its command tail without the length or the 0Dh ("" none) */
 };
 
-/* The 256 bytes of a PSP at p. A command tail over 126 bytes is cut there (DOS's limit). */
+/* The 256 bytes of a PSP at p. A command tail over 126 bytes is cut there (DOS's limit), its length said as 127
+   (Windows 9x's way: the whole line is in the environment's CMDLINE). */
 void dos_psp_make(unsigned char *p, const struct dos_psp_init *in);
 
 /* An environment for a child at dst (room bytes): the parent's strings (env: "A=1\0B=2\0\0"), then the word

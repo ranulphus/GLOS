@@ -13262,6 +13262,12 @@ def main():
         if os.environ.get("API_ONLY") == "net":     # (API_ONLY=net: the network's case alone)
             wins = [c for c in [("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k")] if not a.profile or c[0] in a.profile]
             return 0 if all(r[1] for r in matrix(api_net_case, wins, a.jobs)) else 1
+        if os.environ.get("API_ONLY") in ("job", "audio", "midi"):     # (one of the window cases' groups alone)
+            wins = [c for c in [("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k")] if not a.profile or c[0] in a.profile]
+            fn = {"job": api_job_case, "audio": api_audio_case, "midi": api_midi_case}[os.environ["API_ONLY"]]
+            if os.environ["API_ONLY"] != "job":
+                wins += [w + ("cs4236b",) for w in wins[:1]]
+            return 0 if all(r[1] for r in matrix(fn, wins, a.jobs)) else 1
         cases = combos if (a.profile or a.boot) else [("bf6", "default"), ("486dx2", "himemx")]
         res = matrix(api_case, cases, a.jobs)
         res += matrix(api_lfn_case, cases, a.jobs)      # ... and long names, with DOSLFN loaded before GLOS

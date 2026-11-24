@@ -57,9 +57,12 @@ void dos_psp_make(unsigned char *p, const struct dos_psp_init *in)
         memcpy(p + 0x6C, in->fcb2, 16);
     else
         blank_fcb(p + 0x6C);
+    /* A tail longer than DOS passes: its first 126 characters, and the length 127 (Windows 9x's sign that the whole
+       line is in the environment's CMDLINE, where its caller put it: a DJGPP program looks there). MS-DOS 7 copies
+       the length byte as it is given, so EXEC passes such a 127 on. */
+    p[0x80] = (unsigned char)(n > 126 ? 127 : n);
     if (n > 126)
         n = 126;
-    p[0x80] = (unsigned char)n;
     memcpy(p + 0x81, in->tail, n);
     p[0x81 + n] = 0x0D;
 }

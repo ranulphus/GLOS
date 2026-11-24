@@ -1371,8 +1371,9 @@ static int exec_call(struct dos_m *m, struct dos_regs86 *r, unsigned al)
         return done(m, r, overlay(m, path, rd16(m, pb), rd16(m, pb + 2)));
     env = rd16(m, pb), toff = rd16(m, pb + 2), tseg = rd16(m, pb + 4);
     f1 = lin(rd16(m, pb + 8), rd16(m, pb + 6)), f2 = lin(rd16(m, pb + 12), rd16(m, pb + 10));
+    /* (up to 127: a length of 127 is Windows 9x's sign of a longer line in CMDLINE, passed on as MS-DOS 7 does) */
     len = rd8(m, lin(tseg, toff));
-    for (i = 0; i < len && i < 126; i++)
+    for (i = 0; i < len && i < 127; i++)
         tail[i] = (char)rd8(m, lin(tseg, toff + 1 + i));
     tail[i] = 0;
     for (i = 0; i < 16; i++)

@@ -764,13 +764,28 @@ void vdos_int(struct trapframe *tf, u8 n, u32 ret, u32 at, int via_arpl)
         return;
     }
     if (res == DOS21_CTRLC) {
-        if (vec(0x23) == arpl[V23]) {           /* (no handler of the program's: DOS's own ends it) */
+        int up = vec(0x23) == arpl[V23] && dctx && !dctx->ending;
+
+        if (vec(0x23) == arpl[V23] && !up) {    /* (no handler of the program's: DOS's own ends it) */
             ctrl_c_end(tf, &r);
             return;
         }
         c23 = r;                                /* its INT 23h, the call's registers, back by an ARPL of GLOS's */
         c23_at = at, c23_via = via_arpl;
         from_regs(tf, &r);
+        /* A DPMI program's, its real-mode vector still DOS's: INT 23h goes up to its protected-mode handler, or is
+           ignored where it has none, as for a DOS in the VM (v86.c's INT trap: deliver.c's dpmi_passup); either way
+           the call is then made again (VC23), as DOS does. Ended by DOS's own handler here, a DJGPP program lost
+           the SIGINT it raises once the call is back (APITEST's job-ctrl-c natively: code 0, not 7; 2026-11-24).
+           Nothing of GLOS's is on the program's stack, so VC23's look for a RETF with CF set never matches. */
+        if (up) {
+            c23_sp = (tf->esp + 4) & 0xFFFF;
+            tf->cs = arpl[VC23] >> 16;
+            if (dpmi_passup(tf, 0x23, arpl[VC23] & 0xFFFF))
+                return;
+            ctrl_c_end(tf, &r);                 /* (not taken: as before; from_regs puts its CS:IP back) */
+            return;
+        }
         c23_sp = tf->esp & 0xFFFF;
         push16(tf, tf->eflags & 0xFFFF);
         push16(tf, arpl[VC23] >> 16);

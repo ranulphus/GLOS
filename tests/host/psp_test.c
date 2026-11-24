@@ -64,7 +64,7 @@ static void t_psp(void)
     in.jft = 0;
     in.fcb1 = 0;
     dos_psp_make(p, &in);
-    CHECK(p[0x80] == 126 && p[0xFF] == 0x0D, "a tail too long: %u, %02x", p[0x80], p[0xFF]);
+    CHECK(p[0x80] == 127 && p[0x81 + 125] == 'x' && p[0xFF] == 0x0D, "a tail too long: %u, %02x", p[0x80], p[0xFF]);
     CHECK(p[0x18] == 0xFF && p[0x18 + 19] == 0xFF, "no handles: all closed");
     CHECK(p[0x5C] == 0 && p[0x5D] == ' ', "first FCB blank");
 }
