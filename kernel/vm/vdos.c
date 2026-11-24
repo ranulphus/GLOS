@@ -390,6 +390,8 @@ static u32 arpl[NV];                            /* (seg << 16 | off) */
      RETF) run in the VM, a nested real-mode call, on the DPMI host's stack where a client runs, else on the
      caller's own a little below its top. A program's handler that calls DOS from there, InDOS set or not, is
      refused (vdos_int): DOS is not entered twice. */
+static u32 gone_at, gone_if;                    /* a call that went back to wait for a key (not through an ARPL):
+                                                   where its INT is (+ 1), and its caller's interrupt flag */
 static u32 dirty_at[DOS_DRIVES];                /* each drive's volume: when it was first seen to have something
                                                    unwritten (0: nothing) */
 static struct trapframe *call_tf;               /* the caller's frame while a call is at work */
@@ -543,6 +545,10 @@ void vdos_int(struct trapframe *tf, u8 n, u32 ret, u32 at, int via_arpl)
         tf->eflags |= 1;
         return;
     }
+    if (gone_at == at + 1 && !via_arpl)         /* (the INT made again after a wait for a key: its caller's own
+                                                   interrupt flag, kept from the first time) */
+        vif0 = gone_if;
+    gone_at = 0;
     if (!mounted)
         mount_c();
     to_regs(tf, &r, ret);
@@ -593,7 +599,12 @@ void vdos_int(struct trapframe *tf, u8 n, u32 ret, u32 at, int via_arpl)
             tf->eip = arpl[n == 0x20 ? V20 : V21] & 0xFFFF;
         } else {
             tf->eip = at;
+            gone_at = at + 1, gone_if = vif0;
         }
+        /* DOS waits for a key with interrupts on, whatever its caller had: the VM idles so. (With the caller's
+           flag, off for a call made through the DPMI host, the watchdog saw a VM halted with its interrupts
+           off: GLOS-WARN vif-stuck, 2026-11-24.) The caller's own comes back with the call made again. */
+        vm.thread->vif = 1;
         app_vm_idle_turn(0);                    /* (an app's own calls meanwhile, as at a DOS's wait for a key: its
                                                    console job's keys may be what it is about to type) */
         if (vm_rd16(0x41A) == vm_rd16(0x41C))
