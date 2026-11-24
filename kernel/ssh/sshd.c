@@ -37,6 +37,7 @@
 #include "kprintf.h"
 #include "mixer.h"
 #include "mm.h"
+#include "pmc.h"
 #include "slip.h"
 #include "pci.h"
 #include "keymap.h"
@@ -1332,6 +1333,62 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             clock_set(t, "hand");
             clock_text(b, sizeof b);
             say(ch, 0, b);
+            ssh_chan_exit(ch, 0);
+        }
+    } else if (!strcmp(cmd, "glos pmc") || !strncmp(cmd, "glos pmc ", 9)) {
+        /* glos pmc start EV0 [EV1] [os] | read | stop: the CPU's performance counters (kernel/arch/pmc.c; Intel's
+           P6 family). An event in hexadecimal as unit mask and event number (UUEE). */
+        const char *q = cmd + 8, *why = 0;
+        u32 evs[2] = { 0, 0 }, nev = 0;
+        int os = 0;
+        char line[160];
+        while (*q == ' ')
+            q++;
+        if (!strncmp(q, "start", 5) && (q[5] == ' ' || !q[5])) {
+            q += 5;
+            for (;;) {
+                u32 v = 0, digits = 0;
+                while (*q == ' ')
+                    q++;
+                if (!*q)
+                    break;
+                if (!strncmp(q, "os", 2) && (q[2] == ' ' || !q[2])) {
+                    os = 1, q += 2;
+                    continue;
+                }
+                for (; (*q >= '0' && *q <= '9') || ((*q | 0x20) >= 'a' && (*q | 0x20) <= 'f'); q++, digits++)
+                    v = v << 4 | (u32)(*q <= '9' ? *q - '0' : (*q | 0x20) - 'a' + 10);
+                if (!digits || digits > 4 || (*q && *q != ' ') || nev == 2) {
+                    nev = 3;
+                    break;
+                }
+                evs[nev++] = v;
+            }
+            if (nev < 1 || nev > 2)
+                why = "usage";
+            else
+                why = pmc_start(vm.bi->cpuid_edx, evs[0], evs[1], os);
+            if (!why)
+                why = pmc_read(vm.bi->cpuid_edx, line, sizeof line);
+        } else if (!strcmp(q, "read")) {
+            why = pmc_read(vm.bi->cpuid_edx, line, sizeof line);
+        } else if (!strcmp(q, "stop")) {
+            why = pmc_stop(vm.bi->cpuid_edx);
+            if (!why)
+                ksnprintf(line, sizeof line, "GLOS-PMC stopped\n");
+        } else {
+            why = "usage";
+        }
+        if (why && !strcmp(why, "usage")) {
+            say(ch, 1, "glos pmc: usage: glos pmc start EV0 [EV1] [os] | read | stop (events in hexadecimal: UUEE)\n");
+            ssh_chan_exit(ch, 2);
+        } else if (why) {
+            say(ch, 1, "glos pmc: ");
+            say(ch, 1, why);
+            say(ch, 1, "\n");
+            ssh_chan_exit(ch, 1);
+        } else {
+            say(ch, 0, line);
             ssh_chan_exit(ch, 0);
         }
     } else if (ci_starts(cmd, "glos mtrr") && (!cmd[9] || cmd[9] == ' ')) {
