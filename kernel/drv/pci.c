@@ -231,7 +231,11 @@ u32 pci_lfb_range(u32 *base, const struct pci_dev **card)
         if (d->class != 0x03)
             continue;
         for (k = 0; k < 6; k++) {
-            u32 b = d->bar[k], size, cap = d->vendor == 0x5333 ? 16u << 20 : 32u << 20;
+            /* (The range's most: 16 MB for S3's, 32 MB for the rest; 64 MB for the Radeon 7000 (1002:5159), whose
+               frame buffer and BAR are 64 MB and whose registers are in a BAR of their own: DOS-GL, bench B,
+               2026-11-24.) */
+            u32 b = d->bar[k], size, cap = d->vendor == 0x5333 ? 16u << 20
+                                           : d->vendor == 0x1002 && d->device == 0x5159 ? 64u << 20 : 32u << 20;
             int matrox_fb = d->vendor == 0x102B && k == 0;      /* (Matrox's G-series: BAR 0 is the framebuffer,
                                                    whatever its flags say: 86Box's G100 has it not prefetchable) */
             if (!b || (b & 1) || (!(b & 8) && !matrox_fb) || (b & 6))   /* (I/O; not prefetchable; 64-bit or below 1 MB) */

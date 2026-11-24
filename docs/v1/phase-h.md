@@ -137,6 +137,11 @@ The Matrox G550 (102B:2527) was in the G-series list from the start, unchecked. 
 same night: its 32 MB frame buffer write-combining by GLOS's choice, DOS-GL's conformance 35/35 through the WARPs
 with it on.
 
+The Radeon 7000 VE (1002:5159) joined the list on 2026-11-24. DOS-GL measured it on bench B with MTRR LFB ON
+by hand: 16-bit stores 6 to 75 MB/s, a 640x480x16 frame copied in 12.2 ms where it took 47.8; DOS-GL's
+conformance 35 of 35 and Glide's as without it. Its range is 64 MB (its frame buffer's size; the others' stays
+32 MB at most).
+
 ## Tier 2: AMD PCnet-PCI (2026-11-23)
 
 `kernel/drv/pcnet.c` drives the Am79C970A (1022:2000), from AMD's data sheet (Rev D):
