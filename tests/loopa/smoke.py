@@ -139,9 +139,7 @@ class Profile:
     def s_session(self):
         """SESSTEST between VECCHK's save and check (sess_agent's own steps): the PIC, the mode, the vectors as
         they were."""
-        if self.native:
-            return None                         # (VECCHK's file: C:\OUT, the hosted RUN.BAT's; sess-agent natively)
-        rcs = [self.ssh(c)[0] for c in self.jobs.SESS_STEPS]
+        rcs =[self.ssh(c)[0] for c in self.jobs.SESS_STEPS]
         text = self.agent.log()
         ok = rcs == [0] * len(self.jobs.SESS_STEPS) and text.count("HX-VECCHK ok") >= 1
         return ok, "" if ok else "rcs=%r" % rcs
