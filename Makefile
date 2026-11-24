@@ -253,6 +253,8 @@ host-test-run: build/host/libpdfbr32.a
 	  && build/host/sesslog_test build/host/sesslog
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/telnet_test tests/host/telnet_test.c \
 	  apps/shared/telnet.c && build/host/telnet_test
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/letters_test tests/host/letters_test.c \
+	  kernel/disk/letters.c kernel/disk/mbr.c kernel/disk/mbrboot.S && build/host/letters_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/disk_test tests/host/disk_test.c kernel/disk/mbr.c \
 	  kernel/disk/fatfmt.c kernel/disk/mbrboot.S kernel/disk/fdboot.S \
 	  && tests/host/disk_test.sh build/host/disk_test build/host/disk
