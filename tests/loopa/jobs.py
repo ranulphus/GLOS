@@ -286,6 +286,22 @@ def native_args(name, args):
         raise HostedOnly("--boot-cfg " + boot)
     work = os.path.join(ROOT, "out", "native-img", name)
     os.makedirs(work, exist_ok=True)
+    # (BLASTER: the hosted RUN.BAT sets it before GLOS.EXE, whose loader reads it to find the Sound Blaster; a native
+    # GLOS starts before any batch file, so the same value goes where a DOS-less PC's user puts it, GLOS.CFG's
+    # [sound] blaster, in the case's own GLOS.CFG or one of its own. The SET stays for DOS programs' environment.)
+    blaster = [l.split("=", 1)[1].strip() for l in lines if re.match(r"(?i)^\s*SET\s+BLASTER=", l)]
+    if blaster:
+        own = [f for f in files if "=" in f and f.split("=", 1)[1].upper() == "/TEST/GLOS.CFG"]
+        text = ""
+        if own:
+            src = own[0].split("=", 1)[0]
+            text = open(src if os.path.isabs(src) else os.path.join(ROOT, src), newline="").read()
+            files = [f for f in files if f not in own]
+        if not re.search(r"(?im)^\s*blaster\s*=", text):
+            text = text + ("" if not text or text.endswith("\n") else "\r\n") + "[sound]\r\nblaster = %s\r\n" % blaster[-1]
+        with open(os.path.join(work, "GLOS.CFG"), "w", newline="") as f:
+            f.write(text)
+        files = files + [os.path.join(work, "GLOS.CFG") + "=/TEST/GLOS.CFG"]
     with open(os.path.join(work, "AUTOEXEC.BAT"), "w", newline="") as f:
         # (C:\OUT: the harness's tools keep their files there, VECCHK's saved vectors for one; Loop A's own disk has it)
         f.write("@ECHO OFF\r\nSET PATH=C:\\HX;C:\\FREEDOS\\BIN\r\nMD C:\\OUT\r\nIF EXIST C:\\RUN.BAT CALL C:\\RUN.BAT\r\n"
