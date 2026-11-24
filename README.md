@@ -44,6 +44,7 @@ and whose Loop A harness runs GLOS in 86Box. Paths are set in `config.mk`; overr
 make                     # build/ow/GLOS.EXE
 make check-deps          # RetroGPU's checkout beside this one (RETROGPU, default ~/RetroGPU)
 make loopa CARD=g450     # boot 86Box with a G450, run GLOS.EXE: out/loopa-g450/ (status, serial.log)
+make loopa-smoke         # the smoke tier: six profiles, one boot each (PRD.md §14.2), after every change
 ```
 
 ## Sibling projects

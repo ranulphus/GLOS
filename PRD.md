@@ -831,6 +831,15 @@ MGA-Glide's harness, with the M0 extensions. Each job can run on:
 
 GLOS jobs drive the agent over SSH from the host.
 
+**Tiers** (owner, 2026-11-06 and 2026-11-24): the host tests first (seconds); then the **smoke tier**, after every
+change (`make loopa-smoke`, `tests/loopa/smoke.py`): one boot for each of six profiles (hosted BF6 with a G400 and
+with VBE at 8 bits, a hosted 486, a native BF6 and 486, an ES1371 on the network card's interrupt line), each running
+the suites' own programs over SSH: a session between VECCHK's save and check, SFTP, ATTRIB, NETTEST, APITEST, the
+desktop and the Calculator's GUI script against its goldens, DOSDIFF and NDOSTEST natively, a tone and the Sound
+Recorder. A profile fails on a failed step or a GLOS-PANIC, GLOS-WARN pmm-, mm-kernel-lin or vif-stuck line in its
+serial log; a dead step's profile is booted again for the rest. About 2 minutes side by side, 8.5 one at a time.
+Then the merge gate (`tools/merge-gate.sh`, `tools/merge-gate-lanes.sh`, `tools/merge-gate.sh remote`), before a merge.
+
 ### 14.3 The supervisor gate (M4 exit)
 
 Each suite runs with GLOS loaded, on raw and HIMEMX boots, and is compared with the same suite under CWSDPMI or DOS/4GW without GLOS. The suites are:
