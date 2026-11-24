@@ -3647,17 +3647,20 @@ def panic_case(profile, card, how="asked"):
     880 Hz. The line is on the text screen too: the screenshots in out/panic-TAG are for the eye.
     how "stuck": a thread of the kernel's that never lets go (glos stuck: the network's, which outranks every
     other, goes round for ever) is found by the scheduler's watch after half a minute and is a panic that names
-    it (kernel/core/sched.c): what stood still with no word, the bench's NE2000 driver in its receive ring."""
+    it (kernel/core/sched.c): what stood still with no word, the bench's NE2000 driver in its receive ring.
+    how "fault": a page fault in the kernel (glos fault, 2026-11-24: the 486's audio case died once writing the
+    framebuffer, its page not present): the panic names the thread, lists returns into the kernel's code, and
+    says what the tables held for the address; before it, the guard refuses to unmap a kernel address."""
     import time
     tag = "%s-%s%s" % (profile, card, "" if how == "asked" else "-" + how)
-    why = "asked" if how == "asked" else "thread-stuck"
+    why = {"asked": "asked", "stuck": "thread-stuck", "fault": "exception"}[how]
     agent = Agent("panic-" + tag, profile, card, ["--sound", "sb16", "--wav", "--shots", "100,130",
         "--cmd", "SERSAY HX-START panic", "--cmd", "C:\\TEST\\GLOS.EXE /SELFTEST", "--cmd", "SERSAY HX-DONE 0"],
         timeout=150 if how == "asked" else 480)
     checks = {"listen": agent.listening()}
     try:
         try:
-            agent.ssh("glos panic" if how == "asked" else "glos stuck", timeout=20)
+            agent.ssh({"asked": "glos panic", "stuck": "glos stuck", "fault": "glos fault"}[how], timeout=20)
         except subprocess.TimeoutExpired:
             pass
         t0 = time.time()
@@ -3666,6 +3669,20 @@ def panic_case(profile, card, how="asked"):
         checks["said"] = "GLOS-PANIC why=" + why in agent.log()
         if how == "stuck":
             checks["named"] = bool(re.search(r"GLOS-SCHED stuck thread=net class=0 same=\d+ starved=\d+ eip=", agent.log()))
+        if how == "fault":
+            lg = agent.log()
+            checks["guard"] = re.search(r"GLOS-WARN mm-kernel-lin unmap lin=c0c00000 from=c0[0-9a-f]{6}", lg) is not None
+            m_g = re.search(r"GLOS-SELFTEST pmm-guard loose=([0-9a-f]+) got=([0-9a-f]+) kept=1", lg)
+            checks["frames"] = (m_g is not None and m_g.group(1) != m_g.group(2)
+                                and "GLOS-WARN pmm-free-kernel frame phys=%s " % m_g.group(1) in lg
+                                and "GLOS-WARN pmm-take-kernel run phys=%s " % m_g.group(1) in lg)
+            checks["told"] = (re.search(r"GLOS-PANIC why=exception vec=e err=2 .* thread=\S+ user=\d+\n", lg) is not None
+                              and re.search(r"GLOS-PANIC calls sp=c[0-9a-f]{7} top=c[0-9a-f]{7}:( c0[0-9a-f]{6})+\n", lg) is not None
+                              and re.search(r"GLOS-PANIC fault lin=c13ffffc cr3=[0-9a-f]{8} kernel=[0-9a-f]{8} "
+                                            r"kpde=[0-9a-f]{8} kpte=00000000 fb_mapped=\d+\n", lg) is not None
+                              and "GLOS-PANIC fault loaded-pde=" in lg)
+            if not (checks["guard"] and checks["told"] and checks["frames"]):
+                print("    panic-%s: %r" % (tag, re.findall(r"GLOS-(?:PANIC|WARN mm)[^\n]*", lg)[:8]))
         try:
             checks["stopped"] = agent.ssh("glos ver", timeout=20)[0] != 0
         except subprocess.TimeoutExpired:
@@ -13025,6 +13042,7 @@ def main():
         res += matrix(sess_agent, [c for c in SESS_AGENT if not a.profile or c[0] in a.profile], a.jobs)
         res += matrix(panic_case, [c for c in SESS_AGENT if not a.profile or c[0] in a.profile], a.jobs)
         res += matrix(panic_case, [c + ("stuck",) for c in SESS_AGENT if not a.profile or c[0] in a.profile], a.jobs)
+        res += matrix(panic_case, [c + ("fault",) for c in SESS_AGENT if not a.profile or c[0] in a.profile], a.jobs)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "dpmi":
         res = matrix(dpmi, combos, a.jobs) + matrix(dpmiconf, combos, a.jobs) + matrix(lazy, combos, a.jobs)

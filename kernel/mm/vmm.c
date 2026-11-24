@@ -28,6 +28,7 @@ static u32 kpt_heap[1024] __attribute__((aligned(4096)));
 static u32 kpt_kmap[1024] __attribute__((aligned(4096)));
 static u32 kpt_dma[1024] __attribute__((aligned(4096)));
 static u32 kpt_fb[FB_MAX >> 22][1024] __attribute__((aligned(4096)));
+static u32 fb_pages;                    /* (mm_fb_map's last: the pages it mapped) */
 static u32 kpt_win[WIN_MAX >> 22][1024] __attribute__((aligned(4096)));
 static u32 kpt_dev[DEV_MAX >> 22][1024] __attribute__((aligned(4096)));
 static u32 kpt_cache[CACHE_MAX >> 22][1024] __attribute__((aligned(4096)));
@@ -59,29 +60,49 @@ u32 mm_cr3(void) { return kernel_phys(kpd); }
    bench-g400 once the cache had filled it (2026-11-17; 86Box models
    neither). The coldest block is still the last resort. With interrupts
    off, as everything here. */
+/* A frame of the kernel's image or below it, which the allocator must never hand out (gate 52, 2026-11-24: the
+   kernel's page table for the screen was given as the 486's recording buffer). One that comes out is logged with
+   the caller and kept taken (it is the kernel's), and another is taken in its place: the screen's mapping is
+   never zeroed again, whatever path set its frame loose; the warnings at the giving end name that path. */
+static int kernel_frame(u32 phys, const char *what, void *from)
+{
+    if (!phys || phys >= image_phys + kernel_bytes())
+        return 0;
+    kprintf("GLOS-WARN pmm-take-kernel %s phys=%x from=%p\n", what, phys, from);
+    return 1;
+}
+
 static u32 take1(void)
 {
     static const u32 sizes[2] = { 256, 32 };
     static u32 after;                           /* (where the last window ended: the next is looked for from there) */
     u32 r = pmm_take(&pmm), w, i;
+    while (kernel_frame(r, "frame", __builtin_return_address(0)))
+        r = pmm_take(&pmm);
     for (i = 0; !r && i < 2 && cache_frames(); i++)
         if ((w = pmm_window_from(&pmm, sizes[i], cache_frame_evictable, 0, after)) != 0xFFFFFFFFu) {
             cache_evict_frames(w, sizes[i]);
             pmm.next = w;
             after = w + sizes[i];
             r = pmm_take(&pmm);
+            while (kernel_frame(r, "frame-evicted", __builtin_return_address(0)))
+                r = pmm_take(&pmm);
         }
     if (!r && cache_reclaim(1))
         r = pmm_take(&pmm);
-    return r;
+    return kernel_frame(r, "frame-reclaimed", __builtin_return_address(0)) ? 0 : r;
 }
 
 static u32 take_run(u32 n)
 {
     u32 r = pmm_take_run(&pmm, n), w;
+    while (kernel_frame(r, "run", __builtin_return_address(0)))
+        r = pmm_take_run(&pmm, n);              /* (that run left taken: it held the kernel's) */
     if (!r && n && cache_frames() && (w = pmm_window(&pmm, n, cache_frame_evictable, 0)) != 0xFFFFFFFFu) {
         cache_evict_frames(w, n);
         r = pmm_take_run(&pmm, n);
+        if (kernel_frame(r, "run-evicted", __builtin_return_address(0)))
+            r = 0;
     }
     return r;
 }
@@ -98,7 +119,23 @@ static int take_at(u32 phys, u32 n)
 }
 
 u32 pmm_alloc(void) { LOCKED(u32, take1()); }
-void pmm_free(u32 phys) { LOCKED_V(pmm_give(&pmm, phys)); }
+
+/* (A frame of the kernel's image, or below it, is never given back: one that comes is a bug found, named with
+   its caller, and kept.) */
+static int kernel_given(u32 phys, const char *what, void *from)
+{
+    if (phys >= image_phys + kernel_bytes())
+        return 0;
+    kprintf("GLOS-WARN pmm-free-kernel %s phys=%x from=%p\n", what, phys, from);
+    return 1;
+}
+
+void pmm_free(u32 phys)
+{
+    if (kernel_given(phys, "frame", __builtin_return_address(0)))
+        return;
+    LOCKED_V(pmm_give(&pmm, phys));
+}
 u32 pmm_free_frames(void) { return pmm.free; }
 u32 mm_avail_frames(void) { return pmm.free + cache_frames(); }
 u32 pmm_frames(void) { return pmm.top; }
@@ -108,7 +145,12 @@ u32 kheap_bytes(void) { return kheap.size; }
 u32 kernel_bytes(void) { return (u32)__kernel_end - (u32)__kernel_start; }
 u32 pmm_alloc_run(u32 n) { LOCKED(u32, take_run(n)); }
 int pmm_claim(u32 phys, u32 n) { LOCKED(int, take_at(phys, n)); }
-void pmm_free_run(u32 phys, u32 n) { LOCKED_V(pmm_give_run(&pmm, phys, n)); }
+void pmm_free_run(u32 phys, u32 n)
+{
+    if (kernel_given(phys, "run", __builtin_return_address(0)))
+        return;
+    LOCKED_V(pmm_give_run(&pmm, phys, n));
+}
 u32 pmm_largest(void) { LOCKED(u32, cache_frames() ? pmm_longest(&pmm, cache_frame_evictable, 0) : pmm_largest_run(&pmm)); }
 
 /* V86 code runs at CPL 3: the identity map of 0-10FFFFh becomes user pages
@@ -196,12 +238,23 @@ u32 mm_space_new(void)
     return f;
 }
 
+/* Its own page tables freed, then the directory. A table is its own if its frame is not the kernel's for that
+   slot: the frames compared, not the whole entries, whose flags differ by themselves (the CPU sets a directory
+   entry's Accessed bit in the directory it walks: the desktop's thread draws the screen with an app's space
+   loaded, and that app's copy of the framebuffer's entry gained the bit the kernel's lacked; at the app's
+   exit the kernel's own table for the screen was freed, and handed out again as the 486's recording buffer,
+   zeroed: every page of the screen gone. Gate 52, 2026-11-24.) */
 void mm_space_free(u32 pd_phys)
 {
-    u32 *pd = kmap(pd_phys), i;
+    u32 *pd = kmap(pd_phys), i, kept = 0, first = 0;
     for (i = 1; i < 1023; i++)
-        if ((pd[i] & PTE_P) && pd[i] != kpd[i])
+        if ((pd[i] & PTE_P) && (pd[i] & ~0xFFFu) != (kpd[i] & ~0xFFFu))
             pmm_free(pd[i] & ~0xFFFu);
+        else if ((pd[i] & PTE_P) && pd[i] != kpd[i] && !kept++)
+            first = i;                          /* (the kernel's, its flags apart: what was freed before) */
+    if (kept)
+        kprintf("GLOS-MM space-free kernel-tables-kept=%u first=%x pde=%x kernel=%x\n", kept, first, pd[first],
+                kpd[first]);
     kunmap(pd);
     pmm_free(pd_phys);
 }
@@ -288,6 +341,57 @@ void mm_space_free_low(u32 pd)
     mm_space_free(pd);
 }
 
+/* glos fault's first steps (/SELFTEST; the sess suite's panic-*-fault): a kernel frame freed is refused; one set
+   loose behind the guards' backs (as by a path not yet known) is never handed out: a DMA buffer, which takes the
+   lowest free run, is given another. 0 if both hold. */
+static u8 guard_page[4096] __attribute__((aligned(4096)));
+
+int mm_guard_test(void)
+{
+    u32 k = kernel_phys(guard_page), phys = 0, f;
+    void *p;
+    guard_page[0] = 0x5A;
+    pmm_free(k);                                /* (refused: GLOS-WARN pmm-free-kernel) */
+    f = irq_save();
+    pmm_give(&pmm, k);                          /* (loose, as a path of the kernel's own might have set it) */
+    irq_restore(f);
+    p = dma_alloc(1, &phys);                    /* (GLOS-WARN pmm-take-kernel run, and another frame) */
+    kprintf("GLOS-SELFTEST pmm-guard loose=%x got=%x kept=%u\n", k, phys, guard_page[0] == 0x5A);
+    return p && phys != k && phys >= image_phys + kernel_bytes() && guard_page[0] == 0x5A ? 0 : -1;
+}
+
+/* What a page fault in the kernel found (cpu.c's panic, 2026-11-24: the 486's audio case died writing the
+   framebuffer's row 460 from the desktop's thread, its page not present, once in some twenty runs): the
+   loaded directory against the kernel's, the kernel's own entries for the address, then the loaded
+   directory's (read last: if it is a frame given to something else, reading it may fault again). */
+void mm_fault_note(u32 lin)
+{
+    u32 pde = kpd[lin >> 22], pte = 0xFFFFFFFFu, cr3 = read_cr3() & ~0xFFFu, i = (lin >> 12) & 1023;
+    if (lin >= FB_BASE && lin < FB_BASE + FB_MAX)
+        pte = kpt_fb[(lin - FB_BASE) >> 22][i];
+    else if (lin >= WIN_BASE && lin < WIN_BASE + WIN_MAX)
+        pte = kpt_win[(lin - WIN_BASE) >> 22][i];
+    else if (lin >= HEAP_BASE && lin < HEAP_BASE + 0x400000u)
+        pte = kpt_heap[i];
+    else if (lin >= DEV_BASE && lin < DEV_BASE + DEV_MAX)
+        pte = kpt_dev[(lin - DEV_BASE) >> 22][i];
+    kprintf("GLOS-PANIC fault lin=%p cr3=%p kernel=%p kpde=%p kpte=%p fb_mapped=%u\n", lin, cr3, mm_cr3(), pde, pte,
+            fb_pages);
+    kprintf("GLOS-PANIC fault loaded-pde=%p\n", CUR_PD[lin >> 22]);
+    if (CUR_PD[lin >> 22] & PTE_P)
+        kprintf("GLOS-PANIC fault loaded-pte=%p\n", CUR_PT[lin >> 12]);
+}
+
+/* (A user address alone: the kernel's own entries are never changed through these; one that tries is a bug
+   found, and named with its caller.) */
+static int kernel_lin(u32 lin, const char *what, void *from)
+{
+    if (lin < 0xC0000000u)
+        return 0;
+    kprintf("GLOS-WARN mm-kernel-lin %s lin=%p from=%p\n", what, lin, from);
+    return 1;
+}
+
 /* The page table for lin in the current space, made if there is none: 0, or -1. */
 static int pt_for(u32 lin)
 {
@@ -306,7 +410,7 @@ static int pt_for(u32 lin)
 
 int mm_map(u32 lin, u32 phys, u32 flags)
 {
-    if (pt_for(lin) != 0)
+    if (kernel_lin(lin, "map", __builtin_return_address(0)) || pt_for(lin) != 0)
         return -1;
     CUR_PT[lin >> 12] = (phys & ~0xFFFu) | PTE_P | (flags & (PTE_W | PTE_U | 0x18 | 0x60 | 0x200));
                                                                 /* PWT, PCD; accessed, dirty (kept); AVL 9 */
@@ -317,7 +421,7 @@ int mm_map(u32 lin, u32 phys, u32 flags)
 u32 mm_unmap(u32 lin)
 {
     u32 pte;
-    if (!(CUR_PD[lin >> 22] & PTE_P))
+    if (kernel_lin(lin, "unmap", __builtin_return_address(0)) || !(CUR_PD[lin >> 22] & PTE_P))
         return 0;
     pte = CUR_PT[lin >> 12];
     CUR_PT[lin >> 12] = 0;
@@ -330,7 +434,10 @@ u32 mm_unmap(u32 lin)
    thread runs (kernel/gfx/gpu.c). -1 if it has no page table there. */
 int mm_space_set(u32 pd_phys, u32 lin, u32 pte)
 {
-    u32 *pd = kmap(pd_phys), pde = pd[lin >> 22], *pt;
+    u32 *pd, pde, *pt;
+    if (kernel_lin(lin, "space-set", __builtin_return_address(0)))
+        return -1;
+    pd = kmap(pd_phys), pde = pd[lin >> 22];
     kunmap(pd);
     if (!(pde & PTE_P))
         return -1;
@@ -346,7 +453,7 @@ int mm_space_set(u32 pd_phys, u32 lin, u32 pte)
    page fault, kernel/dpmi/mem.c lin_fault()): a not-present PTE marked. */
 int mm_lazy(u32 lin)
 {
-    if (pt_for(lin) != 0)
+    if (kernel_lin(lin, "lazy", __builtin_return_address(0)) || pt_for(lin) != 0)
         return -1;
     CUR_PT[lin >> 12] = MM_LAZY | MM_W | MM_U;
     invlpg(lin);
@@ -464,7 +571,7 @@ void mm_win_free_sparse(void *mem, u32 bytes)
     u32 n = (bytes + 0xFFF) >> 12, first = ((u32)mem - WIN_BASE) >> 12, i, f = irq_save();
     for (i = first; i < first + n && i < WIN_MAX >> 12; i++) {
         u32 fr = kpt_win[i >> 10][i & 1023] & ~0xFFFu;
-        if (fr && fr != zero_frame)
+        if (fr && fr != zero_frame && !kernel_given(fr, "win-sparse", __builtin_return_address(0)))
             pmm_give(&pmm, fr);
         kpt_win[i >> 10][i & 1023] = 0;
         invlpg(WIN_BASE + (i << 12));
@@ -477,7 +584,9 @@ void mm_win_free(void *mem, u32 bytes)
 {
     u32 n = (bytes + 0xFFF) >> 12, first = ((u32)mem - WIN_BASE) >> 12, i, f = irq_save();
     for (i = first; i < first + n && i < WIN_MAX >> 12; i++) {
-        pmm_give(&pmm, kpt_win[i >> 10][i & 1023] & ~0xFFFu);
+        u32 fr = kpt_win[i >> 10][i & 1023] & ~0xFFFu;
+        if (fr && fr != zero_frame && !kernel_given(fr, "win", __builtin_return_address(0)))    /* (an unbacked page's 0 would free frame 0) */
+            pmm_give(&pmm, fr);
         kpt_win[i >> 10][i & 1023] = 0;
         invlpg(WIN_BASE + (i << 12));
         win_used[i >> 5] &= ~(1u << (i & 31));
@@ -549,6 +658,7 @@ void *mm_fb_map(u32 phys, u32 bytes)
     if (!bytes || n > FB_MAX >> 12)
         return 0;
     f = irq_save();
+    fb_pages = n;
     for (i = 0; i < FB_MAX >> 12; i++) {
         kpt_fb[i >> 10][i & 1023] = i < n ? ((phys & ~0xFFFu) + (i << 12)) | PTE_P | PTE_W : 0;
         invlpg(FB_BASE + (i << 12));

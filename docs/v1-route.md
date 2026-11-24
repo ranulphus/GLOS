@@ -600,6 +600,26 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
   own, never the app's transfer buffer). The bytes are what DJGPP's own `findfirst` puts at the start of the
   transfer buffer, so a library call from the worker still overlapped the window thread's write somehow.
 
+- **A kernel page table handed out as a DMA buffer** (gate 52, 2026-11-24, local: `audio-486dx2-vbe`, a panic,
+  the first in about twenty runs of the case). The desktop's thread faulted writing the screen's row 460 (its
+  page not present) just as the Sound Recorder began to record: the SB16's recording buffer had been given the
+  physical frame of `kpt_fb`, the kernel's own page table for the screen (283000h in that build), and
+  `dma_alloc` zeroed it. So the frame allocator held a frame of the kernel's image as free. **The path that set
+  it loose is not proven.** One flaw that can do it was found and mended (`kernel/mm/vmm.c`, `mm_space_free`):
+  an exited app's page tables were found by comparing its directory's entries with the kernel's whole, flags
+  and all, and the CPU sets a directory entry's Accessed bit in the directory it walks (the desktop's thread
+  draws with an app's space loaded), so a kernel table could be freed with an app; the frames are compared now.
+  But two runs of the case with a line for every such difference showed none. **The crash itself cannot happen
+  again**: the allocator never hands out a frame of the kernel's image (`GLOS-WARN pmm-take-kernel`, the frame
+  kept taken and another given), and every way of giving a frame back refuses one (`GLOS-WARN
+  pmm-free-kernel`, with the caller: `pmm_free`, `pmm_free_run`, the windows' own frees, which also gave frame
+  0 back for an unbacked page). `mm_map`, `mm_unmap`, `mm_lazy` and `mm_space_set` refuse a kernel address
+  (`GLOS-WARN mm-kernel-lin`); a kernel page fault's panic names the thread, the returns on its stack and what
+  the tables held for the address. All tried by `glos fault` under /SELFTEST (the sess suite's `panic-*-fault`
+  cases: a kernel frame freed is refused, one set loose behind the guards' backs is not handed out). **Next**:
+  a `pmm-take-kernel` or `pmm-free-kernel` line in any run names the path; the Games Library's overwritten
+  output above may be another face of the same loose frames.
+
 - **The SB16's playback dead after a recording** (the fortieth gate, 2026-11-22, devserver:
   `audio-486dx2-vbe`; not seen in three runs here). The Player's stream was never mixed (`periods=0` for its
   246 seconds), and the stream that had been playing when the Sound Recorder began got nothing after it

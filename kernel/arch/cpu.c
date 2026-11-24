@@ -5,6 +5,7 @@
 #include "arch.h"
 #include "io.h"
 #include "kprintf.h"
+#include "mm.h"
 #include "random.h"
 #include "sched.h"
 
@@ -216,7 +217,24 @@ static void dump(const char *why, struct trapframe *tf)
         kprintf(" vec=%x err=%x eip=%p cs=%x eflags=%x cr2=%p eax=%p ebx=%p ecx=%p edx=%p esi=%p edi=%p ebp=%p",
                 tf->vec, tf->err, tf->eip, tf->cs, tf->eflags, read_cr2(), tf->eax, tf->ebx, tf->ecx, tf->edx,
                 tf->esi, tf->edi, tf->ebp);
-    kprintf("\n");
+    kprintf(" thread=%s user=%u\n", current && current->name ? current->name : "?", current ? current->user : 0);
+    if (tf && tf->vec == 14 && !(tf->eflags & EFLAGS_VM) && (tf->cs & 3) == 0) {
+        extern char __kernel_start[], __text_end[];
+        u32 *sp = (u32 *)&tf->esp, k, n = 0;        /* (a fault in ring 0: the stack goes on where the frame ends) */
+
+        u32 top = current && current->stack_top > (u32)sp && current->stack_top - (u32)sp < 0x10000u
+                  ? current->stack_top : ((u32)sp + 0x1000) & ~0xFFFu;
+        kprintf("GLOS-PANIC calls sp=%p top=%p:", (u32)sp, top);     /* (what on it looks like a return into the
+                                                       kernel's code: no frame pointers, so some are old) */
+        for (k = 0; k < 96 && n < 12 && (u32)(sp + k) < top; k++)      /* (to the thread's stack top, which is
+                                                                           the kernel's own: never a page beyond) */
+            if (sp[k] >= (u32)__kernel_start && sp[k] < (u32)__text_end) {
+                kprintf(" %p", sp[k]);
+                n++;
+            }
+        kprintf("\n");
+        mm_fault_note(read_cr2());
+    }
 }
 
 /* The last words for someone at the PC, where no cable is on the serial port (the 486 bench stood dead twice

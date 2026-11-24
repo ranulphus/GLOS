@@ -27,6 +27,8 @@ struct bootinfo;
 
 void mm_init(struct bootinfo *bi);
 u32 mm_cr3(void);                       /* the kernel's page directory (physical) */
+int mm_guard_test(void);                 /* (glos fault: the frame guards, tried) */
+void mm_fault_note(u32 lin);            /* (a kernel page fault's panic: what the tables held for lin) */
 u32 kernel_phys(const void *p);         /* physical address of a kernel image/bss address */
 
 u32 pmm_alloc(void);                    /* a free frame, 0 when none */

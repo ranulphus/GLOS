@@ -1740,6 +1740,17 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         } else {
             panic("asked", 0);
         }
+    } else if (!strcmp(cmd, "glos fault")) {    /* (the suites': a kernel page fault's panic and what it tells of
+                                                   the tables; first the guard against a kernel address unmapped
+                                                   through an app's calls, which must refuse. /SELFTEST alone) */
+        if (!(vm.bi->flags & BI_F_SELFTEST)) {
+            say(ch, 1, "glos fault: only under GLOS /SELFTEST\n");
+            ssh_chan_exit(ch, 2);
+        } else {
+            mm_unmap(FB_BASE);
+            mm_guard_test();
+            *(volatile u32 *)(FB_BASE + FB_MAX - 4) = 0;    /* (beyond any screen's mapping) */
+        }
     } else if (!strcmp(cmd, "glos stuck")) {    /* (the suites': a thread that never lets go, for the scheduler's
                                                    watch to find after half a minute. /SELFTEST alone) */
         if (!(vm.bi->flags & BI_F_SELFTEST)) {

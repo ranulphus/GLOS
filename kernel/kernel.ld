@@ -6,6 +6,7 @@ SECTIONS
     . = 0xC0100000;
     __kernel_start = .;
     .text : { *(.text.head) *(.text .text.*) }
+    __text_end = .;
     .rodata : { *(.rodata .rodata.*) }
     .data : { *(.data .data.*) . = ALIGN(16); }     /* padded, so the file covers it */
     __file_end = .;
