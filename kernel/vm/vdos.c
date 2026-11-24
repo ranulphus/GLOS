@@ -390,6 +390,8 @@ static u32 arpl[NV];                            /* (seg << 16 | off) */
      RETF) run in the VM, a nested real-mode call, on the DPMI host's stack where a client runs, else on the
      caller's own a little below its top. A program's handler that calls DOS from there, InDOS set or not, is
      refused (vdos_int): DOS is not entered twice. */
+static u32 dirty_at[DOS_DRIVES];                /* each drive's volume: when it was first seen to have something
+                                                   unwritten (0: nothing) */
 static struct trapframe *call_tf;               /* the caller's frame while a call is at work */
 static u32 win;                                 /* the three bytes (seg << 16 | off) */
 static u8 in_window;
@@ -518,7 +520,7 @@ void vdos_int(struct trapframe *tf, u8 n, u32 ret, u32 at, int via_arpl)
 {
     struct dos_regs86 r;
     u32 vif0 = vm.thread->vif;
-    int res;
+    int res, d;
 
     if (call_tf) {                              /* from an interrupt taken in a call's window: not twice */
         if (reentered++ < 8)
@@ -548,6 +550,21 @@ void vdos_int(struct trapframe *tf, u8 n, u32 ret, u32 at, int via_arpl)
                                                            and the kill look at it) */
     sti();
     res = n == 0x20 ? dos20(&vd, &r) : dos21(&vd, &r);
+    /* What files' writes left for later (kernel/fs/fsv.c: a written file's entry and the FATs go to the disk at
+       its close, as DOS's do) is flushed here when it has waited two seconds, and the volume marked clean: a
+       program that keeps a file open and goes on calling DOS loses no more than that to a power cut. */
+    for (d = 0; d < DOS_DRIVES; d++) {
+        struct fsv_vol *fv = vd.vol[d];
+
+        if (!fv || !fsv_dirty(fv))
+            dirty_at[d] = 0;
+        else if (!dirty_at[d])
+            dirty_at[d] = timer_ticks() | 1;
+        else if (timer_ticks() - dirty_at[d] >= 2048) {
+            fsv_flush(fv);
+            dirty_at[d] = 0;
+        }
+    }
     cli();
     vm_wr8(vm.indos, (u8)(vm_rd8(vm.indos) - 1));
     ide_patient(0);

@@ -90,6 +90,7 @@ static void to_fat(const struct fsv_file *h, struct fat_file *ff)
     ff->pos = h->pos;
     ff->dir = n->dir;
     ff->index = n->index;
+    ff->changed = n->changed;
     if (h->gen == n->gen) {
         ff->cl = h->cl;
         ff->cl_ord = h->cl_ord;
@@ -106,6 +107,7 @@ static void from_fat(struct fsv_file *h, const struct fat_file *ff)
         n->gen++;
     n->first = ff->first;
     n->size = ff->size;
+    n->changed = ff->changed;
     h->pos = ff->pos;
     h->cl = ff->cl;
     h->cl_ord = ff->cl_ord;
@@ -121,13 +123,64 @@ int fsv_mount(struct fsv_vol *v, fat_read_fn read, fat_write_fn write, fat_time_
     return write ? fat_mount_rw(&v->fat, read, write, now, ctx, cp) : fat_mount(&v->fat, read, ctx, cp);
 }
 
+/* A node's entry and the FATs written, if its file changed since they last were. */
+static int node_out(struct fsv_vol *v, struct fsv_node *n)
+{
+    struct fat_file ff;
+    int r;
+
+    if (!n->changed)
+        return FAT_OK;
+    memset(&ff, 0, sizeof ff);
+    ff.v = &v->fat;
+    ff.first = n->first;
+    ff.size = n->size;
+    ff.dir = n->dir;
+    ff.index = n->index;
+    ff.changed = 1;
+    r = fat_commit(&ff);
+    if (!r)
+        n->changed = 0;
+    return r;
+}
+
+int fsv_dirty(const struct fsv_vol *v)
+{
+    int i;
+
+    if (v->fat.dirty)
+        return 1;
+    for (i = 0; i < FSV_NODES; i++)
+        if (v->node[i].refs && v->node[i].changed)
+            return 1;
+    return 0;
+}
+
 int fsv_flush(struct fsv_vol *v)
+{
+    int r = FAT_OK, e, i;
+
+    lock(v);
+    if (fsv_dirty(v)) {
+        for (i = 0; i < FSV_NODES; i++)
+            if (v->node[i].refs && (e = node_out(v, &v->node[i])) != 0)
+                r = e;
+        if ((e = fat_flush(&v->fat)) != 0)
+            r = e;
+    }
+    unlock(v);
+    return r;
+}
+
+int fsv_commit(struct fsv_file *f)
 {
     int r;
 
-    lock(v);
-    r = fat_flush(&v->fat);
-    unlock(v);
+    if (!f->n)
+        return FSV_EBADF;
+    lock(f->v);
+    r = node_out(f->v, f->n);
+    unlock(f->v);
     return r;
 }
 
@@ -223,7 +276,7 @@ long fsv_write(struct fsv_file *f, const void *buf, unsigned long n)
         return FAT_EACCES;
     lock(f->v);
     to_fat(f, &ff);
-    r = fat_write(&ff, buf, n);
+    r = fat_write_later(&ff, buf, n);           /* (its entry and the FATs: at a close, a commit, a flush) */
     from_fat(f, &ff);
     unlock(f->v);
     return r;
@@ -274,6 +327,7 @@ int fsv_close(struct fsv_file *f)
     if (!n)
         return FSV_EBADF;
     lock(f->v);
+    r = node_out(f->v, n);                      /* (what its writes left for now: DOS's close) */
     n->readers -= (unsigned)reads(f->access);
     n->writers -= (unsigned)writes(f->access);
     n->deny_read -= (unsigned)denies_read(f->share);
@@ -281,9 +335,14 @@ int fsv_close(struct fsv_file *f)
     n->refs--;
     f->n = 0;
     if (!n->refs && n->gone) {
-        r = fat_free_chain(&f->v->fat, n->first);
+        int e = fat_free_chain(&f->v->fat, n->first);
+
+        if (e)
+            r = e;
         n->gone = 0;
     }
+    if (!n->refs)
+        n->changed = 0;
     unlock(f->v);
     return r;
 }
@@ -305,6 +364,13 @@ int fsv_lookup(struct fsv_vol *v, const char *path, struct fat_ent *e)
 
     lock(v);
     r = fat_lookup(&v->fat, path, e);
+    if (!r && !(e->attr & (FAT_A_DIR | FAT_A_LABEL))) {
+        const struct fsv_node *n = node_at(v, e->dir, e->index);
+
+        if (n && n->changed)                    /* (an open file being written: as it is now, not as its entry
+                                                   still has it) */
+            e->size = n->size, e->cluster = n->first;
+    }
     unlock(v);
     return r;
 }
@@ -409,6 +475,12 @@ int fsv_readdir(struct fsv_vol *v, struct fat_dir *d, struct fat_ent *e)
     lock(v);
     d->cl = d->cl_ord = 0;              /* (others may have grown or changed the folder since: from its start) */
     r = fat_readdir(d, e);
+    if (r == 1 && !(e->attr & (FAT_A_DIR | FAT_A_LABEL))) {
+        const struct fsv_node *n = node_at(v, e->dir, e->index);
+
+        if (n && n->changed)                    /* (a file being written: as it is now) */
+            e->size = n->size, e->cluster = n->first;
+    }
     unlock(v);
     return r;
 }

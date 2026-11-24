@@ -136,7 +136,8 @@ long fat_read(struct fat_file *f, void *buf, unsigned long n);
 int fat_seek(struct fat_file *f, unsigned long pos);
 
 /* ---- writing (N1b): a volume mounted with a write callback; every call writes what it changed before it
-   returns (write-through), FSInfo's count and hint and the clean bit at fat_flush */
+   returns (write-through), FSInfo's count and hint and the clean bit at fat_flush. One exception, for a file
+   that is written call after call: fat_write_later, which leaves the FATs and the file's entry for fat_commit */
 
 /* The volume, for reading and writing. `now` 0: times are left 0. */
 int fat_mount_rw(struct fat_vol *v, fat_read_fn read, fat_write_fn write, fat_time_fn now, void *ctx, int cp);
@@ -148,6 +149,14 @@ int fat_flush(struct fat_vol *v);
 int fat_create(struct fat_vol *v, const char *path, unsigned char attr, struct fat_file *f);
 /* n bytes at the file's position (past its end: the gap is zeros): how many, or an error. */
 long fat_write(struct fat_file *f, const void *buf, unsigned long n);
+/* The same, the data written and no more: the FATs' sectors it changed stay in the cache (written when the cache
+   needs their place, or with any entry that is written after) and the file's entry stays as it was (f->changed,
+   which the caller keeps with the file), until fat_commit, fat_flush or another call that writes this file's
+   entry. DOS's own way: a file's size is on the disk when the file is closed. The order a volume stays
+   repairable by holds: the FATs before the entry. */
+long fat_write_later(struct fat_file *f, const void *buf, unsigned long n);
+/* What fat_write_later left: the FATs, then the file's entry if it changed. */
+int fat_commit(struct fat_file *f);
 /* The file made `size` bytes long: clusters past it freed, or zeros added. */
 int fat_truncate(struct fat_file *f, unsigned long size);
 /* Its directory entry brought up to date (size, first cluster, written time): fat_write does it as it goes. */

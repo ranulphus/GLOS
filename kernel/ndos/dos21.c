@@ -692,6 +692,10 @@ static int end_program(struct dos_m *m, struct dos_regs86 *r, unsigned code, uns
             if (m->lfn[k].used && m->lfn[k].psp == cur)
                 m->lfn[k].used = 0;
         dos_mem_free_owner(&m->mcb, cur);
+        for (k = 0; k < DOS_DRIVES; k++)        /* (what it wrote is on the disk when it has ended, and the
+                                                   volumes are marked clean again) */
+            if (m->vol[k])
+                fsv_flush(m->vol[k]);
     }
     if ((parent == m->lay.root_psp && !m->root_runs) || parent == cur || cur == m->lay.root_psp) {
         set_psp(m, m->lay.root_psp);

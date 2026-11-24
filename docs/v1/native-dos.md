@@ -195,6 +195,16 @@ right error is part of the answer); **internal** after the core.
   untouched, the last-access date. ScanDisk must find nothing after GLOS has written a volume.
 - **Writes in a safe order:** data, then the FAT (both copies), then the directory entry; the volume marked
   dirty while anything is unwritten and clean again after the flush. Flushes when idle, at restart and power off.
+  **A file being written** has its data on the disk at each write; its entry (its size) and the FATs' sectors
+  its writes changed go there when a handle on it is closed, at a commit (68h; a duplicate handle closed), at a
+  flush (0Dh; a program's end; two seconds after something was left, at the next DOS call), or when the cache
+  needs a held sector's place: DOS's own way, since 2026-11-24 (`fat_write_later`, `fsv_commit`, a node's
+  `changed`). Until then the file is as its open node has it, for every handle, lookup and listing; a power
+  cut meanwhile leaves the file as it last was on the disk and the volume sound (the FATs always before the
+  entry). Before, every write call wrote both FATs and the entry: four disk commands for a write of one, which
+  made a program's writes several times slower natively than under FreeDOS (SFTP: 22 to 36 s a megabyte
+  against 8), and held the system VM's thread so long that an app's own timer handler came late (`thr`'s
+  `interrupts` case on the 486).
 - **Drive letters in MS-DOS's order:** the first primary partition of each hard disk, disk by disk; then the
   logical drives of each disk; then the other primaries. Paths like `C:\GAMES` mean the same under GLOS as under
   the MS-DOS beside it. A and B the floppies (B the phantom of A on a one-drive PC, as DOS has it).

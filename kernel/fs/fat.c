@@ -934,6 +934,8 @@ int fat_flush(struct fat_vol *v)
 
     if (!v->write)
         return FAT_EROFS;
+    if ((r = held_out(v)) != 0)
+        return r;
     if (v->fsinfo) {
         b = sector(v, v->fsinfo, &err);
         if (!b)
@@ -1513,6 +1515,9 @@ static int update_file(struct fat_file *f)
     unsigned long now = now_of(v);
     int r;
 
+    if ((r = held_out(v)) != 0)                 /* (the FATs a write left in the cache, before the entry that
+                                                   points at their chain: fat_write_later) */
+        return r;
     if (f->dir == FAT_NO_ENTRY) {               /* (a deleted file's: no entry to keep up) */
         f->changed = 0;
         return FAT_OK;
@@ -1666,7 +1671,9 @@ static long put_bytes(struct fat_file *f, const unsigned char *buf, unsigned lon
 
 /* What a put_bytes that stopped part way wrote still counts: the size covers it (DOS's short write when the disk
    is full). The entry is brought up to date after the data, whatever came of it. */
-long fat_write(struct fat_file *f, const void *buf, unsigned long n)
+/* A write's work. later: what it changed in the FATs stays in the cache (their sectors held) and the file's
+   entry as it was (f->changed), for fat_commit; else both are written before it returns. */
+static long write_file(struct fat_file *f, const void *buf, unsigned long n, int later)
 {
     unsigned long pos = f->pos, start;
     long r = 0;
@@ -1689,7 +1696,7 @@ long fat_write(struct fat_file *f, const void *buf, unsigned long n)
         f->v->hold = f->v->fat != 12;           /* (FAT12's entries across two sectors keep their own order) */
         r = put_bytes(f, buf, n);
         f->v->hold = 0;
-        e = held_out(f->v);                     /* the FATs, before the entry */
+        e = later ? FAT_OK : held_out(f->v);    /* the FATs, before the entry */
         if (e)
             return e;
     }
@@ -1697,10 +1704,19 @@ long fat_write(struct fat_file *f, const void *buf, unsigned long n)
         f->size = f->pos;
     if (f->pos != start)
         f->changed = 1;
-    e = f->changed ? update_file(f) : FAT_OK;
+    e = f->changed && !later ? update_file(f) : FAT_OK;
     if (e)
         return e;
     return f->pos != start ? (long)(f->pos - start) : r < 0 ? r : 0;
+}
+
+long fat_write(struct fat_file *f, const void *buf, unsigned long n) { return write_file(f, buf, n, 0); }
+
+long fat_write_later(struct fat_file *f, const void *buf, unsigned long n) { return write_file(f, buf, n, 1); }
+
+int fat_commit(struct fat_file *f)
+{
+    return f->changed ? update_file(f) : held_out(f->v);
 }
 
 int fat_truncate(struct fat_file *f, unsigned long size)

@@ -36,12 +36,17 @@ static int rd(void *ctx, unsigned long lba, unsigned char *buf, unsigned count)
     return 0;
 }
 
+static unsigned long calls_out, fat_out; /* the write callback's calls; those into the FATs (fat_lo to fat_hi) */
+static unsigned long fat_lo, fat_hi;
+
 static int wr(void *ctx, unsigned long lba, const unsigned char *buf, unsigned count)
 {
     (void)ctx;
     if (lba + count > SECTORS)
         return 1;
     memcpy(disk + lba * 512, buf, count * 512UL);
+    calls_out++;
+    fat_out += lba >= fat_lo && lba < fat_hi;
     return 0;
 }
 
@@ -341,6 +346,97 @@ static void t_listing(void)
         CHECK(seen[i] == 1, "stay%02d seen %d times", i, seen[i]);
 }
 
+/* The disk as it is now, mounted apart (what a power cut would leave): path's size there, or FFFFFFFFh if it
+   has no such file; *clean: the volume's clean mark. */
+static unsigned long on_disk(const char *path, int *clean)
+{
+    static struct fsv_vol other;
+    struct fat_ent e;
+
+    if (fsv_mount(&other, rd, 0, 0, 0, 437, 0) != 0)
+        return 0xFFFFFFFEUL;
+    if (clean)                                  /* (FAT16: the second entry's top bit, in the first FAT) */
+        *clean = (disk[other.fat.fat0 * 512 + 3] & 0x80) != 0;
+    return fsv_lookup(&other, path, &e) == 0 ? e.size : 0xFFFFFFFFUL;
+}
+
+/* A file's entry and the FATs go to the disk at its close, at a commit and at a flush, not at each write; until
+   then the file is the node's: other handles, searches and listings see it as it is. */
+static void t_later(void)
+{
+    static unsigned char a[6000], b[6000];
+    struct fsv_file w, r2;
+    struct fat_ent e;
+    struct fat_dir d;
+    unsigned long before;
+    int i, clean = 0, found = 0;
+
+    fill(a, sizeof a, 7);
+    fsv_mkdir(&vol, "\\LATER");
+    fsv_flush(&vol);
+    CHECK(!fsv_dirty(&vol) && on_disk("\\LATER", &clean) != 0xFFFFFFFEUL && clean, "clean at the start (%d)", clean);
+    CHECK(fsv_create(&vol, "\\LATER\\A.DAT", 0, 1, FSV_RW, FSV_DENY_NONE, &w) == 0, "create");
+    fat_lo = vol.fat.fat0, fat_hi = vol.fat.fat0 + vol.fat.nfats * vol.fat.fat_sectors;
+    before = fat_out;
+    for (i = 0; i < 6; i++)
+        CHECK(fsv_write(&w, a + i * 1000, 1000) == 1000, "write %d", i);
+    /* (six writes over three clusters: their data and nothing into the FATs, where each cluster's entry went to
+       both copies at once before; the mark that the volume isn't clean went there when the file was made) */
+    CHECK(fat_out - before == 0, "six writes made %lu writes into the FATs", fat_out - before);
+    CHECK(fsv_dirty(&vol), "not dirty after writes");
+    CHECK(on_disk("\\LATER\\A.DAT", &clean) == 0 && !clean, "on the disk before a close: %lu bytes, clean %d",
+          on_disk("\\LATER\\A.DAT", 0), clean);
+    CHECK(fsv_lookup(&vol, "\\LATER\\A.DAT", &e) == 0 && e.size == 6000 && e.cluster != 0, "a lookup meanwhile: %lu bytes",
+          e.size);
+    CHECK(fsv_opendir(&vol, "\\LATER", &d) == 0, "opendir");
+    while (fsv_readdir(&vol, &d, &e) == 1)
+        if (!strcmp(e.sname, "A.DAT"))
+            found = e.size == 6000;
+    CHECK(found, "a listing meanwhile");
+    CHECK(fsv_open(&vol, "\\LATER\\A.DAT", FSV_READ, FSV_DENY_NONE, &r2) == 0 && fsv_read(&r2, b, 6000) == 6000
+          && !memcmp(a, b, 6000), "another handle meanwhile");
+    /* a commit: on the disk, the handles still open */
+    CHECK(fsv_commit(&w) == 0 && on_disk("\\LATER\\A.DAT", 0) == 6000 && fat_out - before == 2,
+          "after a commit: %lu bytes, %lu writes into the FATs", on_disk("\\LATER\\A.DAT", 0), fat_out - before);
+    before = calls_out;
+    CHECK(fsv_commit(&w) == 0 && calls_out == before, "a commit with nothing new wrote %lu times", calls_out - before);
+    /* more written, the reader closed (any close writes the file's entry), then the writer */
+    CHECK(fsv_write(&w, a, 3000) == 3000 && on_disk("\\LATER\\A.DAT", 0) == 6000, "written on: still 6000 on the disk");
+    CHECK(fsv_close(&r2) == 0 && on_disk("\\LATER\\A.DAT", 0) == 9000, "after the reader's close: %lu", on_disk("\\LATER\\A.DAT", 0));
+    CHECK(fsv_write(&w, a, 500) == 500 && fsv_close(&w) == 0 && on_disk("\\LATER\\A.DAT", &clean) == 9500 && !clean,
+          "after the writer's close: %lu, clean %d", on_disk("\\LATER\\A.DAT", 0), clean);
+    /* a flush: every open file's entry, and the clean mark; nothing written when nothing waits */
+    CHECK(fsv_create(&vol, "\\LATER\\B.DAT", 0, 1, FSV_RW, FSV_DENY_NONE, &w) == 0 && fsv_write(&w, a, 4000) == 4000,
+          "a second file");
+    CHECK(fsv_flush(&vol) == 0 && on_disk("\\LATER\\B.DAT", &clean) == 4000 && clean && !fsv_dirty(&vol),
+          "after a flush: %lu, clean %d", on_disk("\\LATER\\B.DAT", 0), clean);
+    before = calls_out;
+    CHECK(fsv_flush(&vol) == 0 && calls_out == before, "a flush with nothing new wrote %lu times", calls_out - before);
+    /* cut shorter, then deleted while open and written: no entry comes back, its clusters are free at its close */
+    fsv_seek(&w, 1000);
+    CHECK(fsv_truncate(&w) == 0 && on_disk("\\LATER\\B.DAT", 0) == 1000, "a cut is on the disk at once: %lu",
+          on_disk("\\LATER\\B.DAT", 0));
+    {
+        unsigned long free0, free1;
+
+        fsv_free(&vol, &free0);
+        CHECK(fsv_write(&w, a, 6000) == 6000 && fsv_unlink(&vol, "\\LATER\\B.DAT") == 0 && fsv_write(&w, a, 6000) == 6000
+              && fsv_close(&w) == 0, "deleted while open and written");
+        fsv_free(&vol, &free1);
+        CHECK(on_disk("\\LATER\\B.DAT", 0) == 0xFFFFFFFFUL && free1 >= free0, "... gone, its clusters free (%lu, %lu before)",
+              free1, free0);
+    }
+    /* renamed while open and written: the entry that is written is the new one */
+    CHECK(fsv_create(&vol, "\\LATER\\C.DAT", 0, 1, FSV_RW, FSV_DENY_NONE, &w) == 0 && fsv_write(&w, a, 2500) == 2500
+          && fsv_rename(&vol, "\\LATER\\C.DAT", "\\LATER\\D.DAT") == 0 && fsv_close(&w) == 0
+          && on_disk("\\LATER\\D.DAT", 0) == 2500 && on_disk("\\LATER\\C.DAT", 0) == 0xFFFFFFFFUL,
+          "renamed while open and written: %lu", on_disk("\\LATER\\D.DAT", 0));
+    fsv_unlink(&vol, "\\LATER\\A.DAT");
+    fsv_unlink(&vol, "\\LATER\\D.DAT");
+    fsv_rmdir(&vol, "\\LATER");
+    fsv_flush(&vol);
+}
+
 int main(void)
 {
     disk = malloc(SECTORS * 512);
@@ -351,6 +447,7 @@ int main(void)
     t_entry_stays();
     t_limit();
     t_listing();
+    t_later();
     CHECK(!held, "the lock left held");
     CHECK(takes > 100, "the lock taken %d times", takes);
     printf("fsv_test: %d failures\n", fails);

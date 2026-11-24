@@ -340,6 +340,10 @@ static void release(struct dos_files *t, unsigned i)
     unsigned n = refs(t, i), k;
 
     if (n > 1) {
+        /* (one of several handles closed: the file's size goes to the disk now, as DOS writes it at each
+           close; programs flush a file so, by closing a duplicate of its handle) */
+        if (!t->k[i].dev && t->k[i].f.n)
+            fsv_commit(&t->k[i].f);
         wr16(entry(t, i), n - 1);
         return;
     }

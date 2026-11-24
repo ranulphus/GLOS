@@ -11,6 +11,9 @@
  *     made again (FSV_ESHARE, as DOS with SHARE answers), but can be renamed (the node follows it to its new
  *     entry) and deleted (its entry gone, the node's dir FAT_NO_ENTRY, its chain freed at the last close), as
  *     MS-DOS 7.1 renames and deletes one;
+ *   - a file's size and first cluster go to its directory entry, and the FATs' sectors its writes changed to
+ *     the disk, when a handle on it is closed, at fsv_commit and at fsv_flush, not at every write (DOS's way:
+ *     until then they are the node's, and what a power cut leaves is the file as it was, the volume sound);
  *   - sharing: each open says its access (read, write, both) and what it denies others (DOS's sharing modes);
  *     a new open that conflicts with one already there is refused (FSV_ESHARE). DOS's compatibility mode and
  *     whose process opened what are N2's (the DOS personality decides, with this as its mechanism).
@@ -44,6 +47,7 @@ struct fsv_node {
     unsigned deny_read, deny_write;     /* handles that deny others reading, writing */
     int gone;                           /* deleted while open: no entry (dir FAT_NO_ENTRY), its chain freed at the
                                            last close */
+    int changed;                        /* written since its entry was last brought up to date */
 };
 
 struct fsv_vol {
@@ -63,7 +67,11 @@ struct fsv_file {
 
 int fsv_mount(struct fsv_vol *v, fat_read_fn read, fat_write_fn write, fat_time_fn now, void *ctx, int cp,
               const struct fsv_lock *lk);
+/* Every open file's entry brought up to date, then the volume's own (fat_flush). Nothing is written if nothing
+   was since the last one. */
 int fsv_flush(struct fsv_vol *v);
+/* Whether anything waits for fsv_flush (a file's entry, the FATs, the clean mark). */
+int fsv_dirty(const struct fsv_vol *v);
 
 /* An existing file opened: FAT_ENOENT, FAT_EISDIR, FAT_EACCES (write access to a read-only file), FSV_ESHARE,
    FSV_ENFILE. */
@@ -77,6 +85,8 @@ long fsv_write(struct fsv_file *f, const void *buf, unsigned long n);
 int fsv_seek(struct fsv_file *f, unsigned long pos);
 /* The file cut (or lengthened with zeros) to the handle's position: DOS's write of 0 bytes. */
 int fsv_truncate(struct fsv_file *f);
+/* The file's entry and the FATs brought up to date now (DOS's commit, 68h; a duplicate handle closed). */
+int fsv_commit(struct fsv_file *f);
 unsigned long fsv_size(struct fsv_file *f);
 int fsv_close(struct fsv_file *f);
 
