@@ -312,17 +312,46 @@ void vm_sync_mask(void)
 int dev_line_heard(int irq) { return !(vpic_imr(&vm.pic) >> irq & 1); }
 
 /* A line becomes the kernel's: the VM never sees it again (supervisor.md §10). */
+/* A line becomes the kernel's: the VM never sees it again (supervisor.md §10). A second driver's claim of a line
+   that has one (docs/devices.md, step D2: two PCI functions of GLOS's on one line, a network card and a sound
+   chip, say) makes a chain: each handler is called at every interrupt of the line and looks at its own device,
+   which every one of GLOS's does (the network's wakes its thread, which finds nothing if it was not its card's).
+   With one driver on a line nothing differs from before: its handler is the line's. */
+#define CHAIN 4
+static void (*chain[16][CHAIN])(struct trapframe *);
+
+static void chained(struct trapframe *tf)
+{
+    u32 irq = (tf->vec - IRQ_BASE_MASTER) & 15, k;
+    for (k = 0; k < CHAIN && chain[irq][k]; k++)
+        chain[irq][k](tf);
+}
+
 void vm_claim_irq(int irq, void (*fn)(struct trapframe *))
 {
+    u32 k;
+    for (k = 0; k < CHAIN && chain[irq][k]; k++)
+        if (chain[irq][k] == fn)
+            return;                             /* (its own already) */
+    if (k == CHAIN) {
+        kprintf("GLOS-WARN irq=%d has %u drivers already: another refused\n", irq, k);
+        return;
+    }
+    chain[irq][k] = fn;
     kernel_lines |= (u16)(1u << irq);
-    set_irq_handler(irq, fn);
+    set_irq_handler(irq, k ? chained : fn);
+    if (k)
+        kprintf("GLOS-DEV line irq=%d drivers=%u\n", irq, k + 1);
     vm_sync_mask();
 }
 
 static void vm_irq_line(struct trapframe *tf);
 
-void vm_unclaim_irq(int irq)
+void vm_unclaim_irq(int irq)                    /* (every driver's claim of it: an ISA card's line, given back) */
 {
+    u32 k;
+    for (k = 0; k < CHAIN; k++)
+        chain[irq][k] = 0;
     kernel_lines &= (u16)~(1u << irq);
     kernel_masked &= (u16)~(1u << irq);
     set_irq_handler(irq, vm_irq_line);

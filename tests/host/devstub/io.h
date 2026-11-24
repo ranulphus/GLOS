@@ -5,6 +5,8 @@
 extern u16 fake_ports[65536];
 static inline u16 inw(u16 p) { return fake_ports[p]; }
 static inline void outw(u16 p, u16 v) { fake_ports[p] = v; }
+static inline u8 inb(u16 p) { return (u8)fake_ports[p]; }       /* (a byte register: a port of its own here) */
+static inline void outb(u16 p, u8 v) { fake_ports[p] = v; }
 static inline u32 irq_save(void) { return 0; }
 static inline void irq_restore(u32 f) { (void)f; }
 #endif

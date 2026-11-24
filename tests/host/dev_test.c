@@ -3,7 +3,8 @@
  * UHCI under the BIOS's legacy support made quiet and its SMI kept; one a
  * driver runs refused; a stale line register with no pin ignored; another
  * maker's UHCI made quiet only while it isn't running; a device with no
- * quiet driver in the way; one of GLOS's own in the way; a line elsewhere
+ * quiet driver in the way; one of GLOS's own not in the way (step D2); the sound chips' quiet drivers
+ * (ES1371, CMI8738, ICH, VIA: idle, an enable left on, driven); a line elsewhere
  * untouched; DOS taking a quiet device back. */
 #include <stdarg.h>
 #include <stdio.h>
@@ -264,19 +265,93 @@ int main(void)
     CHECK(dev_take_line(nic, with, sizeof with) == -1 && usb->keeper == DEV_DOS && mapped == 0);
     CHECK(strstr(logbuf, "why=no-memory") != NULL);
 
-    /* No quiet driver for it (a PCI sound card): in the way, untouched, and named in the log */
+    /* No quiet driver for it (a PCI sound card GLOS has no driver for): in the way, untouched, and named in the log */
     reset();
-    other = add(10, 0, 0x1274, 0x1371, 0x04, 0x01, 0x00, 1, 5, 0);
+    other = add(10, 0, 0x1013, 0x6003, 0x04, 0x01, 0x00, 1, 5, 0);
     nic = add(11, 0, 0x10EC, 0x8139, 0x02, 0x00, 0x00, 1, 5, 0);
     CHECK(dev_take_line(nic, with, sizeof with) == -1 && !strcmp(with, "00:0a.0") && other->keeper == DEV_DOS);
-    CHECK(!strcmp(logbuf, "GLOS-DEV shares 00:0a.0 id=1274:1371 class=040100 irq=5 keeper=dos\n"));
+    CHECK(!strcmp(logbuf, "GLOS-DEV shares 00:0a.0 id=1013:6003 class=040100 irq=5 keeper=dos\n"));
 
-    /* One of GLOS's own on the line: in the way until step D2 */
+    /* One of GLOS's own on the line (step D2): not in the way, its handler and the newcomer's are chained */
     reset();
     other = add(12, 0, 0x10EC, 0x8029, 0x02, 0x00, 0x00, 1, 9, 0);
     other->keeper = DEV_GLOS;
     nic = add(13, 0, 0x10EC, 0x8139, 0x02, 0x00, 0x00, 1, 9, 0);
-    CHECK(dev_take_line(nic, with, sizeof with) == -1 && !strcmp(with, "00:0c.0"));
+    CHECK(dev_take_line(nic, with, sizeof with) == 0 && !with[0] && other->keeper == DEV_GLOS && !logbuf[0]);
+
+    /* The sound chips GLOS has drivers for (step D2), on the network card's line.
+       An ES1371 with nothing enabled: quiet as it is, nothing written */
+    reset();
+    other = add(10, 0, 0x1274, 0x1371, 0x04, 0x01, 0x00, 1, 5, 0);
+    other->bar[0] = 0xD000 | 1;
+    nic = add(11, 0, 0x10EC, 0x8139, 0x02, 0x00, 0x00, 1, 5, 0);
+    fake_ports[0xD000] = 0x0000, fake_ports[0xD020] = 0x0000;
+    CHECK(dev_take_line(nic, with, sizeof with) == 0 && other->keeper == DEV_QUIET);
+    CHECK(strstr(logbuf, "GLOS-DEV quiet 00:0a.0 id=1274:1371 class=es1371 irq=5 how=no-intr\n") != NULL);
+    /* ... its playback interrupt enabled but the channel off: the enable cleared */
+    reset();
+    other = add(10, 0, 0x1274, 0x1371, 0x04, 0x01, 0x00, 1, 5, 0);
+    other->bar[0] = 0xD000 | 1;
+    nic = add(11, 0, 0x10EC, 0x8139, 0x02, 0x00, 0x00, 1, 5, 0);
+    fake_ports[0xD000] = 0x0000, fake_ports[0xD020] = 0x020C;
+    CHECK(dev_take_line(nic, with, sizeof with) == 0 && other->keeper == DEV_QUIET && fake_ports[0xD020] == 0x000C);
+    CHECK(strstr(logbuf, "how=intr") != NULL);
+    /* ... DAC2 playing by interrupt (a DOS driver's): somebody's, in the way */
+    reset();
+    other = add(10, 0, 0x1274, 0x1371, 0x04, 0x01, 0x00, 1, 5, 0);
+    other->bar[0] = 0xD000 | 1;
+    nic = add(11, 0, 0x10EC, 0x8139, 0x02, 0x00, 0x00, 1, 5, 0);
+    fake_ports[0xD000] = 0x0020, fake_ports[0xD020] = 0x020C;
+    CHECK(dev_take_line(nic, with, sizeof with) == -1 && other->keeper == DEV_DOS && fake_ports[0xD020] == 0x020C);
+    CHECK(strstr(logbuf, "GLOS-DEV keep 00:0a.0 id=1274:1371 class=es1371 irq=5 why=driven\n") != NULL);
+    /* A CMI8738: channel 0 enabled with its interrupt (driven); then only the interrupt (cleared) */
+    reset();
+    other = add(12, 0, 0x13F6, 0x0111, 0x04, 0x01, 0x00, 1, 10, 0);
+    other->bar[0] = 0xD400 | 1;
+    nic = add(13, 0, 0x10EC, 0x8139, 0x02, 0x00, 0x00, 1, 10, 0);
+    fake_ports[0xD402] = 0x0001, fake_ports[0xD40E] = 0x0801;
+    CHECK(dev_take_line(nic, with, sizeof with) == -1 && strstr(logbuf, "class=cmi8738 irq=10 why=driven") != NULL);
+    logbuf[0] = 0;
+    fake_ports[0xD402] = 0x0000;
+    CHECK(dev_take_line(nic, with, sizeof with) == 0 && other->keeper == DEV_QUIET && fake_ports[0xD40E] == 0x0800);
+    /* An ICH's AC'97 (its bus master block is BAR 1): PCM out running with its interrupts (driven); stopped
+       with them left on (cleared, the run bits as they were) */
+    reset();
+    other = add(31, 5, 0x8086, 0x2415, 0x04, 0x01, 0x00, 2, 11, 0);
+    other->bar[1] = 0xD800 | 1;
+    nic = add(13, 0, 0x8086, 0x1229, 0x02, 0x00, 0x00, 1, 11, 0);
+    fake_ports[0xD80B] = 0x00, fake_ports[0xD81B] = 0x1D, fake_ports[0xD82B] = 0x00;
+    CHECK(dev_take_line(nic, with, sizeof with) == -1 && strstr(logbuf, "class=ich97 irq=11 why=driven") != NULL);
+    logbuf[0] = 0;
+    fake_ports[0xD81B] = 0x1C;
+    CHECK(dev_take_line(nic, with, sizeof with) == 0 && other->keeper == DEV_QUIET && fake_ports[0xD81B] == 0x00);
+    /* A VIA VT8235's (its channels' control registers at +1): a DXS channel going with its interrupts (driven);
+       the same on a 686, whose enables are in the type register (+2); idle: quiet as it is; its I/O not
+       decoded: it can't interrupt */
+    reset();
+    other = add(17, 5, 0x1106, 0x3059, 0x04, 0x01, 0x00, 3, 12, 0);
+    other->bar[0] = 0xE000 | 1;
+    nic = add(18, 0, 0x1106, 0x3065, 0x02, 0x00, 0x00, 1, 12, 0);
+    fake_ports[0xE010] = 0x80, fake_ports[0xE011] = 0x23;
+    CHECK(dev_take_line(nic, with, sizeof with) == -1 && strstr(logbuf, "class=via-ac97 irq=12 why=driven") != NULL);
+    logbuf[0] = 0;
+    fake_ports[0xE010] = 0x00;
+    CHECK(dev_take_line(nic, with, sizeof with) == 0 && other->keeper == DEV_QUIET && fake_ports[0xE011] == 0x20);
+    reset();
+    other = add(7, 5, 0x1106, 0x3058, 0x04, 0x01, 0x00, 3, 5, 0);
+    other->bar[0] = 0xE400 | 1;
+    nic = add(18, 0, 0x1106, 0x3043, 0x02, 0x00, 0x00, 1, 5, 0);
+    fake_ports[0xE400] = 0x80, fake_ports[0xE402] = 0xB3;
+    CHECK(dev_take_line(nic, with, sizeof with) == -1 && strstr(logbuf, "why=driven") != NULL);
+    logbuf[0] = 0;
+    fake_ports[0xE400] = 0x00, fake_ports[0xE402] = 0x00;
+    CHECK(dev_take_line(nic, with, sizeof with) == 0 && strstr(logbuf, "how=no-intr") != NULL);
+    reset();
+    other = add(7, 5, 0x1106, 0x3058, 0x04, 0x01, 0x00, 3, 5, 0);
+    other->bar[0] = 0xE400 | 1;
+    command[0] = 6;
+    nic = add(18, 0, 0x1106, 0x3043, 0x02, 0x00, 0x00, 1, 5, 0);
+    CHECK(dev_take_line(nic, with, sizeof with) == 0 && strstr(logbuf, "how=off") != NULL);
 
     /* DOS writes a quiet device's configuration: DOS's again; a write to one of DOS's changes nothing */
     reset();

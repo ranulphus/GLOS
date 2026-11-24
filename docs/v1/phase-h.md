@@ -199,6 +199,14 @@ The mixer tries it after a Crystal chip and before the PCI cards. The virtual So
 - **Tests:** Loop A's audio suite gains bf6 + G200 + 86Box's `ess_es1688` (BLASTER "A220 I5 D1 T4"). The Sound
   Recorder must say it can't record. Bench D's ES1887 is owed.
 
+## Shared interrupt lines (2026-11-24)
+
+The PCI sound drivers took their line without asking, which on a PC whose sound chip shares the network card's
+line would have cost the network its interrupts. They now follow the devices rule, and the rule's step D2 was
+built for GLOS's own drivers: handlers on one line are chained, and an idle sound chip no longer gets a
+network card refused. `docs/devices.md` has the detail; the audio suite's `es1371-share` case proves both
+drivers at work on one line in Loop A.
+
 ## Tier 2: ISA Plug and Play (2026-11-23, night)
 
 `kernel/drv/isapnp.c` is the protocol, from Intel's and Microsoft's Plug and Play ISA Specification 1.0a: the

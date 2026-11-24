@@ -25,6 +25,7 @@ struct pci_dev {
 u32 pci_read32(u32 bus, u32 dev, u32 fn, u32 reg);
 void pci_write32(u32 bus, u32 dev, u32 fn, u32 reg, u32 v);
 int pci_scan(void);                     /* the number of functions found */
+void pci_share_test(void);              /* /SHAREIRQ: the first sound card's line made the first network card's */
 struct pci_dev *pci_find(u16 vendor, u16 device, int nth);
 struct pci_dev *pci_at(int i);          /* NULL past the end */
 void pci_claim(struct pci_dev *d);      /* its keeper is GLOS */

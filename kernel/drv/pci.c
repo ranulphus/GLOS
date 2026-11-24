@@ -223,6 +223,48 @@ int pci_video_mem(u32 base, u32 bytes)
     return 0;
 }
 
+/* /SHAREIRQ, a test's (docs/devices.md, step D2): Loop A's 86Box boards give every PCI card a line of its own,
+   and two of GLOS's drivers on one line could not be tried there. The first sound card's interrupt is led to the
+   first network card's line by the chipset's own routing: on a PIIX (8086:7000, 7110: configuration 60h-63h, a
+   PIRQ's IRQ each) the PIRQ that led to the sound card's IRQ is led to the network card's, and every function
+   that was on the old IRQ is told (its line register, and GLOS's list). */
+void pci_share_test(void)
+{
+    struct pci_dev *isa = pci_find(0x8086, 0x7110, 0), *net = 0, *snd = 0, *d;
+    u32 route, k, old, now, moved = 0;
+    int i;
+    if (!isa)
+        isa = pci_find(0x8086, 0x7000, 0);
+    for (i = 0; (d = pci_at(i)) != 0; i++) {
+        if (!net && d->class == 0x02 && pci_uses_line(d))
+            net = d;
+        if (!snd && d->class == 0x04 && pci_uses_line(d))
+            snd = d;
+    }
+    if (!isa || !net || !snd || net->irq == snd->irq) {
+        kprintf("GLOS-PCI shareirq none router=%u net=%u sound=%u\n", isa != 0, net ? net->irq : 0, snd ? snd->irq : 0);
+        return;
+    }
+    old = snd->irq, now = net->irq;
+    route = pci_read32(isa->bus, isa->dev, isa->fn, 0x60);
+    for (k = 0; k < 4; k++)
+        if (((route >> (8 * k)) & 0x8F) == old) {
+            route = (route & ~(0xFFu << (8 * k))) | (now << (8 * k));
+            moved++;
+        }
+    if (!moved) {
+        kprintf("GLOS-PCI shareirq none route=%08x sound=%u\n", route, old);
+        return;
+    }
+    pci_write32(isa->bus, isa->dev, isa->fn, 0x60, route);
+    for (i = 0; (d = pci_at(i)) != 0; i++)
+        if (d->pin && d->irq == old) {
+            d->irq = (u8)now;
+            pci_write32(d->bus, d->dev, d->fn, 0x3C, (pci_read32(d->bus, d->dev, d->fn, 0x3C) & ~0xFFu) | now);
+        }
+    kprintf("GLOS-PCI shareirq irq=%u was=%u route=%08x\n", now, old, route);
+}
+
 u32 pci_lfb_range(u32 *base, const struct pci_dev **card)
 {
     struct pci_dev *d;

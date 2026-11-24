@@ -163,10 +163,152 @@ static int mga_quiet(struct pci_dev *d, const char **how)
     return 0;
 }
 
+/* The PCI sound chips GLOS has drivers for (phase H; step D2, 2026-11-24): one that sits on the network card's
+   line is quiet while no channel of its runs with its interrupt enabled (the enables are cleared, if any is
+   set); one that plays or records by interrupt is somebody's (a DOS driver's) and stays so. Their registers are
+   in I/O space. From the same data sheets as the drivers (cmi8738.c, es1371.c, ich97.c, via686.c). */
+static u16 snd_io(const struct pci_dev *d, int bar)
+{
+    if (!(pci_read32(d->bus, d->dev, d->fn, 4) & 1) || !(d->bar[bar] & 1))
+        return 0;
+    return (u16)(d->bar[bar] & 0xFFFCu);
+}
+
+static int cmi_match(const struct pci_dev *d)
+{
+    return d->vendor == 0x13F6 && (d->device == 0x0100 || d->device == 0x0101 || d->device == 0x0111
+                                   || d->device == 0x0112);
+}
+
+static int cmi_quiet(struct pci_dev *d, const char **how)
+{
+    u16 io = snd_io(d, 0), on, ints;
+    if (!io) {
+        *how = "off";
+        return 0;
+    }
+    on = inw((u16)(io + 0x02)) & 3;             /* FUNCTRL0 bits 17:16: the channels enabled */
+    ints = inw((u16)(io + 0x0E)) & 3;           /* INT_HLDCLR bits 17:16: their interrupts */
+    if (on & ints) {
+        *how = "driven";
+        return -1;
+    }
+    if (!ints) {
+        *how = "no-intr";
+        return 0;
+    }
+    outw((u16)(io + 0x0E), (u16)(inw((u16)(io + 0x0E)) & ~3));
+    *how = "intr";
+    return 0;
+}
+
+static int es_match(const struct pci_dev *d)
+{
+    return d->vendor == 0x1274 && (d->device == 0x1371 || d->device == 0x5880);
+}
+
+static int es_quiet(struct pci_dev *d, const char **how)
+{
+    u16 io = snd_io(d, 0), on, ints;
+    if (!io) {
+        *how = "off";
+        return 0;
+    }
+    on = (inw(io) >> 4) & 7;                    /* CONTROL bits 6:4: DAC1, DAC2, ADC enabled */
+    ints = (inw((u16)(io + 0x20)) >> 8) & 7;    /* SERIAL bits 10:8: P1, P2, R1 interrupts */
+    if (((on >> 2) & ints & 1) | ((on >> 1) & (ints >> 1) & 1) | (on & (ints >> 2) & 1)) {
+        *how = "driven";
+        return -1;
+    }
+    if (!ints) {
+        *how = "no-intr";
+        return 0;
+    }
+    outw((u16)(io + 0x20), (u16)(inw((u16)(io + 0x20)) & ~0x0700));
+    *how = "intr";
+    return 0;
+}
+
+static int ich_match(const struct pci_dev *d)
+{
+    static const u16 ids[] = { 0x2415, 0x2425, 0x2445, 0x2485, 0x24C5, 0x24D5, 0x266E, 0x27DE, 0x7195 };
+    u32 k;
+    for (k = 0; k < sizeof ids / sizeof ids[0]; k++)
+        if (d->vendor == 0x8086 && d->device == ids[k])
+            return 1;
+    return 0;
+}
+
+static int ich_quiet(struct pci_dev *d, const char **how)
+{
+    u16 io = snd_io(d, 1), k;                   /* (the bus master block: BAR 1) */
+    u8 cr[3], any = 0;
+    if (!io) {
+        *how = "off";
+        return 0;
+    }
+    for (k = 0; k < 3; k++) {                   /* PCM in, PCM out, mic in: control at 0Bh, 1Bh, 2Bh */
+        cr[k] = inb((u16)(io + 0x0B + k * 0x10));
+        if ((cr[k] & 0x01) && (cr[k] & 0x1C)) { /* (running, with an interrupt enabled) */
+            *how = "driven";
+            return -1;
+        }
+        any |= cr[k] & 0x1C;
+    }
+    if (!any) {
+        *how = "no-intr";
+        return 0;
+    }
+    for (k = 0; k < 3; k++)
+        outb((u16)(io + 0x0B + k * 0x10), (u8)(cr[k] & ~0x1C));
+    *how = "intr";
+    return 0;
+}
+
+static int via_match(const struct pci_dev *d) { return d->vendor == 0x1106 && (d->device == 0x3058 || d->device == 0x3059); }
+
+static int via_quiet(struct pci_dev *d, const char **how)
+{
+    /* (the 686's three channels have their interrupt enables in the type register, +2; the VT8233 family's seven
+       in the control register, +1; a channel's status, +0, bit 7: it is going) */
+    static const u8 at686[] = { 0x00, 0x10, 0x20 }, at8233[] = { 0x00, 0x10, 0x20, 0x30, 0x40, 0x60, 0x70 };
+    int v8233 = d->device == 0x3059;
+    const u8 *at = v8233 ? at8233 : at686;
+    u32 n = v8233 ? sizeof at8233 : sizeof at686, k;
+    u16 io = snd_io(d, 0);
+    u8 any = 0;
+    if (!io) {
+        *how = "off";
+        return 0;
+    }
+    for (k = 0; k < n; k++) {
+        u8 ints = inb((u16)(io + at[k] + (v8233 ? 1 : 2))) & 3;
+        if (ints && (inb((u16)(io + at[k])) & 0x80)) {
+            *how = "driven";
+            return -1;
+        }
+        any |= ints;
+    }
+    if (!any) {
+        *how = "no-intr";
+        return 0;
+    }
+    for (k = 0; k < n; k++) {
+        u16 p = (u16)(io + at[k] + (v8233 ? 1 : 2));
+        outb(p, (u8)(inb(p) & ~3));
+    }
+    *how = "intr";
+    return 0;
+}
+
 static const struct quiet quiets[] = {
     { "uhci", uhci_match, uhci_quiet },
     { "ohci", ohci_match, ohci_quiet },
     { "mga", mga_match, mga_quiet },
+    { "cmi8738", cmi_match, cmi_quiet },
+    { "es1371", es_match, es_quiet },
+    { "ich97", ich_match, ich_quiet },
+    { "via-ac97", via_match, via_quiet },
 };
 
 /* ---- lines */
@@ -189,6 +331,10 @@ int dev_take_line(struct pci_dev *d, char *with, u32 room)
         const char *how = "no-driver";
         if (o == d || !pci_uses_line(o) || o->irq != d->irq || o->keeper == DEV_QUIET)
             continue;
+        if (o->keeper == DEV_GLOS)              /* (step D2: another of GLOS's own on the line is not in the way: their
+                                                   handlers are chained, vm_claim_irq; a USB controller of GLOS's
+                                                   uses no line at all) */
+            continue;
         if (o->keeper == DEV_DOS)
             for (k = 0; k < sizeof quiets / sizeof quiets[0]; k++)
                 if (quiets[k].match(o)) {
@@ -202,7 +348,7 @@ int dev_take_line(struct pci_dev *d, char *with, u32 room)
                     }
                     break;
                 }
-        if (o->keeper != DEV_QUIET) {           /* (GLOS's own on the same line: step D2) */
+        if (o->keeper != DEV_QUIET) {           /* (DOS's, and not to be made quiet: in the way) */
             if (room && !r)
                 ksnprintf(with, room, "%s", addr(o, a, sizeof a));
             /* (every one of them said, the first named: a PC's log then tells all that stands in the way) */

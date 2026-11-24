@@ -121,10 +121,34 @@ G's VIA sound shares IRQ 12 with a UHCI that is quiet, bench B's CMI8738 has IRQ
   line that isn't quiet, the sound card is refused (`GLOS-CMI refused shared-irq irq=11 with=00:0b.0`, and
   `shared-irq:...` in Devices), and the line stays the other device's. Once found whole, the card is GLOS's
   (`pci_claim`: DOS no longer finds it on the PCI bus while GLOS runs).
-- **Still so:** a network card that shares its line with a sound chip GLOS has not made quiet is refused, as
-  with any function nobody has quieted. Quiet drivers for the sound chips (interrupts off while no channel
-  runs) would lift that, and are not written: no bench needs them yet.
-- **Step D2** (chained handlers, above) is what lets the network card and the sound card both work on one line.
-  Bench G is where it could be proved: its sound shares IRQ 12 with a UHCI, its network card IRQ 11 with the
-  G550.
+
+## Step D2, its first half: GLOS's own drivers on one line (2026-11-24)
+
+Reading the rule again for the sound drivers showed that it was too strict for them as it stood: a USB
+controller of GLOS's own counted as in the way, though GLOS polls it and it uses no line, and sound chips often
+share a line with one. So the first half of D2 was built the same morning:
+
+- **A chain of handlers** (`vm_claim_irq`, kernel/vm/v86.c): a second driver's claim of a line adds its handler
+  to the first's; each is called at every interrupt of the line and looks at its own device (the sound
+  drivers read their status registers; the network's wakes its thread, which finds nothing if the card had
+  nothing). Four at most. With one driver on a line its handler is the line's, as before:
+  `GLOS-DEV line irq=11 drivers=2` is said when a chain is made.
+- **The rule:** another function of GLOS's own on the line is not in the way (`dev_take_line`).
+- **Quiet drivers for the sound chips GLOS drives** (CMI8738, ES1371 family, Intel ICH AC'97, VIA AC'97): a
+  network card that shares its line with one takes the line if no channel of the chip runs with its
+  interrupt enabled (`how=no-intr`, or `how=intr` when an enable had been left on and was cleared); a chip
+  that plays by interrupt is a DOS driver's and stays in the way (`why=driven`). The mixer's driver then
+  joins the network's on the line.
+- **Not built:** the second half, passing what none of GLOS's drivers claims on to a DOS driver's handler,
+  with its storm guard. A line shared with a device a DOS driver uses is still refused.
+- **Tests:**
+  - host: `dev_test` (the rule; each sound chip's quiet driver idle, with an enable left on, driven, and with
+    its I/O not decoded);
+  - Loop A: no 86Box board shares a line by itself, so `GLOS.EXE /SHAREIRQ` (a test's switch) leads the first
+    sound card's interrupt to the network card's line through the PIIX's routing registers. The audio suite's
+    `es1371-share` case then runs whole, over SSH, with both drivers on IRQ 11: `GLOS-PCI shareirq irq=11
+    was=12`, `GLOS-DEV quiet ... class=es1371 irq=11 how=no-intr`, `GLOS-DEV line irq=11 drivers=2`, every
+    check as without sharing, no watchdog kick.
+  - A real PC with a network card and a sound chip on one line has not been tried: none of the benches has
+    that.
 

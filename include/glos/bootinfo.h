@@ -45,6 +45,8 @@ typedef unsigned int   bi_u32;
 #define BI_F_VERBOSE     0x0200                 /* /VERBOSE: the kernel's log lines on the text screen too */
 #define BI_F_NATIVE      0x1000                 /* GLOSLDR.SYS started GLOS: no DOS in the system VM (native boot) */
 #define BI_F_BIOSDISK    0x2000                 /* /BIOSDISK: a native boot's C: by the BIOS's calls, an IDE disk too */
+#define BI_F_SHAREIRQ    0x4000                 /* /SHAREIRQ (a test's): the first PCI sound card's line made the
+                                                   first network card's (pci.c: Loop A's boards share none) */
 
 /* glos_call() functions (the ARPL at bp_call_off, AX = fn, EBX = arg). */
 #define GLOS_CALL_LEAVE  1                      /* stop the VM, back to real mode; arg = exit code */

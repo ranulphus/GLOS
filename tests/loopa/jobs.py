@@ -5184,7 +5184,9 @@ AUDIO_CASES = [("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k"),
                ("bf6", "g200", "ne2kpci", "cs4235"),      # (docs/crystal-audio.md: GLOS sets the chip up; 86Box
                ("bf6", "g200", "ne2kpci", "cmi8738"),     # offers these three Crystal cards, given MGA-Glide's
                ("bf6", "g200", "ne2kpci", "es1371"),      # sound/crystal ROMs) (phase H's PCI cards: kernel/drv/
-               ("bf6", "g200", "ne2kpci", "ess_es1688")]  # (... and an ESS AudioDrive, kernel/drv/ess.c)
+               ("bf6", "g200", "ne2kpci", "ess_es1688"),  # (... and an ESS AudioDrive, kernel/drv/ess.c)
+               ("bf6", "g200", "ne2kpci", "es1371", True, True)]  # (... and the ES1371 on the network card's line:
+#   GLOS.EXE /SHAREIRQ, two of GLOS's drivers on one line, docs/devices.md step D2)
 #   cmi8738.c and es1371.c; their lost edges on IRQ 12 are the mixer's watchdog's: docs/v1/phase-h.md)
 
 
@@ -5252,7 +5254,7 @@ def vsb_case(profile, vcard, card, sound="sb16", virtual=True):
     return "  %-26s %s%s" % ("vsb-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
 
 
-def audio_case(profile, vcard, card, sound="sb16", virtual=True):
+def audio_case(profile, vcard, card, sound="sb16", virtual=True, share=False):
     """GLOS's mixer (M8 step E; kernel/drv/mixer.c, sb16.c, tests/dos/audtest.c): with the desktop up GLOS plays
     the SB16 itself; AUDTEST's tone through a stream, then two streams of other rates and channels at once, then
     one while a session (a DOS program) has the card: no underrun in any while it was fed, the card given to the
@@ -5274,6 +5276,8 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
     # back, a Crystal chip's own BLASTER.
     if not virtual:
         tag += "-real"
+    if share:                                   # (GLOS.EXE /SHAREIRQ: the sound card's line made the network card's)
+        tag += "-share"
     blaster = "A220 I5 D1 T4" if (crystal and not virtual) or ess else "A220 I5 D1 H5 T6"
     # The Player's files (phase F): five seconds of 1175 Hz as a WAV (16 bits, one channel, 22050 Hz), and a
     # module of one long note: a sine of 32 bytes at the period 428, 259 Hz, for a pattern (7.7 seconds).
@@ -5315,7 +5319,8 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
         "--file", "tests/host/sndfix/PMP3.MP3=/TEST/PMP3.MP3", "--file", "tests/host/sndfix/POGG.OGG=/TEST/POGG.OGG",
         "--file", "sdk/gui/fonts/SMOOTH.DAT=/TEST/SMOOTH.DAT", "--file", "sdk/gui/fonts/FONTS.DAT=/TEST/FONTS.DAT",
         "--file", "sdk/gui/fonts/ICONS.DAT=/TEST/ICONS.DAT",
-        "--cmd", "SERSAY HX-START audio", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
+        "--cmd", "SERSAY HX-START audio", "--cmd", "VECCHK save",
+        "--cmd", "C:\\TEST\\GLOS.EXE" + (" /SHAREIRQ" if share else ""),
         "--cmd", "VECCHK check"] + (["--cmd", "SET BLASTER=" + blaster] if crystal else []) + [
         "--cmd", "SBCHK", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"], timeout=2400)
     agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
@@ -5350,6 +5355,16 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
             checks["blaster"] = "BLASTER=" + blaster in agent.ssh("SET")[1]
         if cmi or es:                           # (found on the PCI bus, its I/O and its line)
             checks["setup"] = re.search(r"GLOS-(CMI|ES) found io=[0-9a-f]+ irq=\d+", agent.log()) is not None
+        if share:                               # (docs/devices.md, step D2: the network card took the line with the
+            # sound chip made quiet; the sound driver's handler then chained to the network's; the whole case
+            # after this is both of them at work on the one line)
+            lg = agent.log()
+            m_sh = re.search(r"GLOS-PCI shareirq irq=(\d+) was=\d+", lg)
+            checks["share"] = (m_sh is not None and re.search(r"GLOS-DEV quiet \S+ id=1274:1371 class=es1371 irq=%s how="
+                                                              % m_sh.group(1), lg) is not None
+                               and "GLOS-DEV line irq=%s drivers=2" % m_sh.group(1) in lg)
+            if not checks["share"]:
+                print("    %s share: %r" % (tag, re.findall(r"GLOS-(?:PCI shareirq|DEV)[^\n]*", lg)[:8]))
         if ess:                                 # (found at BLASTER's port: an AudioDrive by its E7h answer)
             checks["setup"] = re.search(r"GLOS-ESS found port=220 irq=5 dma=1 dsp=3\.\d+ id=688", agent.log()) is not None
         checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0

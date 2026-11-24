@@ -463,6 +463,7 @@ static int flag_arg(const char *a)
     else if (!stricmp(a, "/DPMITRACE")) bi.flags |= BI_F_DPMITRACE;
     else if (!stricmp(a, "/DIRECT")) bi.flags |= BI_F_DIRECT;
     else if (!stricmp(a, "/VERBOSE")) bi.flags |= BI_F_VERBOSE;
+    else if (!stricmp(a, "/SHAREIRQ")) bi.flags |= BI_F_SHAREIRQ;
     else if (!strnicmp(a, "/CACHE=", 7) && cache_word(a + 7) >= 0) bi.cache_mode = (unsigned long)cache_word(a + 7);
     else if (!strnicmp(a, "/STUBPAGE=", 10) && cfg_page(a + 10) >= 0) bi.stub_page = (unsigned long)cfg_page(a + 10);
     else return 0;

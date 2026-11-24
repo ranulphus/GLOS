@@ -128,6 +128,8 @@ void kmain(struct bootinfo *loader_bi)
         services_init(bi);                      /* the background apps ([services] run; kernel/core/services.c) */
         schedule_init(bi);                      /* the commands GLOS runs at times (GLOS.DAT; kernel/core/schedule.c) */
         pci_scan();
+        if (bi->flags & BI_F_SHAREIRQ)
+            pci_share_test();
         cache_init(bi);                         /* the disk cache: its drives, the IDE ports it watches */
         lcon_init();                            /* the prompt on the PC's own screen (kernel/shell/lcon.c) */
         sshd_start(bi);                         /* (with no network too: GLOS's own commands are run on its
