@@ -79,6 +79,8 @@ static int phase = P_READY, watching;   /* watching: the careful skier has the s
    mountain; any key or click gives the game back, on the mountain it is at. */
 static unsigned attract_ms = 30000, idle_ms, stopped_ms;
 static int attract, attract_given;
+static int attract_left = -1;           /* (-attracts N, the suite's: so many starts by itself and no more, so that a
+                                           picture of the game given back is of something that stays; -1: any number) */
 static unsigned seed = 1;
 static int grade = SKI_BLUE, mode = SKI_SLALOM, of_day, jacket, figure, weather, arg_weather = -1;
 static unsigned last_ms, acc;           /* the frame's clock: milliseconds times sixty not yet made steps of */
@@ -496,8 +498,10 @@ static void frame(void *arg)            /* the game's clock: the steps that are 
         start(1);
         return;
     }
-    if (attract_ms && !attract && phase == P_READY && win->active && now - idle_ms >= attract_ms) {
+    if (attract_ms && attract_left && !attract && phase == P_READY && win->active && now - idle_ms >= attract_ms) {
         attract = 1;
+        if (attract_left > 0)
+            attract_left--;
         say("demonstration by itself");
         start(1);
         return;
@@ -1315,6 +1319,8 @@ int main(int argc, char **argv)
             today = atoi(argv[++i]);    /* (the suite's: a day that does not change) */
         else if (!strcmp(argv[i], "-attract") && i + 1 < argc)
             attract_ms = (unsigned)atol(argv[++i]), attract_given = 1;  /* (milliseconds; 0 never) */
+        else if (!strcmp(argv[i], "-attracts") && i + 1 < argc)
+            attract_left = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-weather") && i + 1 < argc)
             arg_weather = atoi(argv[++i]);      /* (the suite's: a weather from the first step) */
     }
