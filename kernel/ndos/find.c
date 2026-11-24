@@ -12,8 +12,7 @@ static void wr16(unsigned char *p, unsigned v)
     p[1] = (unsigned char)(v >> 8);
 }
 
-/* An entry's short name ("NAME.EXT") as its 11 directory bytes. */
-static void name11(const char *s, unsigned char out[11])
+void dos_name11(const char *s, unsigned char out[11])
 {
     int k = 0;
 
@@ -45,7 +44,7 @@ static int next(struct fsv_vol *v, unsigned char *dta)
     while ((r = fsv_readdir(v, &d, &e)) > 0) {
         unsigned char n11[11];
 
-        name11(e.sname, n11);
+        dos_name11(e.sname, n11);
         if (!dos_match(dta + 1, n11) || !dos_attr_match(dta[0x0C], e.attr))
             continue;
         wr16(dta + 0x0D, (unsigned)(d.index & 0xFFFF));

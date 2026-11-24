@@ -16,5 +16,7 @@ int dos_findfirst(struct fsv_vol *v, unsigned drive, const char *dir, const char
                   unsigned char *dta);
 /* 4Fh: the next, from the DTA alone. 0, or 12h. */
 int dos_findnext(struct fsv_vol *v, unsigned char *dta);
+/* An entry's short name ("NAME.EXT", "." and "..") as its 11 bytes in a folder. */
+void dos_name11(const char *s, unsigned char out[11]);
 
 #endif

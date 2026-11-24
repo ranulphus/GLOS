@@ -710,6 +710,7 @@ static int end_program(struct dos_m *m, struct dos_regs86 *r, unsigned code, uns
 /* ---- the machine */
 
 static void lol_make(struct dos_m *m);
+static void nls_make(struct dos_m *m);
 
 void dos_m_init(struct dos_m *m, unsigned char *mem, unsigned long size, const struct dos_layout *lay,
                 struct fsv_vol *v, int drive, int cp)
@@ -729,9 +730,10 @@ void dos_m_init(struct dos_m *m, unsigned char *mem, unsigned long size, const s
     for (i = 0; i < DOS_DRIVES; i++)
         strcpy(m->cds.cwd[i], "\\");
     memset(mem + lay->sda, 0, DOS_SDA_SIZE);
-    memset(mem + lay->misc, 0, 6);
+    memset(mem + lay->misc, 0, DOS_MISC);
     mem[lay->misc + 2] = 0xCB;                  /* (RETF) */
     lol_make(m);
+    nls_make(m);
     dos_files_init(&m->files, mem, m->lay.sft, DOS_FILES);
     dos_mem_init(&m->mcb, mem, size, m->lay.first_mcb, m->lay.low_top, 0, 0);
     dos_mem_alloc(&m->mcb, (sizeof env + 1 + 15) / 16, m->lay.root_psp, &envseg, &largest);
@@ -754,7 +756,7 @@ void dos_m_init(struct dos_m *m, unsigned char *mem, unsigned long size, const s
 int dos_m_init_vm(struct dos_m *m, unsigned char *mem, unsigned long size, unsigned psp, unsigned top,
                   unsigned low_top, struct fsv_vol *v, int drive, int cp, unsigned extra, unsigned *extra_seg)
 {
-    unsigned long bytes = 0x12 + 0x70 + DOS_SDA_SIZE + 0x20 + 6 + (unsigned long)DOS_FILES * DOS_SFT_SIZE;
+    unsigned long bytes = 0x12 + 0x70 + DOS_SDA_SIZE + DOS_MISC + 6 + (unsigned long)DOS_FILES * DOS_SFT_SIZE;
     unsigned paras = (unsigned)((bytes + 15) / 16), seg, largest, i;
     struct dos_psp_init pin;
     unsigned long base;
@@ -782,7 +784,7 @@ int dos_m_init_vm(struct dos_m *m, unsigned char *mem, unsigned long size, unsig
     m->lay.lol = base + 0x12;
     m->lay.sda = m->lay.lol + 0x70;
     m->lay.misc = m->lay.sda + DOS_SDA_SIZE;
-    m->lay.sft = m->lay.misc + 0x20;            /* (misc: 32 bytes here, the last 16 the system VM's own: vdos.c) */
+    m->lay.sft = m->lay.misc + DOS_MISC;        /* (misc: 10h on, the system VM's own: vdos.c) */
     m->lay.root_psp = psp;
     m->lay.first_mcb = psp - 1;
     m->lay.low_top = low_top;
@@ -793,6 +795,7 @@ int dos_m_init_vm(struct dos_m *m, unsigned char *mem, unsigned long size, unsig
         strcpy(m->cds.cwd[i], "\\");
     mem[m->lay.misc + 2] = 0xCB;                /* (RETF) */
     lol_make(m);
+    nls_make(m);
     dos_files_init(&m->files, mem, m->lay.sft, DOS_FILES);
     memset(&pin, 0, sizeof pin);
     pin.seg = psp;
@@ -1163,24 +1166,16 @@ static int serial(struct dos_m *m, struct dos_regs86 *r)
 
 /* 7302h: DL's drive's extended DPB at ES:DI (CX bytes, 3Fh at least), as MS-DOS 7.1 gives it for any FAT drive:
    the length (3Dh), DOS 4's DPB from the volume's parameters (FAT32's 16-bit fields 0), then FAT32's fields. */
-static int ext_dpb(struct dos_m *m, struct dos_regs86 *r)
+/* Drive d's parameter block as MS-DOS 7.1 lays it out (RBIL table 01395 with FAT32's fields: 3Dh bytes) at p. */
+static void dpb_fill(struct dos_m *m, int d, unsigned long p)
 {
-    unsigned long b = lin(r->es, r->di), p = b + 2;
-    int d = (r->dx & 0xFF) ? (int)(r->dx & 0xFF) - 1 : m->cds.current;
-    const struct fat_vol *f;
-    unsigned shift = 0, i, big;
+    const struct fat_vol *f = &m->vol[d]->fat;
+    unsigned shift = 0, i, big = f->fat == 32;
 
-    if (r->cx < 0x3F)
-        return err(m, r, 0x18);
-    if (d < 0 || d >= DOS_DRIVES || !m->vol[d])
-        return err(m, r, 0x0F);
-    f = &m->vol[d]->fat;
-    big = f->fat == 32;
     while ((1u << shift) < f->spc && shift < 8)
         shift++;
-    for (i = 0; i < 0x3F; i++)
-        wr8(m, b + i, 0);
-    wr16(m, b, 0x3D);
+    for (i = 0; i < 0x3D; i++)
+        wr8(m, p + i, 0);
     wr8(m, p + 0x00, (unsigned)d), wr8(m, p + 0x01, (unsigned)d);
     wr16(m, p + 0x02, 512);
     wr8(m, p + 0x04, f->spc - 1), wr8(m, p + 0x05, shift);
@@ -1203,29 +1198,121 @@ static int ext_dpb(struct dos_m *m, struct dos_regs86 *r)
     wr16(m, p + 0x31, (unsigned)f->fat_sectors), wr16(m, p + 0x33, (unsigned)(f->fat_sectors >> 16));
     wr16(m, p + 0x35, (unsigned)f->root_cluster), wr16(m, p + 0x37, (unsigned)(f->root_cluster >> 16));
     wr16(m, p + 0x39, (unsigned)f->next_free), wr16(m, p + 0x3B, (unsigned)(f->next_free >> 16));
+}
+
+static int ext_dpb(struct dos_m *m, struct dos_regs86 *r)
+{
+    unsigned long b = lin(r->es, r->di);
+    int d = (r->dx & 0xFF) ? (int)(r->dx & 0xFF) - 1 : m->cds.current;
+
+    if (r->cx < 0x3F)
+        return err(m, r, 0x18);
+    if (d < 0 || d >= DOS_DRIVES || !m->vol[d])
+        return err(m, r, 0x0F);
+    wr16(m, b, 0x3D);
+    dpb_fill(m, d, b + 2);
     return ok(r);
+}
+
+/* The country's 34 bytes (38h's buffer, 6501h's after its head): the USA's, as code page 437 is. */
+static void country_bytes(struct dos_m *m, unsigned char c[34])
+{
+    unsigned long map = m->lay.misc + 2;        /* (the case map: a RETF, to check) */
+
+    memset(c, 0, 34);
+    c[0x02] = '$';
+    c[0x07] = ',';
+    c[0x09] = '.';
+    c[0x0B] = '-';
+    c[0x0D] = ':';
+    c[0x10] = 2;
+    c[0x12] = (unsigned char)(map & 0xF), c[0x13] = 0;
+    c[0x14] = (unsigned char)(map >> 4), c[0x15] = (unsigned char)(map >> 12);
+    c[0x16] = ',';
 }
 
 static int country(struct dos_m *m, struct dos_regs86 *r)
 {
     unsigned long b = lin(r->ds, r->dx);
+    unsigned char c[34];
     unsigned i;
 
     if ((r->dx & 0xFFFF) == 0xFFFF)
         return err(m, r, 0x02);                 /* (setting a country: not this DOS's) */
+    country_bytes(m, c);
     for (i = 0; i < 34; i++)
-        wr8(m, b + i, 0);
-    wr16(m, b + 0x00, 0);                       /* (month, day, year: the USA's, as code page 437 is) */
-    wr8(m, b + 0x02, '$');
-    wr8(m, b + 0x07, ',');
-    wr8(m, b + 0x09, '.');
-    wr8(m, b + 0x0B, '-');
-    wr8(m, b + 0x0D, ':');
-    wr8(m, b + 0x10, 2);
-    wr16(m, b + 0x12, (unsigned)(m->lay.misc + 2) & 0xF);  /* (the case map: a RETF, to check) */
-    wr16(m, b + 0x14, (unsigned)(m->lay.misc + 2) >> 4);
-    wr8(m, b + 0x16, ',');
+        wr8(m, b + i, c[i]);
     r->bx = 1;
+    return ok(r);
+}
+
+/* The country's tables in the machine's memory (65h's: the layout's misc, MISC_UCASE on): upper case for the
+   bytes 80h-FFh, the same for file names (GLOS folds both by dos_upper: MS-DOS 7.1's COUNTRY.SYS tables where it
+   has the code page), and the characters a file name ends at (RBIL table 01750, as MS-DOS 7.1 has it). */
+static void nls_make(struct dos_m *m)
+{
+    static const unsigned char fterm[24] = { 0x16, 0x00, 0x01, 0x00, 0xFF, 0x00, 0x00, 0x20, 0x02, 0x0E,
+                                             '.', '"', '/', '\\', '[', ']', ':', '|', '<', '>', '+', '=', ';', ',' };
+    unsigned i;
+
+    wr16(m, m->lay.misc + MISC_UCASE, 128);
+    wr16(m, m->lay.misc + MISC_FUCASE, 128);
+    for (i = 0; i < 128; i++) {
+        wr8(m, m->lay.misc + MISC_UCASE + 2 + i, dos_upper(m->cp, (unsigned char)(0x80 + i)));
+        wr8(m, m->lay.misc + MISC_FUCASE + 2 + i, dos_upper(m->cp, (unsigned char)(0x80 + i)));
+    }
+    for (i = 0; i < sizeof fterm; i++)
+        wr8(m, m->lay.misc + MISC_FTERM + i, fterm[i]);
+}
+
+/* 65h, as MS-DOS 7.1 answers with no COUNTRY.SYS loaded (DOSDIFF's S65 lines): 01h the country's information
+   (as much of its 41 bytes as CX holds, 5 at least), 02h, 04h, 05h and 07h a table's address (upper case, file
+   names' upper case, file names' ends, an empty DBCS table), 06h (the collating table) done with nothing given,
+   as there; 20h-22h a character, a counted string, an ASCIZ string made upper case; 23h yes (1), no (0) or
+   neither (2). Another code page's or another country's, and what else there is: 01h. */
+static int nls(struct dos_m *m, struct dos_regs86 *r, unsigned al)
+{
+    unsigned long b = lin(r->es, r->di), t;
+    unsigned char info[41];
+    unsigned i, n;
+
+    switch (al) {
+    case 0x20:
+        r->dx = (r->dx & 0xFF00) | dos_upper(m->cp, (unsigned char)r->dx);
+        return ok(r);
+    case 0x21:
+    case 0x22:
+        b = lin(r->ds, r->dx);
+        for (i = 0; al == 0x21 ? i < (r->cx & 0xFFFF) : i < 0xFFFF && rd8(m, b + i) != 0; i++)
+            wr8(m, b + i, dos_upper(m->cp, (unsigned char)rd8(m, b + i)));
+        return ok(r);
+    case 0x23:
+        n = r->dx & 0xFF;
+        r->ax = n == 'Y' || n == 'y' ? 1 : n == 'N' || n == 'n' ? 0 : 2;
+        return ok(r);
+    }
+    if (al < 1 || al > 7 || al == 3 || (r->cx & 0xFFFF) < 5
+        || ((r->bx & 0xFFFF) != 0xFFFF && (int)(r->bx & 0xFFFF) != m->cp)
+        || ((r->dx & 0xFFFF) != 0xFFFF && (r->dx & 0xFFFF) != 1))
+        return err(m, r, 0x01);
+    if (al == 6)
+        return ok(r);
+    if (al == 1) {
+        n = (r->cx & 0xFFFF) > 41 ? 41 : r->cx & 0xFFFF;
+        info[0] = 1;
+        info[1] = (unsigned char)(n - 3), info[2] = 0;
+        info[3] = 1, info[4] = 0;
+        info[5] = (unsigned char)m->cp, info[6] = (unsigned char)(m->cp >> 8);
+        country_bytes(m, info + 7);
+        for (i = 0; i < n; i++)
+            wr8(m, b + i, info[i]);
+        r->cx = n;
+        return ok(r);
+    }
+    t = m->lay.misc + (al == 2 ? MISC_UCASE : al == 4 ? MISC_FUCASE : al == 5 ? MISC_FTERM : 0);
+    wr8(m, b, al);
+    wr16(m, b + 1, (unsigned)(t & 0xF)), wr16(m, b + 3, (unsigned)(t >> 4));
+    r->cx = 5;
     return ok(r);
 }
 
@@ -1507,13 +1594,43 @@ static int lfn(struct dos_m *m, struct dos_regs86 *r, unsigned al)
         strcpy(m->cds.cwd[drive], m->lfn_res);
         return ok(r);
     case 0x41:
-        if ((e = lfn_path(m, r->ds, r->dx, &v, &drive, p)) == 0) {
-            if (strchr(p, '*') || strchr(p, '?'))
-                e = 0x02;                       /* (patterns, SI 1: not here) */
+        if ((e = lfn_path(m, r->ds, r->dx, &v, &drive, p)) != 0)
+            return err(m, r, (unsigned)e);
+        if (!strchr(p, '*') && !strchr(p, '?'))
+            return done(m, r, no_file(v, p, fs_err(fsv_unlink(v, p), 0x02)));
+        if ((r->si & 0xFFFF) != 1)
+            return err(m, r, 0x02);             /* (a pattern is SI 1's) */
+        {
+            /* SI 1: every file of the folder that the last part matches, CL the attributes a search may find,
+               CH those a file must have. 02h if none was deleted. */
+            char *last = strrchr(p, '\\'), *pat = m->lfn_in;
+            unsigned search = r->cx & 0xFF, must = (r->cx >> 8) & 0xFF, n = 0;
+            struct fat_dir dir;
+            size_t plen;
+
+            if (strlen(last + 1) >= sizeof m->lfn_in)
+                return err(m, r, 0x03);
+            strcpy(pat, last + 1);
+            if (last == p)
+                last[1] = 0;                    /* (the root) */
             else
-                e = no_file(v, p, fs_err(fsv_unlink(v, p), 0x02));
+                *last = 0;
+            if (fsv_opendir(v, p, &dir) != 0)
+                return err(m, r, 0x03);
+            plen = strlen(p);
+            while (fsv_readdir(v, &dir, &fe) == 1) {
+                if ((fe.attr & (FAT_A_DIR | FAT_A_LABEL)) || !dos_attr_match(search, fe.attr)
+                    || (fe.attr & must) != must || !lfn_match(pat, &fe)
+                    || plen + 1 + strlen(fe.name) >= DOS_LONG_PATH * 2)
+                    continue;
+                strcpy(p2, p);
+                if (plen > 1)
+                    p2[plen] = '\\';
+                strcpy(p2 + plen + (plen > 1), fe.name);
+                n += fsv_unlink(v, p2) == 0;
+            }
+            return done(m, r, n ? 0 : 0x02);
         }
-        return done(m, r, e);
     case 0x43: {
         unsigned bl = r->bx & 0xFF;
 
@@ -1701,6 +1818,471 @@ static int lfn(struct dos_m *m, struct dos_regs86 *r, unsigned al)
 
 /* ---- INT 21h */
 
+/* ---- FCBs (0Fh-17h, 21h-24h, 27h, 28h)
+
+   Files as programs written for DOS 1, and for CP/M before it, open them: no handles and no paths, a File
+   Control Block of the program's own (RBIL table 01345) with a drive and a name in that drive's current
+   folder, records read and written through the DTA. An extended one (FFh first, the FCB seven bytes on) gives
+   an attribute: for searches, for the hidden and system files an open may find, for a file made. The open file
+   is files.c's (dos_fcb_open): the FCB's reserved bytes keep its place there and a ticket (18h, 1Ah). Every
+   call answers in AL alone; the flags stay as they came.
+
+   Every answer here is MS-DOS 7.1's on a FAT12 floppy (DOSDIFF's F lines, tools/ndos/msdos-ref.sh): on a
+   FAT32 volume MS-DOS 7.1 opens no file through an FCB at all, and GLOS's DOS does, there as anywhere. Not
+   here: a volume's label made or renamed through an FCB (DOS 2's way), a device read through one. */
+
+enum { F_BLOCK = 0x0C, F_RECSIZE = 0x0E, F_SIZE = 0x10, F_DATE = 0x14, F_TIME = 0x16, F_SLOT = 0x18,
+       F_MARK = 0x19,                           /* (A5h: an FCB that was opened once, here) */
+       F_TICKET = 0x1A, F_REC = 0x20, F_RANDOM = 0x21,
+       F_FOUND = 0x15 };                        /* (a search's FCB: its place at 0Ch-14h, the drive here) */
+
+/* The FCB at DS:DX (an extended one's: past its seven bytes), the attribute an extended one gives (else 0),
+   whether it is one. */
+static unsigned long fcb_at(struct dos_m *m, const struct dos_regs86 *r, unsigned *attr, int *ext)
+{
+    unsigned long f = lin(r->ds, r->dx);
+
+    *attr = 0;
+    *ext = rd8(m, f) == 0xFF;
+    if (*ext) {
+        *attr = rd8(m, f + 6);
+        f += 7;
+    }
+    return f;
+}
+
+/* A drive (0 A:) and a name's eleven bytes as a name DOS's calls take: "C:NAME.EXT", in the drive's current
+   folder. 0 if the bytes can't be a name. */
+static int fcb_str(int drive, const unsigned char n11[11], char out[16])
+{
+    unsigned k = 0, i, n;
+
+    out[k++] = (char)('A' + drive);
+    out[k++] = ':';
+    for (i = 0; i < 11; i++)
+        if (n11[i] < 0x20)
+            return 0;
+    for (n = 8; n && n11[n - 1] == ' '; n--)
+        ;
+    if (!n)
+        return 0;
+    for (i = 0; i < n; i++)
+        out[k++] = (char)n11[i];
+    for (n = 3; n && n11[8 + n - 1] == ' '; n--)
+        ;
+    if (n)
+        out[k++] = '.';
+    for (i = 0; i < n; i++)
+        out[k++] = (char)n11[8 + i];
+    out[k] = 0;
+    return 1;
+}
+
+/* The FCB at f: its drive (0 A:; the current one for the FCB's 0) and its name as fcb_str makes it; *wild: the
+   name has a '?'. 0 if it has no such drive or no name. */
+static int fcb_name(struct dos_m *m, unsigned long f, char out[16], int *drive, int *wild)
+{
+    unsigned d = rd8(m, f), i;
+    unsigned char n11[11];
+
+    *wild = 0;
+    if (d > DOS_DRIVES)
+        return 0;
+    *drive = d ? (int)d - 1 : m->cds.current;
+    for (i = 0; i < 11; i++)
+        if ((n11[i] = (unsigned char)rd8(m, f + 1 + i)) == '?')
+            *wild = 1;
+    return fcb_str(*drive, n11, out);
+}
+
+/* A file an extended FCB's attribute doesn't ask for: a folder, a label, a hidden or system file. */
+static int fcb_unseen(const struct fat_ent *fe, unsigned attr)
+{
+    return (fe->attr & (FAT_A_DIR | FAT_A_LABEL)) || (fe->attr & (FAT_A_HIDDEN | FAT_A_SYSTEM) & ~attr);
+}
+
+/* The FCB at f bound to its file: the name's file in the drive's current folder opened (create: made, or cut
+   to nothing), a pattern's first match (as MS-DOS opens it: the FCB keeps its pattern), its place and ticket
+   put in the FCB. The entry and *drive, or -1 (59h's code set). */
+static int fcb_bind(struct dos_m *m, unsigned long f, unsigned attr, int create, int *drive)
+{
+    unsigned slot, ticket;
+    int wild, d, e, i;
+    char name[16], path[128];
+    unsigned char dta[DOS_DTA_FIND];
+    struct fsv_vol *v = 0;
+    struct fat_ent fe;
+
+    m->last_error = 0x02;
+    if (!fcb_name(m, f, name, drive, &wild) || (wild && create))
+        return -1;
+    path[0] = 0;
+    if ((d = dev_name(name)) == 0) {
+        if (wild) {
+            char here[4];
+
+            here[0] = name[0], here[1] = ':', here[2] = '.', here[3] = 0;
+            if (resolve_str(m, here, &v, drive, path) != 0
+                || dos_findfirst(v, (unsigned)*drive, path, name + 2, attr & ~(unsigned)(FAT_A_DIR | FAT_A_LABEL), m->cp, dta) != 0)
+                return -1;
+            memcpy(name + 2, dta + 0x1E, 13);
+            name[15] = 0;
+        }
+        if (resolve_str(m, name, &v, drive, path) != 0)
+            return -1;
+        if (create ? (attr & (FAT_A_LABEL | FAT_A_DIR)) != 0 : fsv_lookup(v, path, &fe) != 0 || fcb_unseen(&fe, attr))
+            return -1;
+    }
+    e = dos_fcb_open(&m->files, cur_psp(m), v, (unsigned)*drive, path, d, create, (unsigned char)attr, &slot, &ticket);
+    if (e || (i = dos_fcb_entry(&m->files, slot, ticket)) < 0) {
+        m->last_error = e ? (unsigned)e : 0x02;
+        return -1;
+    }
+    wr8(m, f + F_SLOT, slot);
+    wr8(m, f + F_MARK, 0xA5);
+    wr16(m, f + F_TICKET, ticket);
+    return i;
+}
+
+/* An FCB's file for a call: the one it is bound to, or, for an FCB that was opened once and that this DOS no
+   longer knows (closed, or forgotten), the file its name says, bound again: MS-DOS reads and writes through a
+   closed FCB as if it were open (without SHARE its FCBs hold all it needs), and programs written for it may.
+   An FCB never opened has no file (01h from its calls, as MS-DOS says). */
+static int fcb_file(struct dos_m *m, unsigned long f, unsigned attr)
+{
+    int i = dos_fcb_entry(&m->files, rd8(m, f + F_SLOT), rd16(m, f + F_TICKET)), drive;
+
+    if (i >= 0 || rd8(m, f + F_MARK) != 0xA5)
+        return i;
+    return fcb_bind(m, f, attr, 0, &drive);
+}
+
+/* 0Fh, 16h: the file opened (made, or cut to nothing), the FCB filled as DOS fills it: its drive's number,
+   block 0, records of 128 bytes, the size, the date and the time; the record within the block and the random
+   record are the program's to set. */
+static int fcb_open(struct dos_m *m, struct dos_regs86 *r, int create)
+{
+    unsigned attr, slot, ticket, k;
+    int ext, drive, i;
+    unsigned long f = fcb_at(m, r, &attr, &ext), e;
+
+    set_al(r, 0xFF);
+    if ((i = fcb_bind(m, f, attr, create, &drive)) < 0)
+        return DOS21_DONE;
+    slot = rd8(m, f + F_SLOT), ticket = rd16(m, f + F_TICKET);
+    e = m->files.table + 6 + (unsigned long)i * DOS_SFT_SIZE;
+    wr8(m, f, (unsigned)drive + 1);
+    wr16(m, f + F_BLOCK, 0);
+    wr16(m, f + F_RECSIZE, 0x80);
+    wr32(m, f + F_SIZE, rd16(m, e + 0x11) | (unsigned long)rd16(m, e + 0x13) << 16);
+    wr16(m, f + F_DATE, rd16(m, e + 0x0F));
+    wr16(m, f + F_TIME, rd16(m, e + 0x0D));
+    for (k = 0x18; k < 0x20; k++)
+        wr8(m, f + k, 0);
+    wr8(m, f + F_SLOT, slot);
+    wr8(m, f + F_MARK, 0xA5);
+    wr16(m, f + F_TICKET, ticket);
+    set_al(r, 0);
+    return DOS21_DONE;
+}
+
+/* An FCB's record size: 128 put in it if it has none, as DOS does. */
+static unsigned fcb_recsize(struct dos_m *m, unsigned long f)
+{
+    unsigned n = rd16(m, f + F_RECSIZE);
+
+    if (!n)
+        wr16(m, f + F_RECSIZE, n = 0x80);
+    return n;
+}
+
+/* The record the sequential calls are at: the block's 128 and the record within it (its low seven bits). */
+static unsigned long fcb_seq(struct dos_m *m, unsigned long f)
+{
+    return (unsigned long)rd16(m, f + F_BLOCK) << 7 | (rd8(m, f + F_REC) & 0x7F);
+}
+
+static void fcb_set_seq(struct dos_m *m, unsigned long f, unsigned long rec)
+{
+    wr16(m, f + F_BLOCK, (unsigned)(rec >> 7 & 0xFFFF));
+    wr8(m, f + F_REC, (unsigned)(rec & 0x7F));
+}
+
+/* The random record: three bytes, and a fourth where records are shorter than 64 bytes. */
+static unsigned long fcb_random(struct dos_m *m, unsigned long f, unsigned size)
+{
+    unsigned long rec = rd16(m, f + F_RANDOM) | (unsigned long)rd8(m, f + F_RANDOM + 2) << 16;
+
+    if (size < 64)
+        rec |= (unsigned long)rd8(m, f + F_RANDOM + 3) << 24;
+    return rec;
+}
+
+static void fcb_set_random(struct dos_m *m, unsigned long f, unsigned size, unsigned long rec)
+{
+    wr16(m, f + F_RANDOM, (unsigned)(rec & 0xFFFF));
+    wr8(m, f + F_RANDOM + 2, (unsigned)(rec >> 16 & 0xFF));
+    if (size < 64)
+        wr8(m, f + F_RANDOM + 3, (unsigned)(rec >> 24));
+}
+
+/* n records of the FCB at f read, or written, at record rec through the DTA; *did the count done (a last record
+   read in part counts, the rest of it zeros). AL: 0; 1 (the file's end with nothing of a record read, the disk
+   full, a file that may not be written, an FCB whose file isn't there); 2 (the records don't fit before the
+   DTA's segment ends: those that fit were done); 3 (the last record read in part). */
+static unsigned fcb_rw(struct dos_m *m, unsigned long f, unsigned attr, int write, unsigned long rec, unsigned n,
+                       unsigned *did)
+{
+    unsigned size = fcb_recsize(m, f), off = dta_off(m), wrap = 0;
+    unsigned long a = lin(dta_seg(m), off), bytes;
+    int i = fcb_file(m, f, attr);
+    long got;
+
+    *did = 0;
+    if (i < 0 || rec > 0xFFFFFFFFUL / size)
+        return 1;
+    if ((unsigned long)n * size > 0x10000UL - off) {
+        n = (unsigned)((0x10000UL - off) / size);
+        wrap = 1;
+    }
+    bytes = (unsigned long)n * size;
+    if (!n || a >= m->size || bytes > m->size - a)
+        return 2;
+    switch (m->files.k[i].dev) {
+    case DOS_DEV_CON:
+    case DOS_DEV_AUX:
+    case DOS_DEV_PRN:
+        if (!write)
+            return 1;                           /* (a device's input is the console calls') */
+        if (m->files.k[i].dev == DOS_DEV_CON)
+            con_out(m, (const char *)m->mem + a, (unsigned)bytes);
+        *did = n;
+        return wrap ? 2 : 0;
+    }
+    if (write) {
+        got = dos_fcb_write(&m->files, i, rec * size, m->mem + a, bytes);
+        *did = got > 0 ? (unsigned)((unsigned long)got / size) : 0;
+        wr32(m, f + F_SIZE, dos_fcb_size(&m->files, i));
+        return *did < n ? 1 : wrap ? 2 : 0;
+    }
+    got = dos_fcb_read(&m->files, i, rec * size, m->mem + a, bytes);
+    if (got <= 0)
+        return 1;
+    *did = (unsigned)((unsigned long)got / size);
+    if ((unsigned long)got % size) {
+        memset(m->mem + a + got, 0, size - (unsigned)((unsigned long)got % size));
+        ++*did;
+        return 3;
+    }
+    return *did < n ? 1 : wrap ? 2 : 0;
+}
+
+/* 11h, 12h: the first, or the next, entry of the drive's current folder that the FCB's name (its '?'s any
+   character) and an extended FCB's attribute match, put in the DTA as an FCB of its own: the drive's number and
+   the entry's 32 bytes as a folder holds them (after the seven bytes of an extended one, if the search's FCB
+   is one). The search's place is kept in the search's FCB, 0Ch on. */
+static int fcb_find(struct dos_m *m, struct dos_regs86 *r, int first)
+{
+    unsigned attr, k;
+    int ext, wild, drive, e;
+    unsigned long f = fcb_at(m, r, &attr, &ext), out = lin(dta_seg(m), dta_off(m));
+    unsigned char dta[DOS_DTA_FIND], ent[32];
+    char name[16], path[128];
+    struct fsv_vol *v;
+    struct fat_ent fe;
+
+    set_al(r, 0xFF);
+    m->last_error = 0x12;
+    if (!fcb_name(m, f, name, &drive, &wild))
+        return DOS21_DONE;
+    if (first) {
+        char here[4];
+
+        here[0] = name[0], here[1] = ':', here[2] = '.', here[3] = 0;
+        wr8(m, f + F_FOUND, 0);
+        if (resolve_str(m, here, &v, &drive, path) != 0)
+            return DOS21_DONE;
+        if (attr == FAT_A_LABEL)
+            path[0] = '\\', path[1] = 0;        /* (the label: the root's, from any folder) */
+        e = dos_findfirst(v, (unsigned)drive, path, name + 2, attr, m->cp, dta);
+        if (e && e != 0x12)
+            return DOS21_DONE;
+    } else {
+        memset(dta, 0, sizeof dta);
+        drive = rd8(m, f + F_FOUND) & 0x1F;
+        if (!(rd8(m, f + F_FOUND) & 0x80) || drive >= DOS_DRIVES || !(v = m->vol[drive])
+            || dos_template(m->cp, name + 2, dta + 1) < 0)
+            return DOS21_DONE;
+        dta[0] = (unsigned char)drive;
+        for (k = 0x0C; k < 0x15; k++)
+            dta[k] = (unsigned char)rd8(m, f + k);
+        e = dos_findnext(v, dta);
+    }
+    for (k = 0x0C; k < 0x15; k++)
+        wr8(m, f + k, dta[k]);
+    wr8(m, f + F_FOUND, 0x80 | (unsigned)drive);
+    if (e)
+        return DOS21_DONE;
+    memset(ent, 0, sizeof ent);
+    if (dta[0x15] & FAT_A_LABEL) {              /* (eleven characters, no dot) */
+        memset(ent, ' ', 11);
+        for (k = 0; k < 11 && dta[0x1E + k]; k++)
+            ent[k] = dta[0x1E + k];
+    } else {
+        dos_name11((const char *)dta + 0x1E, ent);
+    }
+    ent[11] = dta[0x15];
+    memcpy(ent + 22, dta + 0x16, 4);            /* (the time, the date) */
+    memcpy(ent + 28, dta + 0x1A, 4);            /* (the size) */
+    memcpy(name + 2, dta + 0x1E, 13);           /* (a name of 12 characters at most, and its NUL) */
+    name[15] = 0;
+    if (!(ent[11] & FAT_A_LABEL) && resolve_str(m, name, &v, &drive, path) == 0 && fsv_lookup(v, path, &fe) == 0) {
+        ent[26] = (unsigned char)fe.cluster, ent[27] = (unsigned char)(fe.cluster >> 8);
+        ent[20] = (unsigned char)(fe.cluster >> 16), ent[21] = (unsigned char)(fe.cluster >> 24);
+    }
+    if (ext) {
+        wr8(m, out, 0xFF);
+        for (k = 1; k < 6; k++)
+            wr8(m, out + k, 0);
+        wr8(m, out + 6, attr);
+        out += 7;
+    }
+    wr8(m, out, (unsigned)drive + 1);
+    for (k = 0; k < 32; k++)
+        wr8(m, out + 1 + k, ent[k]);
+    set_al(r, 0);
+    return DOS21_DONE;
+}
+
+/* 13h (the files the FCB's name matches deleted: 00h if one was) and 17h (each renamed to the name at the
+   FCB's 11h, a '?' there keeping the old name's character: 00h if every one was, and there was one). */
+static int fcb_names(struct dos_m *m, struct dos_regs86 *r, int rename)
+{
+    unsigned attr, k, done = 0, left = 0, failed = 0;
+    int ext, wild, drive, d2, e;
+    unsigned long f = fcb_at(m, r, &attr, &ext);
+    unsigned char dta[DOS_DTA_FIND], o11[11], n11[11];
+    char name[16], here[4], dir[128], path[128], path2[128];
+    struct fsv_vol *v, *v2;
+
+    set_al(r, 0xFF);
+    m->last_error = 0x02;
+    if (!fcb_name(m, f, name, &drive, &wild))
+        return DOS21_DONE;
+    here[0] = name[0], here[1] = ':', here[2] = '.', here[3] = 0;
+    if (resolve_str(m, here, &v, &drive, dir) != 0)
+        return DOS21_DONE;
+    /* (as many as there are at the start: a file found again under its new name isn't taken twice) */
+    for (e = dos_findfirst(v, (unsigned)drive, dir, name + 2, attr, m->cp, dta); !e; e = dos_findnext(v, dta))
+        left++;
+    for (e = dos_findfirst(v, (unsigned)drive, dir, name + 2, attr, m->cp, dta); !e && left; e = dos_findnext(v, dta)) {
+        left--;
+        memcpy(name + 2, dta + 0x1E, 13);       /* (a name of 12 characters at most, and its NUL) */
+        name[15] = 0;
+        if (resolve_str(m, name, &v2, &d2, path) != 0)
+            continue;
+        if (!rename) {
+            if (!(dta[0x15] & (FAT_A_DIR | FAT_A_LABEL | FAT_A_RDONLY)) && fsv_unlink(v, path) == 0)
+                done++;
+            continue;
+        }
+        dos_name11((const char *)dta + 0x1E, o11);
+        for (k = 0; k < 11; k++)
+            if ((n11[k] = (unsigned char)rd8(m, f + 0x11 + k)) == '?')
+                n11[k] = o11[k];
+        if (!fcb_str(drive, n11, name) || resolve_str(m, name, &v2, &d2, path2) != 0
+            || fsv_rename(v, path, path2) != 0) {
+            failed = 1;
+            break;
+        }
+        done++;
+    }
+    if (done && !failed)
+        set_al(r, 0);
+    return DOS21_DONE;
+}
+
+static int fcb(struct dos_m *m, struct dos_regs86 *r, unsigned ah)
+{
+    unsigned attr, did = 0, size, al, n;
+    int ext, wild, drive, i;
+    unsigned long f = fcb_at(m, r, &attr, &ext), rec;
+    char name[16], path[128];
+    struct fsv_vol *v;
+    struct fat_ent fe;
+
+    switch (ah) {
+    case 0x0F:
+    case 0x16:
+        return fcb_open(m, r, ah == 0x16);
+    case 0x10:
+        /* (an FCB closed before, or forgotten: 00h as MS-DOS says, if its file is there; one never opened: FFh) */
+        i = dos_fcb_close(&m->files, rd8(m, f + F_SLOT), rd16(m, f + F_TICKET));
+        if (!i)
+            wr16(m, f + F_TICKET, 0);
+        else if (rd8(m, f + F_MARK) == 0xA5 && fcb_name(m, f, name, &drive, &wild)
+                 && resolve_str(m, name, &v, &drive, path) == 0
+                 && (wild || (fsv_lookup(v, path, &fe) == 0 && !(fe.attr & (FAT_A_DIR | FAT_A_LABEL)))))
+            i = 0;
+        set_al(r, i ? 0xFF : 0);
+        return DOS21_DONE;
+    case 0x11:
+    case 0x12:
+        return fcb_find(m, r, ah == 0x11);
+    case 0x13:
+    case 0x17:
+        return fcb_names(m, r, ah == 0x17);
+    case 0x14:                                  /* the next record read, written */
+    case 0x15:
+        rec = fcb_seq(m, f);
+        al = fcb_rw(m, f, attr, ah == 0x15, rec, 1, &did);
+        if (did)
+            fcb_set_seq(m, f, rec + 1);
+        set_al(r, al);
+        return DOS21_DONE;
+    case 0x21:                                  /* the random record read, written: the place stays on it */
+    case 0x22:
+        rec = fcb_random(m, f, fcb_recsize(m, f));
+        fcb_set_seq(m, f, rec);
+        set_al(r, fcb_rw(m, f, attr, ah == 0x22, rec, 1, &did));
+        return DOS21_DONE;
+    case 0x23:                                  /* a file's size in records, into the random record */
+        set_al(r, 0xFF);
+        if (!fcb_name(m, f, name, &drive, &wild) || wild || resolve_str(m, name, &v, &drive, path) != 0
+            || fsv_lookup(v, path, &fe) != 0 || fcb_unseen(&fe, attr))
+            return DOS21_DONE;
+        if ((size = rd16(m, f + F_RECSIZE)) == 0)
+            size = 0x80;                        /* (128 if it has none; here MS-DOS leaves the FCB's 0) */
+        fcb_set_random(m, f, size, fe.size / size + (fe.size % size != 0));
+        set_al(r, 0);
+        return DOS21_DONE;
+    case 0x24:                                  /* the random record set from the sequential place */
+        fcb_set_random(m, f, rd16(m, f + F_RECSIZE), fcb_seq(m, f));
+        return DOS21_DONE;
+    case 0x27:                                  /* CX records from the random record on, which moves past them */
+    case 0x28:
+        n = r->cx;
+        size = fcb_recsize(m, f);
+        rec = fcb_random(m, f, size);
+        al = 0;
+        if (n) {
+            al = fcb_rw(m, f, attr, ah == 0x28, rec, n, &did);
+        } else if (ah == 0x28) {                /* (no records: the file's size made the random record's place) */
+            i = fcb_file(m, f, attr);
+            if (i < 0 || rec > 0xFFFFFFFFUL / size || dos_fcb_write(&m->files, i, rec * size, 0, 0) < 0)
+                al = 1;
+            else
+                wr32(m, f + F_SIZE, dos_fcb_size(&m->files, i));
+        }
+        r->cx = did;
+        fcb_set_random(m, f, size, rec + did);
+        fcb_set_seq(m, f, rec + did);
+        set_al(r, al);
+        return DOS21_DONE;
+    }
+    return DOS21_UNANSWERED;
+}
+
 static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
 {
     unsigned ah = ah_of(r), al = al_of(r), h;
@@ -1802,6 +2384,72 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
         }
         set_al(r, DOS_DRIVES);                  /* (MS-DOS 7.1's: 26, LASTDRIVE=Z) */
         return DOS21_DONE;
+    case 0x03:                                  /* AUX's input: no port, the end of what there is (Ctrl-Z) */
+        set_al(r, 0x1A);
+        return DOS21_DONE;
+    case 0x04:                                  /* AUX's output, the printer's: nowhere, as writes by handle */
+    case 0x05:
+        return DOS21_DONE;
+    case 0x1F:                                  /* the current drive's parameter block, a drive's: DS:BX (one
+                                                   place for every drive: made at each call) */
+    case 0x32:
+        d = ah == 0x32 && (r->dx & 0xFF) ? (int)(r->dx & 0xFF) - 1 : m->cds.current;
+        if (d < 0 || d >= DOS_DRIVES || !m->vol[d] || m->vol[d]->fat.fat == 32) {
+            set_al(r, 0xFF);                    /* (a FAT32 drive's is 7302h's, as in MS-DOS 7.1) */
+            return DOS21_DONE;
+        }
+        dpb_fill(m, d, m->lay.misc + MISC_DPB);
+        r->ds = (unsigned)(m->lay.misc >> 4), r->bx = (unsigned)(m->lay.misc & 0xF) + MISC_DPB;
+        set_al(r, 0);
+        return DOS21_DONE;
+    case 0x26:                                  /* a PSP made at DX by the program: 256 bytes of its code
+                                                   segment (a .COM's PSP), the vectors as they are now, 20
+                                                   handles in it, as MS-DOS 7.1 makes it */
+    case 0x55: {                                /* ... and a child's, of the current PSP's bytes: its parent
+                                                   the current one, SI the segment past its memory, the
+                                                   handles a child inherits; made the current one */
+        unsigned cur = cur_psp(m), k;
+        unsigned long p = lin(r->dx, 0), c = lin(ah == 0x26 ? r->cs : cur, 0);
+        unsigned char jft[20];
+
+        if (p + 0x100 > m->size)
+            return DOS21_DONE;
+        for (k = 0; k < 0x100; k++)
+            wr8(m, p + k, rd8(m, c + k));
+        wr16(m, p, 0x20CD);
+        for (k = 0; k < 3; k++) {
+            wr16(m, p + 0x0A + k * 4, (unsigned)(vec(m, 0x22 + k) & 0xFFFF));
+            wr16(m, p + 0x0C + k * 4, (unsigned)(vec(m, 0x22 + k) >> 16));
+        }
+        wr16(m, p + 0x32, 20);
+        wr16(m, p + 0x34, 0x18), wr16(m, p + 0x36, r->dx);
+        wr16(m, p + 0x40, rd16(m, lin(cur, 0x40)));
+        if (ah == 0x55) {
+            wr16(m, p + 0x02, r->si);
+            wr16(m, p + 0x16, cur);
+            dos_inherit(&m->files, cur, jft);
+            for (k = 0; k < 20; k++)
+                wr8(m, p + 0x18 + k, jft[k]);
+            set_psp(m, r->dx);
+        }
+        return DOS21_DONE;
+    }
+    case 0x1B:                                  /* the current drive's clusters, a drive's: DS:BX its media byte */
+    case 0x1C:
+        d = ah == 0x1C && (r->dx & 0xFF) ? (int)(r->dx & 0xFF) - 1 : m->cds.current;
+        if (d < 0 || d >= DOS_DRIVES || !(v = m->vol[d])) {
+            set_al(r, 0xFF);
+            return DOS21_DONE;
+        }
+        wr8(m, m->lay.misc + MISC_MEDIA, d < 2 ? 0xF0 : 0xF8);
+        set_al(r, v->fat.spc);                  /* (FAT32's large counts cut, as 36h's) */
+        r->cx = 512;
+        r->dx = (unsigned)(v->fat.clusters > 0xFFFF ? 0xFFFF : v->fat.clusters);
+        r->ds = (unsigned)(m->lay.misc >> 4), r->bx = (unsigned)(m->lay.misc & 0xF) + MISC_MEDIA;
+        return DOS21_DONE;
+    case 0x0F: case 0x10: case 0x11: case 0x12: case 0x13: case 0x14: case 0x15: case 0x16: case 0x17:
+    case 0x21: case 0x22: case 0x23: case 0x24: case 0x27: case 0x28:
+        return fcb(m, r, ah);
     case 0x19:
         set_al(r, (unsigned)m->cds.current);
         return DOS21_DONE;
@@ -1887,6 +2535,13 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
         r->dx = (unsigned)(v->fat.clusters > 0xFFFF ? 0xFFFF : v->fat.clusters);
         return DOS21_DONE;
     }
+    case 0x37:                                  /* the switch character: '/', and AL as it came whatever was
+                                                   asked, as MS-DOS 7.1 answers */
+        if (al == 0)
+            r->dx = (r->dx & 0xFF00) | '/';
+        if (al == 2)
+            r->dx = (r->dx & 0xFF00) | 0xFF;    /* (device names need no \DEV\) */
+        return DOS21_DONE;
     case 0x38:
         if (al == 0 || al == 1)
             return country(m, r);
@@ -1931,6 +2586,68 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
             return err(m, r, (unsigned)e);
         r->ax = h;
         return ok(r);
+    case 0x5A: {
+        /* A file with a name of DOS's making in the folder at DS:DX (a path, a backslash at its end or given
+           one, 13 bytes of room after it), CX its attributes: the handle, the whole name at DS:DX. */
+        unsigned n, k, tries;
+
+        if (str_in(m, r->ds, r->dx, path2, sizeof path2 - 14) != 0)
+            return err(m, r, 0x03);
+        n = (unsigned)strlen(path2);
+        if (n && path2[n - 1] != '\\' && path2[n - 1] != '/' && path2[n - 1] != ':')
+            path2[n++] = '\\';
+        for (tries = 0, e = 0x50; tries < 100 && e == 0x50; tries++) {
+            unsigned long t = (m->now ? m->now(m->ctx) : 0) * 2654435761UL + ++m->temp_n * 0x9E3779B1UL;
+
+            for (k = 0; k < 8; k++)
+                path2[n + k] = (char)('A' + (t >> (k * 4) & 15));
+            path2[n + 8] = 0;
+            if ((e = resolve_str(m, path2, &v, &drive, path)) != 0)
+                return err(m, r, e == 0x02 ? 0x03 : (unsigned)e);
+            e = no_file(v, path, dos_create(&m->files, cur_psp(m), v, (unsigned)drive, path, (unsigned char)r->cx,
+                                            0, &h));
+        }
+        if (e)
+            return err(m, r, e == 0x02 ? 0x03 : (unsigned)e);
+        str_out(m, r->ds, r->dx, path2);
+        r->ax = h;
+        return ok(r);
+    }
+    case 0x5C: {
+        unsigned long off = (unsigned long)r->cx << 16 | (r->dx & 0xFFFF), len = (unsigned long)r->si << 16 | (r->di & 0xFFFF);
+
+        if (al > 1)
+            return err(m, r, 0x01);
+        return done(m, r, dos_lock(&m->files, cur_psp(m), r->bx, (int)al, off, len));
+    }
+    case 0x67: {
+        /* A program's handle table made BX handles: past 20, in a block of its own (the PSP's 32h and 34h say
+           where); 20 or fewer, back in the PSP. 04h if a handle past the new count is open, 08h if there is no
+           memory for the table. */
+        unsigned psp = cur_psp(m), want = r->bx < 20 ? 20 : r->bx, have = rd16(m, lin(psp, 0x32)), seg = psp, off = 0x18,
+                 largest, k;
+        unsigned old_seg = rd16(m, lin(psp, 0x36)), old_off = rd16(m, lin(psp, 0x34));
+        unsigned long old = lin(old_seg, old_off), neu;
+
+        if (want == have)
+            return ok(r);
+        for (k = want; k < have; k++)
+            if (rd8(m, old + k) != 0xFF)
+                return err(m, r, 0x04);
+        if (want > 20) {
+            if (dos_mem_alloc(&m->mcb, (want + 15) / 16, psp, &seg, &largest) != 0)
+                return err(m, r, 0x08);
+            off = 0;
+        }
+        neu = lin(seg, off);
+        for (k = 0; k < want; k++)
+            wr8(m, neu + k, k < have ? rd8(m, old + k) : 0xFF);
+        if (!(old_seg == psp && old_off == 0x18))
+            dos_mem_free(&m->mcb, old_seg);
+        wr16(m, lin(psp, 0x32), want);
+        wr16(m, lin(psp, 0x34), off), wr16(m, lin(psp, 0x36), seg);
+        return ok(r);
+    }
     case 0x3E:
         return done(m, r, dos_close(&m->files, cur_psp(m), r->bx));
     case 0x3F:
@@ -2127,6 +2844,21 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
         r->cx = (r->cx & 0x00FF) | loc << 8;
         return DOS21_DONE;
     }
+    case 0x5E:
+        if (al == 0) {                          /* the machine's name: none (CH 0), fifteen blanks */
+            unsigned k;
+
+            for (k = 0; k < 15; k++)
+                wr8(m, lin(r->ds, r->dx) + k, ' ');
+            wr8(m, lin(r->ds, r->dx) + 15, 0);
+            r->cx = 0;
+            return ok(r);
+        }
+        return err(m, r, 0x01);
+    case 0x5F:                                  /* redirections: no network, as MS-DOS 7.1 without one says */
+        return err(m, r, 0x01);
+    case 0x65:
+        return nls(m, r, al);
     case 0x63:
         if (al == 0) {
             r->ds = (unsigned)(m->lay.misc >> 4), r->si = (unsigned)(m->lay.misc & 0xF);

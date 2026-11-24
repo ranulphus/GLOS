@@ -7472,6 +7472,7 @@ def ndos_nhello():
 DOSDIFF_KNOWN = {
     "5D06h": "GLOS's own swappable data area, 16 bytes",
     "71A0h": "long names: GLOS's own DOS answers the 71xxh calls, which MS-DOS 7.1 with no Windows refuses",
+    "S5C0": "regions locked (5Ch): SHARE's call, built into GLOS's DOS; MS-DOS 7.1 says 01h until SHARE is loaded",
 }
 
 
@@ -13081,6 +13082,9 @@ def main():
         if os.environ.get("NBOOT_MSDOS"):
             cases = [c + (True,) for c in cases if c[0] == "bf6"]
         return 0 if all(r[1] for r in matrix(nboot_dual_case, cases, a.jobs)) else 1
+    if a.suite == "nboot" and os.environ.get("NBOOT_ONLY") == "dos":      # (GLOS's own DOS alone: DOSDIFF, NDOSTEST)
+        cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
+        return 0 if all(r[1] for r in matrix(nboot_dos_case, cases, a.jobs)) else 1
     if a.suite == "nboot":                      # (native boot: the bf6, the 486)
         cases = [c for c in [("bf6", None), ("486dx2", None)] if not a.profile or c[0] in a.profile]
         res = matrix(nboot_case, cases, a.jobs)

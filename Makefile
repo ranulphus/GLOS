@@ -151,6 +151,11 @@ host-test-run: build/host/libpdfbr32.a
 	  kernel/ndos/mcb.c kernel/ndos/path.c kernel/ndos/find.c kernel/ndos/names.c kernel/ndos/fucase.c kernel/ndos/dtime.c \
 	  kernel/fs/fsv.c kernel/fs/fat.c kernel/disk/fatfmt.c kernel/disk/mbr.c kernel/disk/mbrboot.S kernel/disk/fdboot.S \
 	  $(CP_SRCS) && build/host/dos21_test
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-format-truncation -Ikernel/include -Iinclude -o build/host/fcb_test \
+	  tests/host/fcb_test.c kernel/ndos/dos21.c kernel/ndos/files.c kernel/ndos/share.c kernel/ndos/psp.c kernel/ndos/exe.c \
+	  kernel/ndos/mcb.c kernel/ndos/path.c kernel/ndos/find.c kernel/ndos/names.c kernel/ndos/fucase.c kernel/ndos/dtime.c \
+	  kernel/fs/fsv.c kernel/fs/fat.c kernel/disk/fatfmt.c kernel/disk/mbr.c kernel/disk/mbrboot.S kernel/disk/fdboot.S \
+	  $(CP_SRCS) && build/host/fcb_test
 	@$(HOST_CC) -m32 -O2 -g -Wall -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint -o build/host/crypto_kat \
 	  tests/host/crypto_kat.c $(TINYSSH_SRCS) && build/host/crypto_kat
 	@$(HOST_CC) -m32 -O2 -g -Wall -Wextra -Werror -Ikernel/include -Iinclude -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint \
@@ -685,6 +690,9 @@ build/lwip/%.o: third_party/lwip/src/%.c $(wildcard kernel/net/port/*.h kernel/n
 # API 2.0's VERSION names the build (git describe): its object made again when that changes (build/build_id).
 build/kernel/app/api2.c.o: build/build_id
 build/kernel/app/api2.c.o: KCFLAGS += -DGLOS_BUILD='"$(BUILD_ID)"'
+# GLOS's own INT 21h is built for size: one large dispatcher whose work is done elsewhere (the file system, the
+# cache, the disk), and the 720 KB floppy's packed kernel has little room left (GLOSK.PAK: 607,232 bytes).
+build/kernel/ndos/dos21.c.o: KCFLAGS += -Os
 build/kernel/%.o: kernel/% $(wildcard kernel/include/*.h include/glos/*.h)
 	@mkdir -p $(dir $@)
 	$(Q)echo "  KCC     $<"

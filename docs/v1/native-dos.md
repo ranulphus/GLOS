@@ -793,9 +793,84 @@ them. DOSDIFF's 71A0h line is the one answer that knowingly differs from MS-DOS 
   (a folder and a file with long names made through Open Watcom's `intdosx`, found by a pattern with both names,
   opened by their short names, removed): `long names: ok` on GLOS's own DOS, `long names: none` under a DOS that
   refuses 71A0h.
-- **Still to come here:** deleting by a pattern (7141h, SI 1), names outside the code page (the calls' Unicode
-  flags), a longer current folder than the CDS's 64 bytes, and the kernel's own shell and SFTP, which still list
-  and take short names when they go through DOS.
+- **Deleting by a pattern** (7141h with SI 1, since 2026-11-24): every file of the folder that the last part
+  matches by its long or its short name, CL the attributes a search may find and CH those a file must have;
+  02h if none was deleted. A pattern without SI 1 is refused (02h), as before.
+- **Still to come here:** names outside the code page (the calls' Unicode flags), a longer current folder than
+  the CDS's 64 bytes, and the kernel's own shell and SFTP, which still list and take short names when they go
+  through DOS.
+
+### Old programs' files: FCBs (2026-11-24)
+
+Programs written for DOS 1, and for CP/M before it, have no handles and no paths: a File Control Block of the
+program's own with a drive and a name in that drive's current folder, and records read and written through
+the DTA. Stage 2's second step answers them (`kernel/ndos/dos21.c`, `fcb`): 0Fh and 16h (open, create), 10h
+(close), 14h and 15h (the next record read, written), 21h and 22h (the random record), 27h and 28h (blocks of
+records; 28h with no records sets the file's size), 23h (a file's size in records), 24h (the random record
+from the sequential place), 11h and 12h (searches: the entry found goes to the DTA as an FCB of its own, the
+drive and the folder's 32 bytes), 13h (delete by pattern) and 17h (rename by pattern, a `?` of the new name
+keeping the old one's character). Extended FCBs (FFh first) give the attribute: for searches, for the hidden
+and system files an open may find, for a file made. Every call answers in AL alone; the flags stay as they came.
+
+- **The open file** is an entry of the system file table with no handle (`kernel/ndos/files.c`,
+  `dos_fcb_open`; its mode has bit 15, as DOS marks an FCB's). The program's FCB keeps a place in a table of
+  the machine's and a ticket (its reserved bytes 18h and 1Ah); the table keeps where the file is.
+- **FCBs never closed** are the rule in such programs (only written files were closed). So an FCB holds an
+  entry of the file table only while it is among the last 8 used (`DOS_FCB_LIVE`); one that lost its entry is
+  opened again at its next call, unseen by the program; 24 are known at once (`DOS_FCBS`), the least recently
+  used forgotten for a 25th. A handle's open takes the least recently used FCB's entry when the table is
+  full, and a program's end forgets its FCBs.
+- **A closed FCB reads and writes on**, as MS-DOS's do (without SHARE its FCBs hold all DOS needs, and a
+  close changes nothing in them): an FCB that was opened once (a mark in its reserved bytes) and that GLOS's
+  DOS no longer knows, closed or forgotten, is bound again to the file its name says in the current folder at
+  its next call, and closing it again says 00h. An FCB never opened has no file: 01h from its reads, FFh from
+  its close, as MS-DOS says.
+- **A pattern opened** (0Fh with `?`s) is its first match, the FCB's name left as it is: MS-DOS's way.
+- **MS-DOS 7.1 opens no file through an FCB on a FAT32 volume** (0Fh and 16h say FFh there; searches, deletes
+  and renames work). GLOS's DOS does, there as anywhere. So the reference's answers are a FAT12 floppy's:
+  `tools/ndos/msdos-ref.sh` boots the private MS-DOS disk with a blank floppy in A: and runs `DOSDIFF A`, and
+  no line of the FCB probes says which drive it was.
+- **Records:** the size in the FCB (128 put there if it is 0), the place by block and record (sequential) or
+  by the random record (three bytes, four where records are shorter than 64 bytes). A last record read in
+  part is filled with zeros (AL 03h); records that don't fit before the DTA's segment ends aren't moved (AL
+  02h, after those that fit); a read-only file is opened for reading alone, and its writes say 01h.
+- **Tested:** `tests/host/fcb_test.c` (each call on a volume in memory; 12 and 30 FCBs left open; handles
+  beside them; a program's end); DOSDIFF's `F` lines (57 of them) are MS-DOS 7.1's answers, and GLOS's DOS
+  gives every one (`loopa-nboot`'s nboot2 case, natively).
+- **Not yet:** a volume's label made or renamed through an FCB (DOS 2's way), a device read through one (CON
+  is written; the console calls read it), INT 24h for an FCB that is forgotten.
+
+### Small calls programs meet (2026-11-24)
+
+- **5Ah**, a temporary file: a name of eight letters made in the folder at DS:DX (a backslash added if it has
+  none), each one new.
+- **67h**, the handle count: past 20, the program's handle table moves to a block of its own (the PSP's 32h and
+  34h say where); 20 or fewer, back into the PSP; 04h if a handle past the new count is open.
+- **5Ch**, regions locked (SHARE's call, built in: MS-DOS 7.1 says 01h until SHARE is loaded, DOSDIFF's known
+  difference): a region locked through a handle is that handle's and its program's to read and write, 21h to
+  others and to a lock that overlaps it; locks go when the handle's last copy is closed and at a program's end.
+  Within one machine only; between machines it is N6's.
+- **37h** (the switch character: `/`; AL comes back as it went in whatever is asked, MS-DOS 7.1's way, not
+  the books'), **1Bh and 1Ch** (a drive's clusters, DS:BX its media byte), **03h, 04h, 05h** (AUX and the
+  printer: no ports, input is Ctrl-Z, output goes nowhere).
+- **1Fh and 32h**, a drive's parameter block: one place for every drive, made at each call; FFh for a FAT32
+  drive, as MS-DOS 7.1 says (7302h's block is that drive's).
+- **55h and 26h**, a PSP made by the program: 55h's is a child's (a copy of the current PSP, its parent the
+  current one, SI the segment past its memory, the handles a child inherits, and it becomes the current one);
+  26h's is DOS 1's (256 bytes of the caller's code segment, a .COM's PSP, with INT 20h, the three vectors and
+  a handle table of 20 set).
+- **5E00h** (the machine's name: none, fifteen blanks, CH 0) and **5Fh** (redirections: 01h, no network).
+- **65h**, the country's: 01h the information (as much of its 41 bytes as CX holds), 02h, 04h, 05h and 07h a
+  table's address (upper case, file names' upper case, the characters a file name ends at, an empty DBCS
+  table: 284 bytes of DOS's memory), 06h done with nothing given (MS-DOS 7.1's answer with no COUNTRY.SYS
+  loaded: no collating table), 20h to 22h upper case of a character and of strings, 23h yes or no. GLOS folds
+  file names by COUNTRY.SYS's table (437's e acute is E), which is also what 04h's table says; MS-DOS with no
+  COUNTRY.SYS has E acute there, the one sample DOSDIFF leaves out.
+- **The reference** for all of these: `tools/ndos/msdos-ref.sh` (above) writes
+  `tests/dos/dosdiff.msdos71.txt`, now 196 lines ("DOSDIFF 3": 44 `S` lines for these calls); GLOS's DOS gives
+  every one but 5Ch's two (`DOSDIFF_KNOWN`).
+- **Room:** `kernel/ndos/dos21.c` is built for size (`-Os`: 54 KB of code became 33 KB). The 720 KB floppy's
+  packed kernel may be 607,232 bytes; with these calls it was 602,862, and is 592,726 so.
 
 ### Interrupts during a call (2026-11-24)
 

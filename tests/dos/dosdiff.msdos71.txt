@@ -1,4 +1,4 @@
-DOSDIFF 2
+DOSDIFF 3
 30h00 ax=0A07 bh=FF
 30h01 ax=0A07 bh=00
 3306h bx=0A07 dx=0000
@@ -89,6 +89,107 @@ DOSDIFF 2
 6900h C:               cf=0
 7302h C: cf=0 len=003D bps=512 fats=2 media=F8
 7302h small buffer     cf=1 ax=0018
+F0Fh open al=00 drive=its number block=0 recsize=128 size=10 rec=77 rr=66
+F14h short record al=03 rec=1 data=0123456789 after=00 last=00 beyond=EE
+F14h at the end al=01 rec=1
+F14h records of 4 al=00 00 03 rec=3 data=38390000
+F14h past them al=01 rec=3
+F14h record 127 al=01 block=0 rec=127
+F21h record 3 al=00 data=67 block=0 rec=3 rr=3
+F21h past the end al=01 block=0 rec=9
+F24h rr=00000105
+F24h long records rr=FF000105
+F27h 5 from 1 al=03 cx=3 rr=4 block=0 rec=4 pad=0000 next=EE
+F27h 2 from 0 al=00 cx=2 rr=2
+F27h none al=00 cx=0 rr=1
+F27h at the end al=01 cx=0 rr=4
+F14h no record size al=03 recsize=128 rec=1
+F10h close al=00
+F10h twice al=00
+F10h, 14h of no file al=FF 01
+F14h never opened al=01 data=? rec=0
+F14h closed al=00 data=0
+F23h records of 3 al=00 rr=4
+F23h no record size al=00 rr=FF000001 recsize=0
+F23h no file al=FF
+F0Fh no file al=FF
+F59h after it          ax=0002 class=08 action=03 locus=02
+F0Fh pattern al=00 name=FCBT?   DAT
+F0Fh drive Q: al=FF
+F0Fh hidden, plain al=FF
+F0Fh hidden, extended al=00 size=6
+F10h extended al=00
+F16h create al=00 drive=its number recsize=128 size=0
+F15h write al=00 size=128 rec=1
+F22h record 2 al=00 size=384 rec=2
+F28h 2 from 3 al=00 cx=2 size=640 rr=5
+F21h what was written al=00 data=CC
+F28h none, at 1 al=00 cx=0 size=128 rr=1
+F28h none, at 4 al=00 size=512
+F10h written al=00
+F its size on the disk 512
+F16h over it al=00 size=0
+F its size on the disk 0
+F0Fh read-only al=00 read=00 write=01
+F10h read-only al=00
+F16h read-only al=FF
+F11h *.DAT n=3 head=drive last=FF FCBN    DAT:20:0 FCBR    DAT:01:9 FCBT1   DAT:20:10
+F12h after the end al=FF
+F11h *.DAT hidden too n=4 head=FF02 last=FF FCBH    DAT:02:6 FCBN    DAT:20:0 FCBR    DAT:01:9 FCBT1   DAT:20:10
+F11h all, folders too n=5 head=FF10 last=FF .          :10:0 ..         :10:0 FCBN    DAT:20:0 FCBR    DAT:01:9 FCBT1   DAT:20:10
+F12h with no 11h al=FF
+F11h the label as a search of the root finds it
+F17h FCBT1.DAT to FCBX?.BAK al=00 new=10 old=4294967295
+F17h to a name there al=FF
+F17h no file al=FF
+F13h FCB*.DAT al=00 new=4294967295 read-only=9 hidden=6
+F13h again al=FF
+F13h hidden too al=00 hidden=4294967295
+F13h no file al=FF
+S3700h al=00 dl=2F
+S3701h al=01 then dl=2F
+S3702h al=02 dl=FF
+S3703h al=03
+S3704h al=04
+S1Ch C: bps=512 media=F8
+S1Ch Q: al=FF
+S1Bh bps=512 media=F8
+S32h C: as its FAT asks
+S1Fh as its FAT asks
+S32h Q: al=FF
+S3305h dl=03
+S5Ah cf=0 len=17
+S5Ah's file deleted    cf=0
+S5Ah no backslash cf=0 len=17 at8=\
+S5Ah no folder         cf=1 ax=0003
+S67h 10 cf=0 count=20 moved=0
+S67h 40 cf=0 count=40 moved=1
+S67h 20 cf=0 count=20 moved=0 off=0018
+S55h current=new top=9ABC parent=old count=20 jft=new:0018 h1=same h19=FF env=same int20=20CD tail=same
+S26h current=old top=the code's parent=the code's count=20 jft=new:0018 int20=20CD b40=the PSP's b80=the code's
+S5C00h                 cf=1 ax=0001
+S5C01h                 cf=1 ax=0001
+S5E00h cf=0 ch=00 buf=202000
+S5F02h                 cf=1 ax=0001
+S6501h cf=0 cx=41 id=01 size=38 country=1
+S6502h cf=0 cx=5 id=02
+S6502h's table size=128 e9=45 e1=E1
+S6504h cf=0 cx=5 id=04
+S6504h's table size=128 e1=E1
+S6505h cf=0 id=05 16 00 01 00 FF 00 00 20 02 0E 2E 22 2F 5C 5B 5D 3A 7C 3C 3E 2B 3D 3B 2C
+S6506h cf=0 id=00
+S6507h cf=0 id=07
+S6501h cx 4            cf=1 ax=0001
+S6501h cx 7 cf=0 cx=7 size=4 b7=EE
+S6501h code page 999   cf=1 ax=0001
+S6501h country 999     cf=1 ax=0001
+S6509h                 cf=1 ax=0001
+S6520h cf=0 dl=A
+S6521h cf=0 ABC 45 z
+S6522h cf=0 ABC 45 Z
+S6523h y cf=0 ax=0001
+S6523h N cf=0 ax=0000
+S6523h x cf=0 ax=0002
 4Dh at the start ax=0000
 spawn none=-1
 3Ah DDIFF              cf=0

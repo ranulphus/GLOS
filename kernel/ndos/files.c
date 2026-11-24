@@ -119,6 +119,19 @@ static int free_entry(struct dos_files *t)
     return -1;
 }
 
+static int fcb_lru_drop(struct dos_files *t, const struct dos_fcb_k *but);
+
+/* An entry for a handle's open: a free one, or the one the least recently used FCB held (FCBs left open don't
+   fill the table). */
+static int handle_entry(struct dos_files *t)
+{
+    int i = free_entry(t);
+
+    if (i < 0 && fcb_lru_drop(t, 0))
+        i = free_entry(t);
+    return i;
+}
+
 static int dos_err(int r)
 {
     switch (r) {
@@ -212,7 +225,7 @@ int dos_open(struct dos_files *t, unsigned psp, struct fsv_vol *v, unsigned driv
 
     if ((mode & 7) == 3 || (mode & 7) > 4 || ((mode >> 4) & 7) > 4)
         return DOS_EINVALID;                    /* (an access or sharing code DOS has not: 0Ch) */
-    if (hd < 0 || (i = free_entry(t)) < 0)
+    if (hd < 0 || (i = handle_entry(t)) < 0)
         return DOS_ENFILE;
     if (dev) {
         set_device(t, (unsigned)i, dev, psp);
@@ -239,7 +252,7 @@ int dos_create(struct dos_files *t, unsigned psp, struct fsv_vol *v, unsigned dr
     unsigned size;
     unsigned char *j = jft(t, psp, &size);
 
-    if (hd < 0 || (i = free_entry(t)) < 0)
+    if (hd < 0 || (i = handle_entry(t)) < 0)
         return DOS_ENFILE;
     r = fsv_create(v, path, (unsigned char)(attr & (FAT_A_RDONLY | FAT_A_HIDDEN | FAT_A_SYSTEM)), replace, FSV_RW,
                    FSV_DENY_NONE, &t->k[i].f);
@@ -252,15 +265,87 @@ int dos_create(struct dos_files *t, unsigned psp, struct fsv_vol *v, unsigned dr
     return 0;
 }
 
-/* One handle's hold on entry i given up: the file closed when none is left. */
+/* ---- 5Ch's locks */
+
+static int same_file(struct dos_files *t, unsigned i, unsigned j)
+{
+    struct fsv_file *a = &t->k[i].f, *b = &t->k[j].f;
+
+    return i == j || (refs(t, j) && !t->k[j].dev && a->n && b->n && a->v == b->v && a->n->dir == b->n->dir
+                      && a->n->index == b->n->index);
+}
+
+static int overlap(const struct dos_lock *l, unsigned long off, unsigned long len)
+{
+    return len && l->len && off <= l->off + (l->len - 1) && l->off <= off + (len - 1);
+}
+
+/* Whether n bytes at pos of entry i's file are another's to read and write: locked through another entry, or
+   by another program. */
+static int locked(struct dos_files *t, unsigned i, unsigned psp, unsigned long pos, unsigned long n)
+{
+    unsigned k;
+
+    for (k = 0; k < DOS_LOCKS; k++) {
+        const struct dos_lock *l = &t->lock[k];
+
+        if (l->used && (l->entry != i || l->psp != psp) && same_file(t, i, l->entry) && overlap(l, pos, n))
+            return 1;
+    }
+    return 0;
+}
+
+int dos_lock(struct dos_files *t, unsigned psp, unsigned h, int unlock, unsigned long off, unsigned long len)
+{
+    int i = held(t, psp, h);
+    struct dos_lock *spare = 0;
+    unsigned k;
+
+    if (i < 0)
+        return DOS_EBADF;
+    if (t->k[i].dev)
+        return 0x01;
+    for (k = 0; k < DOS_LOCKS; k++) {
+        struct dos_lock *l = &t->lock[k];
+
+        if (!l->used) {
+            if (!spare)
+                spare = l;
+            continue;
+        }
+        if (unlock) {
+            if (l->entry == (unsigned)i && l->psp == psp && l->off == off && l->len == len) {
+                l->used = 0;
+                return 0;
+            }
+        } else if (same_file(t, (unsigned)i, l->entry) && overlap(l, off, len)) {
+            return 0x21;
+        }
+    }
+    if (unlock)
+        return 0x21;
+    if (!spare)
+        return 0x24;
+    spare->used = 1;
+    spare->entry = (unsigned char)i;
+    spare->psp = psp;
+    spare->off = off;
+    spare->len = len;
+    return 0;
+}
+
+/* One handle's hold on entry i given up: the file closed when none is left, its locks gone. */
 static void release(struct dos_files *t, unsigned i)
 {
-    unsigned n = refs(t, i);
+    unsigned n = refs(t, i), k;
 
     if (n > 1) {
         wr16(entry(t, i), n - 1);
         return;
     }
+    for (k = 0; k < DOS_LOCKS; k++)
+        if (t->lock[k].used && t->lock[k].entry == i)
+            t->lock[k].used = 0;
     if (!t->k[i].dev && t->k[i].f.n)
         fsv_close(&t->k[i].f);
     wr16(entry(t, i), 0);
@@ -323,6 +408,8 @@ long dos_read(struct dos_files *t, unsigned psp, unsigned h, void *buf, unsigned
         return t->k[i].dev == DOS_DEV_NUL ? 0 : -DOS_EACCES;
     if ((mode_of(t, (unsigned)i) & 7) == 1)
         return -DOS_EACCES;                     /* (write-only) */
+    if (locked(t, (unsigned)i, psp, t->k[i].f.pos, n))
+        return -0x21;
     r = fsv_read(&t->k[i].f, buf, n);
     refresh(t, (unsigned)i);
     return r < 0 ? -dos_err((int)r) : r;
@@ -341,6 +428,8 @@ long dos_write(struct dos_files *t, unsigned psp, unsigned h, const void *buf, u
         return -DOS_EACCES;                     /* (read-only) */
     if (t->k[i].f.pos >= 0x80000000UL)
         return 0;                               /* (a place before the start: dos_seek's) */
+    if (locked(t, (unsigned)i, psp, t->k[i].f.pos, n ? n : 0xFFFFFFFFUL - t->k[i].f.pos))
+        return -0x21;                           /* (a cut: everything from there on) */
     r = n ? fsv_write(&t->k[i].f, buf, n) : fsv_truncate(&t->k[i].f);
     entry(t, (unsigned)i)[5] &= (unsigned char)~0x40;  /* (written) */
     refresh(t, (unsigned)i);
@@ -385,6 +474,172 @@ void dos_inherit(struct dos_files *t, unsigned parent_psp, unsigned char child_j
     }
 }
 
+/* ---- FCBs (files.h) */
+
+/* An FCB's entry given up (its file closed); the FCB is still known. */
+static void fcb_drop(struct dos_files *t, struct dos_fcb_k *f)
+{
+    if (f->entry >= 0)
+        release(t, (unsigned)f->entry);
+    f->entry = -1;
+}
+
+/* The least recently used FCB that holds an entry (but isn't `but`) made to give it up: 1, or 0 (there is
+   none). */
+static int fcb_lru_drop(struct dos_files *t, const struct dos_fcb_k *but)
+{
+    struct dos_fcb_k *old = 0;
+    unsigned k;
+
+    for (k = 0; k < DOS_FCBS; k++) {
+        struct dos_fcb_k *f = &t->fcb[k];
+
+        if (f->ticket && f->entry >= 0 && f != but && (!old || (int)(f->stamp - old->stamp) < 0))
+            old = f;
+    }
+    if (!old)
+        return 0;
+    fcb_drop(t, old);
+    return 1;
+}
+
+/* f's file opened (create: made or cut to nothing first) in an entry of the table: 0, or a DOS error. */
+static int fcb_attach(struct dos_files *t, struct dos_fcb_k *f, int create, unsigned char attr)
+{
+    unsigned live = 0, k, mode = 0x8002;        /* (bit 15: an FCB's; read-write, compatibility) */
+    struct fat_ent fe;
+    int i, r;
+
+    for (k = 0; k < DOS_FCBS; k++)
+        live += t->fcb[k].ticket && t->fcb[k].entry >= 0 && &t->fcb[k] != f;
+    if (live >= DOS_FCB_LIVE)
+        fcb_lru_drop(t, f);
+    if ((i = free_entry(t)) < 0 && fcb_lru_drop(t, f))
+        i = free_entry(t);
+    if (i < 0)
+        return DOS_ENFILE;
+    if (f->dev) {
+        set_device(t, (unsigned)i, f->dev, f->psp);
+        wr16(entry(t, (unsigned)i) + 2, mode);
+    } else {
+        if (create) {
+            r = fsv_create(f->v, f->path, (unsigned char)(attr & (FAT_A_RDONLY | FAT_A_HIDDEN | FAT_A_SYSTEM)), 1,
+                           FSV_RW, FSV_DENY_NONE, &t->k[i].f);
+        } else {
+            if ((r = share_with(t, f->v, f->path, mode)) != 0)
+                return r;
+            r = f->ro ? FAT_EACCES : fsv_open(f->v, f->path, FSV_RW, FSV_DENY_NONE, &t->k[i].f);
+            if (r == FAT_EACCES && fsv_lookup(f->v, f->path, &fe) == FAT_OK && (fe.attr & FAT_A_RDONLY)) {
+                mode = 0x8000;
+                f->ro = 1;
+                r = fsv_open(f->v, f->path, FSV_READ, FSV_DENY_NONE, &t->k[i].f);
+            }
+        }
+        if (r)
+            return dos_err(r);
+        fill(t, (unsigned)i, f->v, f->drive, f->path, mode, f->psp);
+    }
+    wr16(entry(t, (unsigned)i), 1);
+    f->entry = i;
+    return 0;
+}
+
+int dos_fcb_open(struct dos_files *t, unsigned psp, struct fsv_vol *v, unsigned drive, const char *path, int dev,
+                 int create, unsigned char attr, unsigned *slot, unsigned *ticket)
+{
+    struct dos_fcb_k *f = 0, *old = 0;
+    unsigned k;
+    int r;
+
+    for (k = 0; k < DOS_FCBS && !f; k++) {
+        if (!t->fcb[k].ticket)
+            f = &t->fcb[k];
+        else if (!old || (int)(t->fcb[k].stamp - old->stamp) < 0)
+            old = &t->fcb[k];
+    }
+    if (!f) {                                   /* (all known: the least recently used is forgotten) */
+        fcb_drop(t, old);
+        f = old;
+    }
+    memset(f, 0, sizeof *f);
+    f->entry = -1;
+    f->psp = psp;
+    f->v = v;
+    f->drive = (unsigned char)drive;
+    f->dev = dev;
+    strncpy(f->path, path, sizeof f->path - 1);
+    if ((r = fcb_attach(t, f, create, attr)) != 0)
+        return r;
+    if (++t->fcb_ticket > 0xFFFF || !t->fcb_ticket)
+        t->fcb_ticket = 1;
+    f->ticket = t->fcb_ticket;
+    f->stamp = ++t->fcb_stamp;
+    *slot = (unsigned)(f - t->fcb);
+    *ticket = f->ticket;
+    return 0;
+}
+
+int dos_fcb_entry(struct dos_files *t, unsigned slot, unsigned ticket)
+{
+    struct dos_fcb_k *f;
+
+    if (slot >= DOS_FCBS || !ticket || (f = &t->fcb[slot])->ticket != ticket)
+        return -1;
+    f->stamp = ++t->fcb_stamp;
+    if (f->entry < 0 && fcb_attach(t, f, 0, 0) != 0)
+        return -1;
+    return f->entry;
+}
+
+long dos_fcb_read(struct dos_files *t, int i, unsigned long pos, void *buf, unsigned long n)
+{
+    long r;
+
+    if (i < 0 || (unsigned)i >= t->n || !refs(t, (unsigned)i))
+        return -DOS_EBADF;
+    if (t->k[i].dev)
+        return t->k[i].dev == DOS_DEV_NUL ? 0 : -DOS_EACCES;
+    fsv_seek(&t->k[i].f, pos);
+    r = fsv_read(&t->k[i].f, buf, n);
+    refresh(t, (unsigned)i);
+    return r < 0 ? -dos_err((int)r) : r;
+}
+
+long dos_fcb_write(struct dos_files *t, int i, unsigned long pos, const void *buf, unsigned long n)
+{
+    long r;
+
+    if (i < 0 || (unsigned)i >= t->n || !refs(t, (unsigned)i))
+        return -DOS_EBADF;
+    if (t->k[i].dev)
+        return t->k[i].dev == DOS_DEV_NUL ? (long)n : -DOS_EACCES;
+    if ((mode_of(t, (unsigned)i) & 7) == 0)
+        return -DOS_EACCES;                     /* (a read-only file's) */
+    fsv_seek(&t->k[i].f, pos);
+    r = n ? fsv_write(&t->k[i].f, buf, n) : fsv_truncate(&t->k[i].f);
+    entry(t, (unsigned)i)[5] &= (unsigned char)~0x40;  /* (written) */
+    refresh(t, (unsigned)i);
+    return r < 0 ? -dos_err((int)r) : r;
+}
+
+unsigned long dos_fcb_size(struct dos_files *t, int i)
+{
+    if (i < 0 || (unsigned)i >= t->n || !refs(t, (unsigned)i) || t->k[i].dev)
+        return 0;
+    return fsv_size(&t->k[i].f);
+}
+
+int dos_fcb_close(struct dos_files *t, unsigned slot, unsigned ticket)
+{
+    struct dos_fcb_k *f;
+
+    if (slot >= DOS_FCBS || !ticket || (f = &t->fcb[slot])->ticket != ticket)
+        return DOS_EBADF;
+    fcb_drop(t, f);
+    f->ticket = 0;
+    return 0;
+}
+
 void dos_close_all(struct dos_files *t, unsigned psp)
 {
     unsigned size, h;
@@ -393,4 +648,12 @@ void dos_close_all(struct dos_files *t, unsigned psp)
     for (h = 0; h < size; h++)
         if (held(t, psp, h) >= 0)
             dos_close(t, psp, h);
+    for (h = 0; h < DOS_FCBS; h++)
+        if (t->fcb[h].ticket && t->fcb[h].psp == psp) {
+            fcb_drop(t, &t->fcb[h]);
+            t->fcb[h].ticket = 0;
+        }
+    for (h = 0; h < DOS_LOCKS; h++)             /* (those on handles a child of its inherited, still open) */
+        if (t->lock[h].used && t->lock[h].psp == psp)
+            t->lock[h].used = 0;
 }

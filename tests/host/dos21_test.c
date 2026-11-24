@@ -696,6 +696,30 @@ int main(void)
         r.ds = psp, r.dx = 0x300, r.si = 0;
         call(&r, 0x7141);
         CHECK(!(r.flags & 1), "7141h %x", r.ax);
+        /* 7141h by a pattern (SI 1): the files it matches, by long or short name; not folders; not without SI 1 */
+        file("\\A long folder name\\first of them.tmp", "1", 1);
+        file("\\A long folder name\\second of them.tmp", "2", 1);
+        file("\\A long folder name\\kept.txt", "3", 1);
+        fsv_mkdir(&vol, "\\A long folder name\\a folder.tmp");
+        str(psp, 0x300, "C:\\A long folder name\\*.tmp");
+        r.ds = psp, r.dx = 0x300, r.si = 0, r.cx = 0;
+        call(&r, 0x7141);
+        CHECK((r.flags & 1) && r.ax == 2, "7141h, a pattern without SI 1: %x", r.ax);
+        r.ds = psp, r.dx = 0x300, r.si = 1, r.cx = 0;
+        call(&r, 0x7141);
+        {
+            struct fat_ent fe;
+
+            CHECK(!(r.flags & 1) && fsv_lookup(&vol, "\\A long folder name\\first of them.tmp", &fe) != 0
+                  && fsv_lookup(&vol, "\\A long folder name\\second of them.tmp", &fe) != 0
+                  && fsv_lookup(&vol, "\\A long folder name\\kept.txt", &fe) == 0
+                  && fsv_lookup(&vol, "\\A long folder name\\a folder.tmp", &fe) == 0, "7141h by a pattern: %x", r.ax);
+        }
+        r.ds = psp, r.dx = 0x300, r.si = 1, r.cx = 0;
+        call(&r, 0x7141);
+        CHECK((r.flags & 1) && r.ax == 2, "7141h by a pattern, none left: %x", r.ax);
+        fsv_rmdir(&vol, "\\A long folder name\\a folder.tmp");
+        fsv_unlink(&vol, "\\A long folder name\\kept.txt");
         str(psp, 0x300, "C:\\A long folder name");
         r.ds = psp, r.dx = 0x300;
         call(&r, 0x713A);
@@ -865,13 +889,276 @@ int main(void)
     call(&r, 0x3301);
     CHECK(dos_key_push(&m, 0x1C0D) == 0 && dos_key_peek(&m) == 0x1C0D && dos_key_get(&m) == 0x1C0D, "05h-style push");
 
+    /* ---- the small calls: 37h, 03h-05h, 1Bh and 1Ch, 5Ah, 67h, 5Ch */
+    {
+        unsigned tp = dos_cur_psp(&m), th, th2, k, tseg, dups[40], ndups = 0;
+        char first[32];
+
+        r.dx = 0x1234, r.flags = 1;
+        call(&r, 0x3700);
+        CHECK((r.ax & 0xFF) == 0 && r.dx == 0x1200 + '/' && (r.flags & 1), "3700h: al %02x dx %04x", r.ax & 0xFF, r.dx);
+        call(&r, 0x3701);                               /* (AL as it came, whatever is asked: MS-DOS 7.1's way) */
+        CHECK((r.ax & 0xFF) == 1, "3701h: al %02x", r.ax & 0xFF);
+        call(&r, 0x3702);
+        CHECK((r.ax & 0xFF) == 2 && (r.dx & 0xFF) == 0xFF, "3702h: al %02x dl %02x", r.ax & 0xFF, r.dx & 0xFF);
+        call(&r, 0x3709);
+        CHECK((r.ax & 0xFF) == 9, "3709h: al %02x", r.ax & 0xFF);
+        res = call(&r, 0x0300);
+        CHECK(res == DOS21_DONE && (r.ax & 0xFF) == 0x1A, "03h: al %02x", r.ax & 0xFF);
+        r.dx = 'x';
+        CHECK(call(&r, 0x0400) == DOS21_DONE && call(&r, 0x0500) == DOS21_DONE, "04h, 05h");
+        r.dx = 0;
+        res = call(&r, 0x1C00);
+        CHECK(res == DOS21_DONE && (r.ax & 0xFF) == vol.fat.spc && r.cx == 512 && mem[lin(r.ds, r.bx)] == 0xF8
+              && r.dx == (vol.fat.clusters > 0xFFFF ? 0xFFFF : vol.fat.clusters),
+              "1Ch: al %u cx %u dx %u media %02x", r.ax & 0xFF, r.cx, r.dx, mem[lin(r.ds, r.bx)]);
+        call(&r, 0x1B00);
+        CHECK((r.ax & 0xFF) == vol.fat.spc && mem[lin(r.ds, r.bx)] == 0xF8, "1Bh: al %u", r.ax & 0xFF);
+        r.dx = 17;
+        call(&r, 0x1C00);
+        CHECK((r.ax & 0xFF) == 0xFF, "1Ch of Q: al %02x", r.ax & 0xFF);
+
+        /* 5Ah: a name made in a folder (with and without its backslash), each one new; no such folder */
+        str(tp, 0x300, "C:\\");
+        memset(mem + lin(tp, 0x304), 0xEE, 16);
+        r.ds = tp, r.dx = 0x300, r.cx = 0, r.flags = 0;
+        call(&r, 0x5A00);
+        th = r.ax;
+        strcpy(first, (char *)mem + lin(tp, 0x300));
+        CHECK(!(r.flags & 1) && strlen(first) == 11 && !memcmp(first, "C:\\", 3) && mem[lin(tp, 0x30C)] == 0xEE,
+              "5Ah: cf %u ax %x \"%s\"", r.flags & 1, r.ax, first);
+        str(tp, 0x340, "C:\\TMPD");
+        r.dx = 0x340;
+        call(&r, 0x3900);
+        r.dx = 0x340, r.cx = 0, r.flags = 0;
+        call(&r, 0x5A00);
+        th2 = r.ax;
+        CHECK(!(r.flags & 1) && strlen((char *)mem + lin(tp, 0x340)) == 16 && !memcmp(mem + lin(tp, 0x340), "C:\\TMPD\\", 8)
+              && strcmp((char *)mem + lin(tp, 0x348), first + 3), "5Ah, no backslash given: \"%s\"", (char *)mem + lin(tp, 0x340));
+        r.bx = th, r.cx = 3, r.dx = 0x300;
+        call(&r, 0x4000);
+        CHECK(!(r.flags & 1) && r.ax == 3, "5Ah's file written: %x", r.ax);
+        r.bx = th;
+        call(&r, 0x3E00);
+        r.bx = th2;
+        call(&r, 0x3E00);
+        r.dx = 0x300;
+        call(&r, 0x4100);
+        CHECK(!(r.flags & 1), "5Ah's file deleted by the name given back: %x", r.ax);
+        r.dx = 0x340;
+        call(&r, 0x4100);
+        str(tp, 0x340, "C:\\TMPD");
+        r.dx = 0x340;
+        call(&r, 0x3A00);
+        CHECK(!(r.flags & 1), "5Ah's second file deleted, its folder removed: %x", r.ax);
+        str(tp, 0x340, "C:\\NOSUCH\\");
+        r.dx = 0x340, r.cx = 0;
+        call(&r, 0x5A00);
+        CHECK((r.flags & 1) && r.ax == 3, "5Ah in no folder: %x", r.ax);
+
+        /* 67h: more handles than the PSP's 20, and back */
+        r.bx = 10, r.flags = 1;
+        call(&r, 0x6700);
+        CHECK(!(r.flags & 1) && w(lin(tp, 0x32)) == 20 && w(lin(tp, 0x36)) == tp, "67h to 10: still the PSP's 20");
+        r.bx = 40;
+        call(&r, 0x6700);
+        tseg = w(lin(tp, 0x36));
+        CHECK(!(r.flags & 1) && w(lin(tp, 0x32)) == 40 && tseg != tp && w(lin(tp, 0x34)) == 0
+              && !memcmp(mem + lin(tseg, 0), mem + lin(tp, 0x18), 20) && mem[lin(tseg, 20)] == 0xFF
+              && mem[lin(tseg, 39)] == 0xFF, "67h to 40: %u at %04x", w(lin(tp, 0x32)), tseg);
+        do {                                            /* (handle 1 again and again, to one past the PSP's own) */
+            r.bx = 1, r.flags = 0;
+            call(&r, 0x4500);
+            CHECK(!(r.flags & 1), "45h past 20 handles: cf, ax %x after %u", r.ax, ndups);
+            dups[ndups++] = r.ax;
+        } while (!(r.flags & 1) && r.ax < 25 && ndups < 39);
+        k = dups[ndups - 1];
+        CHECK(k == 25, "45h past 20 handles: the last is %u", k);
+        r.bx = k, r.cx = 2, r.ds = tp, r.dx = 0x300, outn = 0;
+        call(&r, 0x4000);
+        CHECK(!(r.flags & 1) && outn == 2, "a write through handle %u: %u", k, outn);
+        r.bx = 20;
+        call(&r, 0x6700);
+        CHECK((r.flags & 1) && r.ax == 4 && w(lin(tp, 0x32)) == 40, "67h to 20 with handle %u open: %x", k, r.ax);
+        for (k = 0; k < ndups; k++) {
+            r.bx = dups[k];
+            call(&r, 0x3E00);
+        }
+        r.bx = 20;
+        call(&r, 0x6700);
+        CHECK(!(r.flags & 1) && w(lin(tp, 0x32)) == 20 && w(lin(tp, 0x36)) == tp && w(lin(tp, 0x34)) == 0x18
+              && dos_mem_check(&m.mcb) == 0, "67h back to 20: %u at %04x:%04x", w(lin(tp, 0x32)), w(lin(tp, 0x36)),
+              w(lin(tp, 0x34)));
+
+        /* 32h, 1Fh: a drive's parameter block; 55h, 26h: a PSP made by the program */
+        r.dx = 3;
+        call(&r, 0x3200);
+        CHECK((r.ax & 0xFF) == 0 && mem[lin(r.ds, r.bx)] == 2 && w(lin(r.ds, r.bx) + 2) == 512
+              && mem[lin(r.ds, r.bx) + 8] == vol.fat.nfats && mem[lin(r.ds, r.bx) + 0x17] == 0xF8,
+              "32h: al %02x drive %u bps %u", r.ax & 0xFF, mem[lin(r.ds, r.bx)], w(lin(r.ds, r.bx) + 2));
+        r.dx = 17;
+        call(&r, 0x3200);
+        CHECK((r.ax & 0xFF) == 0xFF, "32h of Q: al %02x", r.ax & 0xFF);
+        call(&r, 0x1F00);
+        CHECK((r.ax & 0xFF) == 0 && w(lin(r.ds, r.bx) + 2) == 512, "1Fh: al %02x", r.ax & 0xFF);
+        r.bx = 0x20;
+        call(&r, 0x4800);
+        tseg = r.ax;
+        r.dx = tseg, r.si = 0x9ABC;
+        call(&r, 0x5500);
+        CHECK(dos_cur_psp(&m) == tseg && w(lin(tseg, 0)) == 0x20CD && w(lin(tseg, 2)) == 0x9ABC && w(lin(tseg, 0x16)) == tp
+              && w(lin(tseg, 0x32)) == 20 && w(lin(tseg, 0x34)) == 0x18 && w(lin(tseg, 0x36)) == tseg
+              && mem[lin(tseg, 0x19)] == mem[lin(tp, 0x19)] && w(lin(tseg, 0x2C)) == w(lin(tp, 0x2C)),
+              "55h: current %04x parent %04x top %04x", dos_cur_psp(&m), w(lin(tseg, 0x16)), w(lin(tseg, 2)));
+        r.bx = 1, r.cx = 2, r.ds = tseg, r.dx = 0, outn = 0;
+        call(&r, 0x4000);
+        CHECK(!(r.flags & 1) && outn == 2, "55h: a write through the child's handle 1: %u", outn);
+        dos_close_all(&m.files, tseg);
+        r.bx = tp;
+        call(&r, 0x5000);
+        memset(mem + lin(tseg, 0), 0, 0x100);
+        r.dx = tseg, r.cs = tp;                         /* (a .COM: its code segment is its PSP) */
+        call(&r, 0x2600);
+        CHECK(dos_cur_psp(&m) == tp && w(lin(tseg, 0)) == 0x20CD && w(lin(tseg, 0x16)) == w(lin(tp, 0x16))
+              && w(lin(tseg, 0x32)) == 20 && w(lin(tseg, 0x34)) == 0x18 && w(lin(tseg, 0x36)) == tseg
+              && w(lin(tseg, 2)) == w(lin(tp, 2)) && mem[lin(tseg, 0x80)] == mem[lin(tp, 0x80)], "26h: current %04x",
+              dos_cur_psp(&m));
+        r.es = tseg;
+        call(&r, 0x4900);
+        CHECK(!(r.flags & 1) && dos_mem_check(&m.mcb) == 0, "the PSPs' block freed");
+
+        /* 5E00h, 5F02h: no network; 65h: the country's */
+        memset(mem + lin(tp, 0x500), 0xEE, 32);
+        r.ds = tp, r.dx = 0x500, r.cx = 0x1234, r.flags = 1;
+        call(&r, 0x5E00);
+        CHECK(!(r.flags & 1) && (r.cx >> 8) == 0 && mem[lin(tp, 0x500)] == ' ' && mem[lin(tp, 0x50E)] == ' '
+              && mem[lin(tp, 0x50F)] == 0 && mem[lin(tp, 0x510)] == 0xEE, "5E00h: cx %04x", r.cx);
+        r.flags = 0;
+        res = call(&r, 0x5F02);
+        CHECK(res == DOS21_DONE && (r.flags & 1) && r.ax == 1, "5F02h: %x", r.ax);
+        memset(mem + lin(tp, 0x500), 0xEE, 64);
+        r.es = tp, r.di = 0x500, r.bx = 0xFFFF, r.dx = 0xFFFF, r.cx = 41, r.flags = 1;
+        call(&r, 0x6501);
+        CHECK(!(r.flags & 1) && r.cx == 41 && mem[lin(tp, 0x500)] == 1 && w(lin(tp, 0x501)) == 38 && w(lin(tp, 0x503)) == 1
+              && w(lin(tp, 0x505)) == 437 && mem[lin(tp, 0x507 + 2)] == '$' && mem[lin(tp, 0x500 + 41)] == 0xEE,
+              "6501h: cx %u size %u", r.cx, w(lin(tp, 0x501)));
+        memset(mem + lin(tp, 0x500), 0xEE, 16);
+        r.di = 0x500, r.bx = 0xFFFF, r.dx = 0xFFFF, r.cx = 7;
+        call(&r, 0x6501);
+        CHECK(!(r.flags & 1) && r.cx == 7 && w(lin(tp, 0x501)) == 4 && mem[lin(tp, 0x507)] == 0xEE, "6501h, 7 bytes: cx %u",
+              r.cx);
+        r.di = 0x500, r.bx = 0xFFFF, r.dx = 0xFFFF, r.cx = 4;
+        call(&r, 0x6501);
+        CHECK((r.flags & 1) && r.ax == 1, "6501h, 4 bytes: %x", r.ax);
+        r.bx = 999, r.dx = 0xFFFF, r.cx = 41;
+        call(&r, 0x6501);
+        CHECK((r.flags & 1) && r.ax == 1, "6501h, another code page: %x", r.ax);
+        r.bx = 0xFFFF, r.dx = 49, r.cx = 41;
+        call(&r, 0x6501);
+        CHECK((r.flags & 1) && r.ax == 1, "6501h, another country: %x", r.ax);
+        r.bx = 0xFFFF, r.dx = 0xFFFF, r.cx = 5, r.di = 0x500;
+        call(&r, 0x6502);
+        k = (unsigned)lin(w(lin(tp, 0x503)), w(lin(tp, 0x501)));
+        CHECK(!(r.flags & 1) && r.cx == 5 && mem[lin(tp, 0x500)] == 2 && w(k) == 128 && mem[k + 2 + 2] == 0x45
+              && mem[k + 2 + 0x61] == 0xE1, "6502h: the table at %x", k);
+        r.bx = 0xFFFF, r.dx = 0xFFFF, r.cx = 5, r.di = 0x500;
+        call(&r, 0x6504);
+        k = (unsigned)lin(w(lin(tp, 0x503)), w(lin(tp, 0x501)));
+        CHECK(!(r.flags & 1) && mem[lin(tp, 0x500)] == 4 && w(k) == 128, "6504h: the table at %x", k);
+        r.bx = 0xFFFF, r.dx = 0xFFFF, r.cx = 5, r.di = 0x500;
+        call(&r, 0x6505);
+        k = (unsigned)lin(w(lin(tp, 0x503)), w(lin(tp, 0x501)));
+        CHECK(!(r.flags & 1) && mem[lin(tp, 0x500)] == 5 && w(k) == 22 && mem[k + 9] == 14 && mem[k + 10] == '.'
+              && mem[k + 23] == ',', "6505h: the table at %x", k);
+        mem[lin(tp, 0x500)] = 0xEE;
+        r.bx = 0xFFFF, r.dx = 0xFFFF, r.cx = 5, r.di = 0x500;
+        call(&r, 0x6506);
+        CHECK(!(r.flags & 1) && mem[lin(tp, 0x500)] == 0xEE, "6506h: done, nothing given (as MS-DOS with no COUNTRY.SYS)");
+        r.bx = 0xFFFF, r.dx = 0xFFFF, r.cx = 5, r.di = 0x500;
+        call(&r, 0x6507);
+        CHECK(!(r.flags & 1) && mem[lin(tp, 0x500)] == 7, "6507h");
+        r.bx = 0xFFFF, r.dx = 0xFFFF, r.cx = 41;
+        call(&r, 0x6509);
+        CHECK((r.flags & 1) && r.ax == 1, "6509h: %x", r.ax);
+        r.dx = 'a', r.flags = 1;
+        call(&r, 0x6520);
+        CHECK(!(r.flags & 1) && (r.dx & 0xFF) == 'A', "6520h: %c", r.dx & 0xFF);
+        memcpy(mem + lin(tp, 0x500), "abc\x82z", 6);
+        r.ds = tp, r.dx = 0x500, r.cx = 4;
+        call(&r, 0x6521);
+        CHECK(!memcmp(mem + lin(tp, 0x500), "ABC\x45z", 6), "6521h: %s", (char *)mem + lin(tp, 0x500));
+        memcpy(mem + lin(tp, 0x500), "abc\x82z", 6);
+        r.ds = tp, r.dx = 0x500;
+        call(&r, 0x6522);
+        CHECK(!memcmp(mem + lin(tp, 0x500), "ABC\x45Z", 6), "6522h: %s", (char *)mem + lin(tp, 0x500));
+        r.dx = 'y';
+        call(&r, 0x6523);
+        CHECK(r.ax == 1, "6523h y: %x", r.ax);
+        r.dx = 'N';
+        call(&r, 0x6523);
+        CHECK(r.ax == 0, "6523h N: %x", r.ax);
+        r.dx = 'x';
+        call(&r, 0x6523);
+        CHECK(r.ax == 2, "6523h x: %x", r.ax);
+
+        /* 5Ch: a region locked through one handle is that handle's */
+        str(tp, 0x300, "C:\\HELLO.COM");
+        r.ds = tp, r.dx = 0x300;
+        call(&r, 0x3D00);
+        th = r.ax;
+        r.dx = 0x300;
+        call(&r, 0x3D00);
+        th2 = r.ax;
+        CHECK(!(r.flags & 1) && th2 != th, "two handles on a file");
+        r.bx = th, r.cx = 0, r.dx = 0, r.si = 0, r.di = 4;
+        call(&r, 0x5C00);
+        CHECK(!(r.flags & 1), "5C00h: %x", r.ax);
+        r.bx = th2, r.cx = 0, r.dx = 2, r.si = 0, r.di = 4;
+        call(&r, 0x5C00);
+        CHECK((r.flags & 1) && r.ax == 0x21, "5C00h over a lock: %x", r.ax);
+        r.bx = th2, r.cx = 0, r.dx = 4, r.si = 0, r.di = 4;
+        call(&r, 0x5C00);
+        CHECK(!(r.flags & 1), "5C00h beside it: %x", r.ax);
+        r.bx = th2, r.cx = 4, r.ds = tp, r.dx = 0x500;
+        call(&r, 0x3F00);
+        CHECK((r.flags & 1) && r.ax == 0x21, "a read of another handle's region: %x", r.ax);
+        r.bx = th, r.cx = 4, r.dx = 0x500;
+        call(&r, 0x3F00);
+        CHECK(!(r.flags & 1) && r.ax == 4, "a read of its own: %x", r.ax);
+        r.bx = th2, r.cx = 0, r.dx = 0, r.si = 0, r.di = 4;
+        call(&r, 0x5C01);
+        CHECK((r.flags & 1) && r.ax == 0x21, "5C01h of another's lock: %x", r.ax);
+        r.bx = th, r.cx = 0, r.dx = 0, r.si = 0, r.di = 4;
+        call(&r, 0x5C01);
+        CHECK(!(r.flags & 1), "5C01h: %x", r.ax);
+        r.bx = th2, r.cx = 3, r.dx = 0x500;
+        call(&r, 0x3F00);
+        CHECK(!(r.flags & 1) && r.ax == 3, "a read once it is given up: %x", r.ax);
+        call(&r, 0x5C02);
+        CHECK((r.flags & 1) && r.ax == 1, "5C02h: %x", r.ax);
+        r.bx = th2;
+        call(&r, 0x3E00);                               /* (its lock at 4 goes with it) */
+        r.bx = th, r.cx = 0, r.dx = 4, r.si = 0, r.di = 4;
+        call(&r, 0x5C00);
+        CHECK(!(r.flags & 1), "5C00h where a closed handle's lock was: %x", r.ax);
+        r.bx = th;
+        call(&r, 0x3E00);
+        r.bx = 1, r.cx = 0, r.dx = 0, r.si = 0, r.di = 1;
+        call(&r, 0x5C00);
+        CHECK((r.flags & 1) && r.ax == 1, "5C00h of CON: %x", r.ax);
+        r.bx = 19;
+        call(&r, 0x5C00);
+        CHECK((r.flags & 1) && r.ax == 6, "5C00h of no handle: %x", r.ax);
+        r.ds = tp;
+    }
+
     /* ---- what isn't there */
     r.flags = 0;
     res = call(&r, 0x71AA);                     /* (a long-name call GLOS's DOS hasn't got: Windows's SUBST) */
     CHECK(res == DOS21_DONE && (r.flags & 1) && r.ax == 0x7100, "71AAh %x", r.ax);
     r.flags = 0;
-    res = call(&r, 0x5F02);
-    CHECK(res == DOS21_UNANSWERED && (r.flags & 1) && r.ax == 1, "5Fh (not yet) %x", r.ax);
+    res = call(&r, 0x6100);
+    CHECK(res == DOS21_UNANSWERED && (r.flags & 1) && r.ax == 1, "61h (not this DOS's) %x", r.ax);
 
     /* ---- the end */
     res = call(&r, 0x4C2A);

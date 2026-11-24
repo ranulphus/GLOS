@@ -31,13 +31,22 @@ struct dos_layout {
     unsigned long lol;                  /* the List of Lists (52h; its words from lol - 12h) */
     unsigned long sda;                  /* the swappable data area in DOS's layout: 00h the critical-error flag,
                                            01h InDOS (34h), 0Ch the DTA, 10h the current PSP, 16h the current drive */
-    unsigned long misc;                 /* an empty DBCS table (63h), +2 a RETF (38h's case map), +4 two bytes
-                                           the machine may use (ndm.c: its INT 23h's ARPL) */
+    unsigned long misc;                 /* DOS_MISC bytes: an empty DBCS table (63h), +2 a RETF (38h's case map),
+                                           +4 two bytes the machine may use (ndm.c: its INT 23h's ARPL; the
+                                           system VM's to +1Eh: vdos.c), +1Fh a drive's media byte (1Bh, 1Ch),
+                                           +20h a drive's parameter block (1Fh, 32h), +60h the country's
+                                           tables (65h: upper case, file names' upper case, file names' ends) */
     unsigned long sft;                  /* the file table: DOS_FILES entries */
     unsigned root_psp;                  /* the root process's PSP (its own parent) */
     unsigned first_mcb, low_top;        /* the memory chain: its first MCB, its end (A000h) */
 };
 extern const struct dos_layout dos_layout_machine;
+#define DOS_MISC    0x180
+#define MISC_MEDIA  0x1F
+#define MISC_DPB    0x20
+#define MISC_UCASE  0x60                /* (a word 128, 128 bytes) */
+#define MISC_FUCASE 0xE2
+#define MISC_FTERM  0x164               /* (24 bytes) */
 
 #define DOS_LFN_FINDS 8                 /* long-name searches open at once (the oldest gives way to a ninth) */
 
@@ -57,6 +66,7 @@ struct dos_m {
     unsigned char ctrl_break, verify;
     unsigned exit_code;                 /* 4Dh's: the last child's AL, AH its kind (00h normal) */
     unsigned last_error;                /* 59h's */
+    unsigned temp_n;                    /* 5Ah's: names made so far */
     unsigned unanswered;
     int ended;                          /* the root's child has ended: the machine with it */
     int root_runs;                      /* the root is a program that runs on (the system VM's stub): its children's
