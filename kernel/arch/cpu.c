@@ -226,8 +226,9 @@ static void dump(const char *why, struct trapframe *tf)
                   ? current->stack_top : ((u32)sp + 0x1000) & ~0xFFFu;
         kprintf("GLOS-PANIC calls sp=%p top=%p:", (u32)sp, top);     /* (what on it looks like a return into the
                                                        kernel's code: no frame pointers, so some are old) */
-        for (k = 0; k < 96 && n < 12 && (u32)(sp + k) < top; k++)      /* (to the thread's stack top, which is
-                                                                           the kernel's own: never a page beyond) */
+        for (k = 0; n < 12 && (u32)(sp + k) < top; k++)       /* (to the thread's stack top, which is the
+                                                                   kernel's own, never a page beyond: a frame's
+                                                                   buffers can hold the first returns far up) */
             if (sp[k] >= (u32)__kernel_start && sp[k] < (u32)__text_end) {
                 kprintf(" %p", sp[k]);
                 n++;
