@@ -325,11 +325,10 @@ int es1371_init(void)
         }
     if (!ct5880)
         ok = ac97_start(&es.ac) == 0;
-    if (!ok) {
-        kprintf("GLOS-ES refused no-codec\n");
-        dev_note(pci_where(pd, w), "es1371", DEVS_REFUSED, "no-codec", 0);
-        return -1;
-    }
+    if (!ok)                                    /* (86Box's ES1371 never answers its codec's reads, all ones: it
+                                                   plays all the same, by DAC2, without the codec's mixer; a real
+                                                   chip's codec that never answers is said so, and played too) */
+        kprintf("GLOS-ES codec none: playing without its mixer\n");
     es.found = 1;
     pci_claim(pd);                              /* (GLOS's: DOS no longer finds it on the PCI bus) */
     kprintf("GLOS-ES found io=%x irq=%u id=%04x rev=%u\n", es.io, es.irq, pd->device, pd->rev);

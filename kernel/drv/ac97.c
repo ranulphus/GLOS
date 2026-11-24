@@ -34,6 +34,7 @@
 int ac97_start(struct ac97 *c)
 {
     u32 i;
+    int none;
     c->wr(c->ctx, R_RESET, 0);
     for (i = 0; i < 500 && (c->rd(c->ctx, R_POWER) & 0x0F) != 0x0F; i++)
         c->pause(c->ctx, 1);
@@ -42,20 +43,23 @@ int ac97_start(struct ac97 *c)
         return -1;
     }
     c->vendor = ((u32)c->rd(c->ctx, R_VENDOR1) << 16) | c->rd(c->ctx, R_VENDOR2);
-    if (c->vendor == 0xFFFFFFFFu || c->vendor == 0) {   /* (nobody answering: reads all ones or all zeros, the
+    none = c->vendor == 0xFFFFFFFFu || c->vendor == 0;  /* (nobody answering reads: all ones or all zeros, the
                                                            power register's "ready" with them; bench F's CT5880
                                                            held in reset, 2026-11-24) */
-        kprintf("GLOS-AC97 none vendor=%08x\n", c->vendor);
-        return -1;
-    }
-    c->vra = (c->rd(c->ctx, R_EXTID) & 1) != 0;
-    c->wr(c->ctx, R_MASTER, 0x0000);            /* the master at 0 dB, ... */
+    c->vra = !none && (c->rd(c->ctx, R_EXTID) & 1) != 0;
+    c->wr(c->ctx, R_MASTER, 0x0000);            /* the master at 0 dB, ... (written even to a codec whose reads
+                                                   fail: 86Box's ES1371 takes writes but never answers a read, and
+                                                   left at its reset's muted volumes it plays silence) */
     c->wr(c->ctx, R_PCM, 0x0808);               /* ... the PCM out at 0 dB, ... */
     c->wr(c->ctx, R_LINE, MUTE | 0x0808);       /* ... the inputs muted to the output, at 0 dB */
     c->wr(c->ctx, R_CD, MUTE | 0x0808);
     c->wr(c->ctx, R_MIC, MUTE | 0x0008);
     c->wr(c->ctx, R_RECSEL, 0x0404);            /* recording the line in, at 0 dB */
     c->wr(c->ctx, R_RECGAIN, 0x0000);
+    if (none) {
+        kprintf("GLOS-AC97 none vendor=%08x\n", c->vendor);
+        return -1;
+    }
     kprintf("GLOS-AC97 ready vendor=%08x vra=%d\n", c->vendor, c->vra);
     return 0;
 }
