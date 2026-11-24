@@ -1260,6 +1260,45 @@ the performance counters, so it can pace each machine.
   PC. Each step is useful on period PCs too: native disks are faster and reach past 8 GB.
 - **GLOS stays 32-bit:** long mode has no V86 mode, and 4 GB is plenty for this software.
 
+### The original Xbox (a study: the owner asked, 2026-11-24)
+
+The owner asked whether an original Xbox could boot native GLOS, given UEFI later; a study for now, not on the
+route. The owner's console is softmodded (it runs homebrew XBEs from the dashboard).
+
+- **Why it fits:** the Xbox is a PC without a BIOS. A Pentium III (Coppermine, 733 MHz: V86 mode and VME), the
+  8259s, the 8254, the RTC, PCI, a standard IDE controller, USB OHCI and an AC'97 controller in the MCPX; 64 MB
+  shared with the GPU. What it lacks is the list above: no BIOS, no VGA BIOS, no 8042 or PS/2, no ISA. So it comes
+  **after steps (2) and (3)** of the path above (native disks, the framebuffer, USB input, the small virtual BIOS
+  in each machine); the Xbox replaces step (4), the start.
+- **What the Xbox adds:**
+  - **The start:** a loader built as an XBE with the open-source nxdk (no Microsoft SDK), run from the softmodded
+    dashboard. Xbox code runs in ring 0, so the loader reads GLOS's files through the Xbox kernel, then takes the
+    machine over (its own GDT and page tables) and starts GLOS's kernel, as Xbox Linux's XBE loaders did. The
+    console's flash is never touched.
+  - **The disk:** FATX (Microsoft's FAT variant on the Xbox's drive) as a file system behind N1's interface. The
+    drive's ATA password lock is already open when the loader runs (the Xbox kernel unlocked it at power-on).
+  - **The display:** first the framebuffer the Xbox kernel set up before the loader took over (a mode chosen
+    through its own call); later GLOS's own mode setting through the TV encoder (three different chips across the
+    revisions, on the SMBus).
+  - **The network:** a driver for the nForce Ethernet controller.
+  - **Sound:** the MCPX's AC'97 part (Linux drives it with its Intel/nForce AC'97 driver, so phase H's AC'97 work
+    may cover most of it), GLOS's virtual Sound Blaster on top. The APU itself is not needed.
+  - **Input:** OHCI (in N4's plan for USB storage anyway), the controller's own USB protocol (XID: close to the
+    Xbox 360 pad's work), and USB keyboards and mice through a port adapter; GLOS's virtual 8042 fed from USB.
+  - **3D, optional:** an NV2A back end for DOS-GL and Glide (a GeForce 3-class GPU, Kelvin's 3D class), documented
+    in practice by nxdk's pbkit and the xemu emulator.
+- **The main limit, VGA:** as far as is known the NV2A has no VGA BIOS and its picture goes out through a TV
+  encoder. DOS programs that program VGA's registers themselves (mode 13h, Mode X: many DOS games) then need VGA
+  emulated by GLOS (the ports trapped, the picture drawn into the framebuffer). Text-mode and VESA programs work
+  through the virtual BIOS. A UEFI PC whose card has no VGA has the same gap, so the work is shared. Whether the
+  NV2A's own VGA core can be used is to be checked on the console.
+- **Testing:** 86Box has no Xbox. xemu (open source) models it, but needs dumps of the console's own BIOS and
+  MCPX boot ROM: private files, kept outside every repository like the MS-DOS 7.1 files. Then the owner's console
+  as a bench.
+- **First experiments, when its time comes:** an nxdk XBE that takes the machine over and prints to the serial
+  line or the framebuffer (in xemu, then on the console); then GLOS's kernel started by it on the framebuffer
+  with the virtual BIOS; then FATX read-only.
+
 ### Room to grow
 
 - **Loadable drivers** (a module format and a stable interface), so storage, network and sound drivers ship as
