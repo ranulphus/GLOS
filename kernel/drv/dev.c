@@ -163,6 +163,43 @@ static int mga_quiet(struct pci_dev *d, const char **how)
     return 0;
 }
 
+/* EHCI USB 2.0 (class 0C 03 20: its registers in memory, BAR 0; the operational ones after the capability length,
+   the first byte). It drives its line only when a cause it has enabled (USBINTR) is up. With none enabled it is
+   quiet as it is (bench B's NEC controller, which shares IRQ 10 with the CMI8738: the sound chip was refused
+   for it on 2026-11-24, as the line rule came to the sound drivers); with some enabled and the controller
+   stopped they are cleared; a controller that runs with them enabled is somebody's (a DOS USB driver's) and
+   stays so. GLOS's own hand-off (ehci.c, later in the start) leaves every one stopped with none enabled. */
+#define EHCI_USBCMD  0x00
+#define EHCI_USBINTR 0x08
+
+static int ehci_match(const struct pci_dev *d) { return d->class == 0x0C && d->subclass == 0x03 && d->progif == 0x20; }
+
+static int ehci_quiet(struct pci_dev *d, const char **how)
+{
+    volatile u8 *cap;
+    volatile u32 *op;
+    if (!(pci_read32(d->bus, d->dev, d->fn, 4) & 2)) {         /* its memory isn't decoded */
+        *how = "off";
+        return 0;
+    }
+    if ((d->bar[0] & 1) || !(d->bar[0] & ~15u) || !(cap = mm_dev_map(d->bar[0] & ~15u, 4096))) {
+        *how = "no-memory";
+        return -1;
+    }
+    op = (volatile u32 *)(cap + cap[0]);
+    if (!op[EHCI_USBINTR / 4]) {
+        *how = "no-intr";
+        return 0;
+    }
+    if (op[EHCI_USBCMD / 4] & 1) {
+        *how = "driven";
+        return -1;
+    }
+    op[EHCI_USBINTR / 4] = 0;
+    *how = "intr";
+    return 0;
+}
+
 /* The PCI sound chips GLOS has drivers for (phase H; step D2, 2026-11-24): one that sits on the network card's
    line is quiet while no channel of its runs with its interrupt enabled (the enables are cleared, if any is
    set); one that plays or records by interrupt is somebody's (a DOS driver's) and stays so. Their registers are
@@ -305,6 +342,7 @@ static const struct quiet quiets[] = {
     { "uhci", uhci_match, uhci_quiet },
     { "ohci", ohci_match, ohci_quiet },
     { "mga", mga_match, mga_quiet },
+    { "ehci", ehci_match, ehci_quiet },
     { "cmi8738", cmi_match, cmi_quiet },
     { "es1371", es_match, es_quiet },
     { "ich97", ich_match, ich_quiet },

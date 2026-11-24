@@ -279,6 +279,31 @@ int main(void)
     nic = add(13, 0, 0x10EC, 0x8139, 0x02, 0x00, 0x00, 1, 9, 0);
     CHECK(dev_take_line(nic, with, sizeof with) == 0 && !with[0] && other->keeper == DEV_GLOS && !logbuf[0]);
 
+    /* An EHCI on a sound chip's line (bench B: a NEC controller and the CMI8738 on IRQ 10). Its operational
+       registers after the capability length (here 20h): none enabled, quiet as it is; enabled but stopped,
+       cleared; running with them, somebody's */
+    reset();
+    other = add(14, 2, 0x1033, 0x00E0, 0x0C, 0x03, 0x20, 3, 10, 0);
+    other->bar[0] = 0xF0001000;
+    nic = add(12, 0, 0x13F6, 0x0111, 0x04, 0x01, 0x00, 1, 10, 0);
+    ohci[0] = 0x20;
+    CHECK(dev_take_line(nic, with, sizeof with) == 0 && other->keeper == DEV_QUIET && mapped == 0xF0001000);
+    CHECK(strstr(logbuf, "GLOS-DEV quiet 00:0e.2 id=1033:00e0 class=ehci irq=10 how=no-intr\n") != NULL);
+    reset();
+    other = add(14, 2, 0x1033, 0x00E0, 0x0C, 0x03, 0x20, 3, 10, 0);
+    other->bar[0] = 0xF0001000;
+    nic = add(12, 0, 0x13F6, 0x0111, 0x04, 0x01, 0x00, 1, 10, 0);
+    ohci[0] = 0x20, ohci[0x28 / 4] = 0x3F;
+    CHECK(dev_take_line(nic, with, sizeof with) == 0 && other->keeper == DEV_QUIET && ohci[0x28 / 4] == 0);
+    CHECK(strstr(logbuf, "how=intr") != NULL);
+    reset();
+    other = add(14, 2, 0x1033, 0x00E0, 0x0C, 0x03, 0x20, 3, 10, 0);
+    other->bar[0] = 0xF0001000;
+    nic = add(12, 0, 0x13F6, 0x0111, 0x04, 0x01, 0x00, 1, 10, 0);
+    ohci[0] = 0x20, ohci[0x20 / 4] = 1, ohci[0x28 / 4] = 0x3F;
+    CHECK(dev_take_line(nic, with, sizeof with) == -1 && other->keeper == DEV_DOS && ohci[0x28 / 4] == 0x3F);
+    CHECK(strstr(logbuf, "class=ehci irq=10 why=driven") != NULL);
+
     /* The sound chips GLOS has drivers for (step D2), on the network card's line.
        An ES1371 with nothing enabled: quiet as it is, nothing written */
     reset();
