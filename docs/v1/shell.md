@@ -555,3 +555,15 @@ As designed above, with these particulars:
 
 4. **Text-mode programs over SSH: later**, as a follow-up. The first version gives a prompt, line commands and
    programs; a program that takes the screen takes the PC's.
+
+## ATTRIB (2026-11-24)
+
+`ATTRIB [+R|-R] [+A|-A] [+S|-S] [+H|-H] [path]`, a built-in: the native-dos session needed to put a native GLOS's
+GLOSLDR.SYS back over SSH (read-only, hidden and system), which neither the shell nor SFTP could. With no change
+asked it lists as MS-DOS 7.1's ATTRIB does (asked of the real one on the reference disk): `A` in the third column,
+S, H and R in the sixth to the eighth, the name padded to fourteen, then the path in full. A pattern, or no path,
+takes files; a folder named alone is shown or changed itself; a change says nothing. Errors: `File not found -
+PATH`, `Invalid switch - /X`, `Invalid parameter - X`. The hosts give it `setattr` (the kernel's: INT 21h 4301h,
+so a native GLOS's own DOS answers it). /S is not done. DEL now says `Access denied` for a file it found but
+could not delete (read-only), as MS-DOS does, where it said `File not found`.
+

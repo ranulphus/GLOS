@@ -26,6 +26,7 @@ struct sh_dirent {
     unsigned long size;
     unsigned short date, time;          /* DOS's: ((year - 1980) << 9 | month << 5 | day), (h << 11 | m << 5 | s / 2) */
     unsigned char dir;
+    unsigned char attr;                 /* DOS's attribute byte: 01h read-only, 02h hidden, 04h system, 20h archive */
 };
 
 enum { SH_OUT, SH_ERR, SH_PROMPT, SH_TEXT };    /* what is written: output, an error, the prompt, a file's own bytes */
@@ -90,6 +91,9 @@ struct sh_host {
        "NUL"; 0: its own); append: the output is added to the file. May be 0: a line with < or > around a
        program is then the host's to run whole, as before. */
     void (*io)(void *ctx, const char *in, const char *out, int append);
+    /* ATTRIB (2026-11-24): a file's or a folder's attributes set (DOS's 01h, 02h, 04h, 20h). 0, or -1. May be 0:
+       ATTRIB then only lists. */
+    int (*setattr)(void *ctx, const char *path, unsigned attr);
 };
 
 /* A batch file being run (S4): where it is, how far it has got, what it was given. */

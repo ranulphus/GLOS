@@ -15,7 +15,7 @@ computer, and on the PC's own screen when there is no desktop. It reads DOS's co
 
 | For | Commands |
 |---|---|
-| Files and folders | CD, DIR, COPY, MOVE, REN, DEL, MD, RD, TYPE, VOL, DF, DU, WHERE, TRUENAME |
+| Files and folders | CD, DIR, COPY, MOVE, REN, DEL, ATTRIB, MD, RD, TYPE, VOL, DF, DU, WHERE, TRUENAME |
 | The prompt | ECHO, SET, PATH, PROMPT, CLS, VER, HELP, HISTORY, DATE, TIME, CHCP, EXIT |
 | Batch files | IF, GOTO, CALL, FOR, SHIFT, PAUSE, REM |
 | GLOS itself | PS, KILL, LOG, STAT, CONFIG, DISPLAY, AUDIO, NETWORK, USB, JOY, CLIP, SHOT, SERVICES |

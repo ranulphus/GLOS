@@ -508,6 +508,7 @@ static void entry(struct sh_dirent *e, const u8 *dta)
     for (i = 0; i < 12 && dta[0x1E + i]; i++)
         e->name[i] = (char)dta[0x1E + i];
     e->dir = (dta[0x15] & 0x10) != 0;
+    e->attr = dta[0x15];
     e->time = (u16)(dta[0x16] | dta[0x17] << 8);
     e->date = (u16)(dta[0x18] | dta[0x19] << 8);
     e->size = e->dir ? 0 : (u32)dta[0x1A] | (u32)dta[0x1B] << 8 | (u32)dta[0x1C] << 16 | (u32)dta[0x1D] << 24;
@@ -770,6 +771,15 @@ static int one_path(struct shsess *s, u16 ax, const char *path)
 static int h_mkdir(void *ctx, const char *path) { return one_path(ctx, 0x3900, path); }
 static int h_rmdir(void *ctx, const char *path) { return one_path(ctx, 0x3A00, path); }
 static int h_unlink(void *ctx, const char *path) { return one_path(ctx, 0x4100, path); }
+
+static int h_setattr(void *ctx, const char *path, unsigned attr)    /* (INT 21h 4301h: CX the attributes) */
+{
+    struct shsess *s = ctx;
+    if (paths(s, path, 0) != 0)
+        return -1;
+    call(s, 0, 0x4301, 0, (u16)(attr & 0x27), PATH_AT);
+    return made(s);
+}
 
 static int h_rename(void *ctx, const char *from, const char *to)
 {
@@ -1748,7 +1758,7 @@ static struct shsess *make(u32 cols, u32 rows, const char *line, const char *dir
     static const struct sh_host host = { 0, h_write, h_clear, h_prompted, h_input, h_quit, h_dir_read, h_dir_free,
         h_is_dir, h_stat, h_open, h_read, h_put, h_close, h_mkdir, h_rmdir, h_unlink, h_rename, h_space,
         h_run, h_as_typed,
-        own_names, own_help, h_extra, h_alloc, h_free, h_seek, h_key, h_stop, h_io };
+        own_names, own_help, h_extra, h_alloc, h_free, h_seek, h_key, h_stop, h_io, h_setattr };
     struct shsess *s;
     if (!(vm.bi->flags & BI_F_AGENT) || !(s = kmalloc(sizeof *s)))
         return 0;

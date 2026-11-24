@@ -218,6 +218,7 @@ COPY from [to]      files (* and ?), into a folder or a file
 MOVE from [to]      ... moved
 REN from to         a file's new name
 DEL files           files deleted (* and ?)
+ATTRIB [+R|-R] [+A|-A] [+S|-S] [+H|-H] [path]  attributes changed, or listed
 MD path, RD path    a folder made, removed
 DF [drive: ...]     the drives: their size, what is used and free
 DU [folder] [/S]    what a folder's files take, with all under it

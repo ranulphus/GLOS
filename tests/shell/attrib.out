@@ -1,0 +1,56 @@
+GLOS shell 1.0. HELP lists its commands.
+
+[[C:\>]]
+cd \work
+[[C:\WORK>]]
+attrib
+  A          TEST.TXT      C:\WORK\TEST.TXT
+  A          TWO.TXT       C:\WORK\TWO.TXT
+[[C:\WORK>]]
+attrib t*.txt
+  A          TEST.TXT      C:\WORK\TEST.TXT
+  A          TWO.TXT       C:\WORK\TWO.TXT
+[[C:\WORK>]]
+attrib +r test.txt
+(SETATTR C:\WORK\TEST.TXT 21)
+[[C:\WORK>]]
+attrib test.txt
+  A    R     TEST.TXT      C:\WORK\TEST.TXT
+[[C:\WORK>]]
+attrib +h +s -a test.txt
+(SETATTR C:\WORK\TEST.TXT 07)
+[[C:\WORK>]]
+attrib c:\work\test.txt
+     SHR     TEST.TXT      C:\WORK\TEST.TXT
+[[C:\WORK>]]
+attrib -r -h -s +a test.txt
+(SETATTR C:\WORK\TEST.TXT 20)
+[[C:\WORK>]]
+attrib test.txt
+  A          TEST.TXT      C:\WORK\TEST.TXT
+[[C:\WORK>]]
+attrib +r sub
+(SETATTR C:\WORK\SUB 01)
+[[C:\WORK>]]
+attrib sub
+       R     SUB           C:\WORK\SUB
+[[C:\WORK>]]
+attrib sub\*.*
+  A          IN.TXT        C:\WORK\SUB\IN.TXT
+[[C:\WORK>]]
+attrib none.txt
+<<File not found - C:\WORK\NONE.TXT
+>>[[C:\WORK>]]
+attrib /x test.txt
+<<Invalid switch - /x
+>>[[C:\WORK>]]
+attrib +q test.txt
+<<Invalid parameter - +q
+>>[[C:\WORK>]]
+attrib test.txt two.txt
+<<Invalid parameter - two.txt
+>>[[C:\WORK>]]
+exit
+(QUIT 0)
+[[C:\WORK>]]
+

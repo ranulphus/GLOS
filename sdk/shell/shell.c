@@ -692,7 +692,7 @@ static int cmd_del(struct sh *s, int argc, char **argv)
 {
     char dir[SH_PATH], pat[64], p[SH_PATH], line[80];
     struct sh_dirent *e;
-    int n, i, done = 0;
+    int n, i, done = 0, found = 0;
     if ((argc = switches(s, argc, argv, "Q")) < 0)      /* (it never asks) */
         return 1;
     if (argc < 2) {
@@ -706,18 +706,101 @@ static int cmd_del(struct sh *s, int argc, char **argv)
     }
     for (i = 0; i < n; i++)
         if (!e[i].dir && match(pat, e[i].name)) {
+            found++;
             path_join(p, sizeof p, dir, e[i].name);
             if (s->h->unlink(s->h->ctx, p) == 0)
                 done++;
         }
     s->h->dir_free(s->h->ctx, e);
-    if (!done) {
-        err(s, "File not found\r\n");
+    if (!done) {                                /* (there, but not deleted: read-only, as MS-DOS says it) */
+        err(s, found ? "Access denied\r\n" : "File not found\r\n");
         return 1;
     }
     sh_fmt(line, sizeof line, "%d file(s) deleted\r\n", done);
     say(s, line);
     return 0;
+}
+
+/* ATTRIB [+R|-R] [+A|-A] [+S|-S] [+H|-H] [path] (2026-11-24, for a native GLOS's GLOSLDR.SYS, read-only, hidden
+   and system, put back over SSH): the attributes changed, or with none asked, listed as MS-DOS 7.1's ATTRIB lists
+   them (asked of the real one on the reference disk): A in the third column, S, H and R in the sixth to the
+   eighth, the name padded to fourteen from the fourteenth, then the path in full. A pattern (or no path: *.*
+   where one is) takes files; a folder named alone is shown or changed itself. A change says nothing. */
+static int cmd_attrib(struct sh *s, int argc, char **argv)
+{
+    static const char letters[] = "RHSA";
+    static const unsigned bits[] = { 0x01, 0x02, 0x04, 0x20 };
+    char dir[SH_PATH], pat[64], p[SH_PATH], line[SH_PATH + 40];
+    const char *path = 0;
+    struct sh_dirent one, *e = 0;
+    unsigned set = 0, clr = 0;
+    int i, n, done = 0, alone = 0, r = 0;
+    for (i = 1; i < argc; i++) {
+        const char *a = argv[i];
+        if ((a[0] == '+' || a[0] == '-') && a[1] && !a[2] && strchr(letters, upper((unsigned char)a[1]))) {
+            unsigned b = bits[strchr(letters, upper((unsigned char)a[1])) - letters];
+            if (a[0] == '+')
+                set |= b, clr &= ~b;
+            else
+                clr |= b, set &= ~b;
+        } else if (a[0] == '/') {
+            sh_fmt(line, sizeof line, "Invalid switch - %s\r\n", a);
+            err(s, line);
+            return 1;
+        } else if (a[0] == '+' || a[0] == '-' || path) {
+            sh_fmt(line, sizeof line, "Invalid parameter - %s\r\n", a);
+            err(s, line);
+            return 1;
+        } else {
+            path = a;
+        }
+    }
+    if ((set || clr) && !s->h->setattr) {
+        err(s, "ATTRIB can't change attributes here\r\n");
+        return 1;
+    }
+    full_path(s, path ? path : "*.*", p, sizeof p);
+    if (path && !strpbrk(path, "*?") && s->h->is_dir(s->h->ctx, p) && s->h->stat(s->h->ctx, p, &one) == 0) {
+        alone = 1, n = 1;                       /* (a folder named alone: itself) */
+        e = &one;
+        sh_fmt(dir, sizeof dir, "%s", p);
+        path_up(dir);
+    } else {
+        sh_fmt(pat, sizeof pat, "%s", path_name(p));
+        sh_fmt(dir, sizeof dir, "%s", p);
+        path_up(dir);
+        if ((n = s->h->dir_read(s->h->ctx, dir, &e)) < 0)
+            n = 0, e = 0;
+    }
+    for (i = 0; i < n; i++) {
+        char full[SH_PATH];
+        unsigned a = e[i].attr;
+        if (!alone && (e[i].dir || !match(pat, e[i].name)))
+            continue;
+        done++;
+        path_join(full, sizeof full, dir, e[i].name);
+        if (alone)
+            sh_fmt(full, sizeof full, "%s", p);
+        if (set || clr) {
+            if (s->h->setattr(s->h->ctx, full, ((a & 0x27) & ~clr) | set) != 0) {
+                sh_fmt(line, sizeof line, "Access denied - %s\r\n", full);
+                err(s, line);
+                r = 1;
+            }
+            continue;
+        }
+        sh_fmt(line, sizeof line, "  %c  %c%c%c     %-14s%s\r\n", a & 0x20 ? 'A' : ' ', a & 0x04 ? 'S' : ' ',
+               a & 0x02 ? 'H' : ' ', a & 0x01 ? 'R' : ' ', e[i].name, full);
+        say(s, line);
+    }
+    if (e && !alone)
+        s->h->dir_free(s->h->ctx, e);
+    if (!done) {
+        sh_fmt(line, sizeof line, "File not found - %s\r\n", p);
+        err(s, line);
+        return 1;
+    }
+    return r;
 }
 
 static int cmd_type(struct sh *s, int argc, char **argv)
@@ -805,7 +888,7 @@ static int cmd_set(struct sh *s, int argc, char **argv, const char *raw)
 static const char *const builtins[] = { "CD", "CHDIR", "DIR", "COPY", "MOVE", "REN", "RENAME", "DEL", "ERASE", "MD",
     "MKDIR", "RD", "RMDIR", "TYPE", "ECHO", "SET", "PATH", "PROMPT", "CLS", "VER", "EXIT", "HISTORY", "HELP", "WHERE",
     "START", "DF", "DU", "CALL", "FOR", "GOTO", "IF", "PAUSE", "REM", "SHIFT", "VOL", "TRUENAME", "BREAK", "VERIFY",
-    "LH", "LOADHIGH", "CTTY", 0 };
+    "LH", "LOADHIGH", "CTTY", "ATTRIB", 0 };
 
 static const char *const helps[] = {
     "CD [path]           the folder (of a drive: CD X:); X: changes drive",
@@ -814,6 +897,7 @@ static const char *const helps[] = {
     "MOVE from [to]      ... moved",
     "REN from to         a file's new name",
     "DEL files           files deleted (* and ?)",
+    "ATTRIB [+R|-R] [+A|-A] [+S|-S] [+H|-H] [path]  attributes changed, or listed",
     "MD path, RD path    a folder made, removed",
     "DF [drive: ...]     the drives: their size, what is used and free",
     "DU [folder] [/S]    what a folder's files take, with all under it",
@@ -1612,6 +1696,8 @@ static int run_line(struct sh *s, char *line)
         r = cmd_du(s, argc, argv);
     } else if (same(argv[0], "TYPE")) {
         r = cmd_type(s, argc, argv);
+    } else if (same(argv[0], "ATTRIB")) {
+        r = cmd_attrib(s, argc, argv);
     } else if (same(argv[0], "ECHO") || echo_dot(argv[0])) {
         const char *t = line + 4;
         if (*t == '.') {

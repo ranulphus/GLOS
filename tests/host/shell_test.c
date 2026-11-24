@@ -59,6 +59,20 @@ static int by_kind_name(const void *a, const void *b)
     return x->dir != y->dir ? y->dir - x->dir : strcmp(x->name, y->name);
 }
 
+/* ATTRIB's attributes: the host's files have none, so they are kept here by path (archive for a file, none for a
+   folder, until set) */
+static struct { char path[600]; unsigned attr; } attrs[64];
+static int nattrs;
+
+static int attr_at(const char *path, int dir)
+{
+    int i;
+    for (i = 0; i < nattrs; i++)
+        if (!strcmp(attrs[i].path, path))
+            return (int)attrs[i].attr;
+    return dir ? 0x10 : 0x20;
+}
+
 static int fill(const char *path, const char *name, struct sh_dirent *e)
 {
     struct stat st;
@@ -67,6 +81,7 @@ static int fill(const char *path, const char *name, struct sh_dirent *e)
     memset(e, 0, sizeof *e);
     snprintf(e->name, sizeof e->name, "%s", name);
     e->dir = S_ISDIR(st.st_mode);
+    e->attr = (unsigned char)(attr_at(path, e->dir) | (e->dir ? 0x10 : 0));
     e->size = e->dir ? 0 : (unsigned long)st.st_size;
     e->date = (unsigned short)((2026 - 1980) << 9 | 11 << 5 | 13);     /* (the same for all: the transcript is kept) */
     e->time = (unsigned short)(12 << 11 | 34 << 5);
@@ -235,10 +250,31 @@ static void h_io(void *ctx, const char *in, const char *out, int append)
     printf("(IO in=%s out=%s%s)\n", in ? in : "-", out ? out : "-", append ? " append" : "");
 }
 
+static int h_setattr(void *ctx, const char *path, unsigned attr)
+{
+    char p[600];
+    struct stat st;
+    int i;
+    (void)ctx;
+    native(path, p, sizeof p);
+    if (stat(p, &st) != 0)
+        return -1;
+    for (i = 0; i < nattrs && strcmp(attrs[i].path, p); i++)
+        ;
+    if (i == nattrs) {
+        if (nattrs == 64)
+            return -1;
+        snprintf(attrs[nattrs++].path, sizeof attrs[0].path, "%s", p);
+    }
+    attrs[i].attr = attr & 0x27;
+    printf("(SETATTR %s %02X)\n", path, attr & 0x27);
+    return 0;
+}
+
 static const struct sh_host host = {
     0, h_write, h_clear, h_prompted, h_input, h_quit, h_dir_read, h_dir_free, h_is_dir, h_stat, h_open, h_read, h_put,
     h_close, h_mkdir, h_rmdir, h_unlink, h_rename, h_space, h_run, 0, extra_names, extra_help, h_extra, h_alloc, h_free,
-    h_seek, h_key, h_stop, h_io };
+    h_seek, h_key, h_stop, h_io, h_setattr };
 
 int main(int argc, char **argv)
 {

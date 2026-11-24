@@ -1,0 +1,23 @@
+# ATTRIB (sdk/shell, 2026-11-24): listed as MS-DOS 7.1 lists them, changed, a folder by itself, the errors.
+mkdir C:\WORK
+mkdir C:\WORK\SUB
+file C:\WORK\TEST.TXT hello
+file C:\WORK\TWO.TXT two
+file C:\WORK\SUB\IN.TXT in
+> cd \work
+> attrib
+> attrib t*.txt
+> attrib +r test.txt
+> attrib test.txt
+> attrib +h +s -a test.txt
+> attrib c:\work\test.txt
+> attrib -r -h -s +a test.txt
+> attrib test.txt
+> attrib +r sub
+> attrib sub
+> attrib sub\*.*
+> attrib none.txt
+> attrib /x test.txt
+> attrib +q test.txt
+> attrib test.txt two.txt
+> exit
