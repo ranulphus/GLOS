@@ -214,7 +214,10 @@ int crystal_init(const char *cfg)
     }
     if ((why = conflict()) != 0) {
         kprintf("GLOS-SOUND crystal refuse reason=%s\n", why);
-        dev_note("crystal", "crystal", DEVS_REFUSED, "conflict", res());
+        if (cfg && strcmp(cfg, "auto"))         /* (named in [sound] crystal: said in Devices. auto only looked, and
+                                                   whether such a chip is there at all is not known: bench G, which
+                                                   has none, listed a refused one, 2026-11-24) */
+            dev_note("crystal", "crystal", DEVS_REFUSED, "conflict", res());
         return -1;
     }
     cs.game_on = cs.game && inb((u16)(cs.game + 1)) == 0xFF;  /* (nothing answering there yet) */

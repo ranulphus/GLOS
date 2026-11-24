@@ -102,18 +102,27 @@ static int codec_idle(void)
     return 0;
 }
 
+/* The codec's register read. The command is written with the valid flag in it, which clears the flag (as FreeBSD's
+   via82c686 and via8233 drivers write it, BSD licence): left set by the read before, it answered for this one
+   at once on bench G's VT8235, with the old data, and the rate read back after it was set was wrong (the
+   driver's first run on silicon, 2026-11-24: "error=rate-or-size"). Then the flag is waited for with this
+   register's number beside it, and the data read once more a moment later; three tries. */
 static u16 codec_rd(void *ctx, u8 reg)
 {
-    u32 i, v;
+    u32 i, v, tries;
     (void)ctx;
-    codec_idle();
-    outl((u16)(via.io + CODEC), CD_READ | ((u32)(reg & 0x7F) << 16));
-    for (i = 0; i < 4096; i++) {
-        v = inl((u16)(via.io + CODEC));         /* (a write of the index would start another access: the
-                                                   answer is known by its register's number instead) */
-        if (!(v & CD_BUSY) && (v & CD_VALID) && ((v >> 16) & 0x7F) == (reg & 0x7Fu))
-            return (u16)v;
-        us(1);
+    for (tries = 0; tries < 3; tries++) {
+        codec_idle();
+        outl((u16)(via.io + CODEC), CD_VALID | CD_READ | ((u32)(reg & 0x7F) << 16));
+        us(20);
+        for (i = 0; i < 4096; i++) {
+            v = inl((u16)(via.io + CODEC));
+            if (!(v & CD_BUSY) && (v & CD_VALID) && ((v >> 16) & 0x7F) == (reg & 0x7Fu)) {
+                us(25);
+                return (u16)inl((u16)(via.io + CODEC));
+            }
+            us(1);
+        }
     }
     return 0xFFFF;
 }
@@ -122,7 +131,10 @@ static void codec_wr(void *ctx, u8 reg, u16 v)
 {
     (void)ctx;
     codec_idle();
-    outl((u16)(via.io + CODEC), ((u32)(reg & 0x7F) << 16) | v);
+    outl((u16)(via.io + CODEC), CD_VALID | ((u32)(reg & 0x7F) << 16) | v);
+    us(20);                                     /* (the controller's busy flag is not up at once: the write is
+                                                   over before the next access is begun) */
+    codec_idle();
 }
 
 static void codec_pause(void *ctx, u32 ms)
