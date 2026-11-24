@@ -264,3 +264,14 @@ Not built yet. What was found:
 - **GLOS on benches D and E:** setup floppies `glos1440-bench-d.img` and `glos1440-bench-e.img` were made on GLOS
   main 30ce832 (`make floppy FLOPPY_HOST=bench-d`, from the host). The owner writes them to floppies and starts
   each PC from its floppy with its network cable in; `tools/floppy/install.py bench-d.local` does the rest.
+
+## ATI cards under GLOS with DOS-GL's devices (2026-11-24)
+
+RetroGPU main 8148677 gave DOS-GL devices for the Rage 128 Pro and the Radeon 7000/7500. GLOS's own display
+stays VBE on them; what changes is GLOS's GL programs and full-screen DOS-GL programs:
+
+| Bench | Card | Checked under GLOS |
+|---|---|---|
+| A (IBM 300PL) | Rage 128 Pro | The OBJECTS saver (a full-screen GLOS window) drew right, and the desktop came back whole after the wake. Cushion in its desktop window drew right at 7 fps (the software renderer, as for any window). Echoes' ECHB, a full-screen DOS-GL program, ran nine runs on the card's CCE ring under GLOS. |
+| B (P3) | Radeon 7500 LE | write_combining = auto took the 64 MB range by itself. TEXCUBE (linked from 8148677) ran full screen on the card's command processor for a minute, then GLOS killed it (no close of DOS-GL's ran); DOS-GL's DPROBE (it only reads registers) then showed the case is real: surface 0 still set over the tiled depth buffer (`info=00030050 lower=0012c000 upper=001c1fff`). After GLOS's desktop mode set (`glos display on`, whose `radeon_surfaces_off` runs first) it read `info=00000000 lower=00000000`, as the untouched surfaces do. The desktop at 1024x768x16, over that range, was clean. The CMI8738 plays: the NEC EHCI on its line is quiet (a quiet driver for EHCI, after main a39561b refused the sound chip for it). |
+

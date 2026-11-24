@@ -620,6 +620,14 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
   a `pmm-take-kernel` or `pmm-free-kernel` line in any run names the path; the Games Library's overwritten
   output above may be another face of the same loose frames.
 
+- **Keys typed as the Terminal's window comes are lost** (gate 52, 2026-11-24, local: `native-486dx2-vbe-8
+  term-run`, the 486 natively). `c:`, Enter and `cd \g` went nowhere; `ui` and what followed reached the shell.
+  Neither end drops them by design: the Terminal's keys wait in its event queue until its shell's job exists
+  (it is started just after the window is shown), and the kernel's shell session keeps what is written to it
+  until it reads. Likely the window manager: keys pressed between the window's showing and its taking the focus
+  go to the window that had it. Not chased; the script now waits for the shell's greeting (`said`), which a
+  person typing at once on a slow PC does not. Next: the focus at a window's showing, in `kernel/wm`.
+
 - **The SB16's playback dead after a recording** (the fortieth gate, 2026-11-22, devserver:
   `audio-486dx2-vbe`; not seen in three runs here). The Player's stream was never mixed (`periods=0` for its
   246 seconds), and the stream that had been playing when the Sound Recorder began got nothing after it
