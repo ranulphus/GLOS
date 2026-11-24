@@ -84,7 +84,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: census rbil fat-test fat-test-run floppy native-floppy usb-stick loopa-floppy loopa-ndos loopa-nboot native-loader loopa-joy loopa-int2f loopa-cache loopa-mem-page loopa-umaprobe loopa-umb sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
+.PHONY: census rbil fat-test fat-test-run floppy native-floppy usb-stick loopa-smoke loopa-floppy loopa-ndos loopa-nboot native-loader loopa-joy loopa-int2f loopa-cache loopa-mem-page loopa-umaprobe loopa-umb sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN build/glos/COMMAND.COM
 
 help:
@@ -873,6 +873,11 @@ loopa-control: all apps check-deps
 loopa-time: all dos-tests check-deps
 	$(Q)python3 tests/loopa/jobs.py time -j $(JOBS)
 # M10 step B: an app's TCP connections (NETTEST) against an echo server on the host; an app killed with some open.
+# The smoke tier (tests/loopa/smoke.py): one boot per profile, six side by side, the suites' own test programs
+# as steps in that boot; about ten minutes, after every change. The merge gate stays for the rest.
+loopa-smoke: all apps dos-tests native-loader build/kernel/GLOSK.PAK gui-goldens build/dj/NETTEST.EXE build/dj/APITEST.EXE \
+             build/dj/AUDTEST.EXE build/apps/RECORDER.EXE check-deps
+	$(Q)python3 tests/loopa/smoke.py
 loopa-netapp: all build/dj/NETTEST.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py netapp -j $(JOBS)
 # M10 step C: HTTPS (FETCH) against servers on the host with a test CA, refusals, GitHub and a FreeDOS mirror.
