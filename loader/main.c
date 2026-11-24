@@ -279,6 +279,7 @@ static int xms_block(unsigned long kb, unsigned long *phys)
 
 #define KCHUNK 32768UL                          /* the kernel image goes up this much at a time */
 #define KERNEL_PACKED 0x5A4F4C47UL              /* "GLOZ": GLOSK.BIN packed (tools/packkernel.py) */
+#define KERNEL_PACKED_X 0x584F4C47UL            /* "GLOX": ... its near calls and jumps turned first (pk_calls) */
 static unsigned long xms_kernel_block;          /* XMS mode: where the kernel's block begins */
 
 /* bytes (even) of the buffer at seg:0 to the kernel's place in extended memory, at off: 0, or -1. */
@@ -549,6 +550,37 @@ static void disks_probe(void)
 static FILE *pk_file;
 static unsigned pk_seg;
 static unsigned long pk_at, pk_left, pk_a = 1, pk_b;       /* (the image's Adler-32 as it goes by) */
+static unsigned long pk_size;                   /* the image's bytes */
+static int pk_turned;                           /* "GLOX": its calls are to be put back */
+
+/* A block of the image (n bytes at w, the image's bytes from base on): its near calls' and jumps' distances from
+   the targets' places packkernel.py gave them (back 1: to those places again). The rule is packkernel.py's,
+   which says why: E8h or E9h with its four bytes inside the block and ten bytes or more before the image's end,
+   the five bytes stepped over whether changed or not; a value v at place p of an image of size bytes changes if
+   -p <= v < size. */
+static void pk_calls(unsigned char far *w, unsigned n, unsigned long base, int back)
+{
+    unsigned i = 0;
+    while (i + 5 <= n) {
+        unsigned char op = w[i];
+        long p = (long)(base + i), v, size = (long)pk_size;
+        if ((op != 0xE8 && op != 0xE9) || p + 10 >= size) {
+            i++;
+            continue;
+        }
+        v = (long)((unsigned long)w[i + 1] | (unsigned long)w[i + 2] << 8 | (unsigned long)w[i + 3] << 16
+                   | (unsigned long)w[i + 4] << 24);
+        if (v >= -p && v < size) {
+            if (back)
+                v = v < size - p ? v + p : v - size;
+            else
+                v = v >= 0 ? v - p : v + size;
+            w[i + 1] = (unsigned char)v, w[i + 2] = (unsigned char)(v >> 8);
+            w[i + 3] = (unsigned char)(v >> 16), w[i + 4] = (unsigned char)(v >> 24);
+        }
+        i += 5;
+    }
+}
 
 static unsigned pk_fill(const unsigned char **p, void *ctx)
 {
@@ -563,9 +595,13 @@ static unsigned pk_fill(const unsigned char **p, void *ctx)
 
 static int pk_flush(unsigned n, void *ctx)
 {
-    const unsigned char far *w = MK_FP(pk_seg, 0);
+    unsigned char far *w = MK_FP(pk_seg, 0);
     unsigned i = 0, k;
     (void)ctx;
+    if (pk_turned)                              /* (the calls put back in the window itself, for the sum and the
+                                                   copy; then turned again: the stream's later bytes are copies
+                                                   of the window's as the stream had them) */
+        pk_calls(w, n, pk_at, 0);
     while (i < n) {                             /* (5552 bytes at most between the remainders: the sums fit 32 bits) */
         k = n - i > 5552 ? 5552 : n - i;
         while (k--) {
@@ -577,6 +613,8 @@ static int pk_flush(unsigned n, void *ctx)
     }
     if (kernel_up(pk_seg, pk_at, ((unsigned long)n + 1) & ~1UL) != 0)
         return -1;
+    if (pk_turned)
+        pk_calls(w, n, pk_at, 1);
     pk_at += n;
     return 0;
 }
@@ -653,9 +691,10 @@ static int glos_main(int argc, char **argv)
     /* The kernel image. */
     kernel_path(path, argv[0]);
     f = fopen(path, "rb");
-    if (!f || fread(&hdr, sizeof hdr, 1, f) != 1 || (hdr.magic != KERNEL_MAGIC && hdr.magic != KERNEL_PACKED))
+    if (!f || fread(&hdr, sizeof hdr, 1, f) != 1
+        || (hdr.magic != KERNEL_MAGIC && hdr.magic != KERNEL_PACKED && hdr.magic != KERNEL_PACKED_X))
         return refuse("no-kernel");
-    if (hdr.magic == KERNEL_PACKED) {           /* (the image's own header's figures, then the stream's) */
+    if (hdr.magic != KERNEL_MAGIC) {            /* (the image's own header's figures, then the stream's) */
         if (fread(&packed, sizeof packed, 1, f) != 1)
             return refuse("no-kernel");
         is_packed = 1;
@@ -738,6 +777,7 @@ static int glos_main(int argc, char **argv)
     if (is_packed) {
         int r;
         pk_file = f, pk_seg = buf_seg, pk_at = 0, pk_left = packed.length;
+        pk_size = hdr.file_size, pk_turned = hdr.magic == KERNEL_PACKED_X;
         r = inflate_stream(pk_fill, pk_flush, 0, (unsigned char far *)MK_FP(buf_seg, 0));
         fclose(f);
         if (r == -2)

@@ -1826,7 +1826,7 @@ def ecm(profile, boot):
     runs = {h: dj_runs(t).get("ECM") for h, t in text.items()}
     g, hd = runs["glos"], runs["hdpmi"]
     ok = bool(g and hd and g[1] == hd[1] and hr_norm(g[0]) == hr_norm(hd[0]))
-    ok = ok and hx_vecchk(text)["glos"] and "GLOS-PANIC" not in text["glos"]
+    ok = ok and hx_vecchk(text["glos"]) and "GLOS-PANIC" not in text["glos"]
     info = ""
     if g and hd and not ok:
         a, b = hr_norm(g[0]), hr_norm(hd[0])
@@ -3405,7 +3405,7 @@ def sess_left(text):
     after = re.search(r"HX-TIME rtc=\S+ dos=\S+ diff=(\d+) vec60=(\w+) kbd=(\w+)", text[a:] if a >= 0 else "")
     if not before or not after:
         return None
-    return {"pic": hx_vecchk(text)[a:], "mode": "HX-VMODE bios=03" in text[a:],
+    return {"pic": hx_vecchk(text[a:]), "mode": "HX-VMODE bios=03" in text[a:],
             "clock": int(after.group(1)) <= 2, "int60": after.group(2) == before.group(2),
             "locks": after.group(3) == before.group(3)}
 
@@ -7620,7 +7620,8 @@ def nboot_install_case(profile, card, bios=False):
                          "build/glos/COMMAND.COM=\\GLOS\\KEYS\\PKG\\DEEP.COM"],
                         cwd=ROOT, capture_output=True, env=dict(os.environ, GLOS_CMDLINE="/BIOSDISK" if bios else ""))
     checks, info = {"image": mk.returncode == 0}, ""
-    listing = lambda out: sorted(re.findall(r"^(\S+ +\S*) +([\d,]+|<DIR>) (\d\d-\d\d-\d{4} +\d\d:\d\d)", out, re.M))
+    # (an hour before ten has one digit: the gate of 2026-11-24 ran after midnight and found no line at all)
+    listing = lambda out: sorted(re.findall(r"^(\S+ +\S*) +([\d,]+|<DIR>) (\d\d-\d\d-\d{4} +\d?\d:\d\d)", out, re.M))
     agent = Agent(tag + "-" + card, profile, card, ["--hdd", img, "--scratch-hdd", "64", "--keep-vm"], timeout=1500,
                   files=False)
     before = []
