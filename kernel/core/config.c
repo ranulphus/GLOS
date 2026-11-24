@@ -491,8 +491,9 @@ static void wc_config(void)
         || (card->vendor == 0x1002 && (card->device == 0x5046      /* (phase H tier 2: the Rage 128 Pro, its
                                                    registers in a BAR of their own; checked on bench B by DOS-GL,
                                                    2026-11-23) */
-                                       || card->device == 0x5159));    /* (... and the Radeon 7000 VE, the same way:
+                                       || card->device == 0x5159      /* (... and the Radeon 7000 VE, the same way:
                                                    DOS-GL's and Glide's conformance and its own tests, 2026-11-24) */
+                                       || card->device == 0x5157));   /* (... and the Radeon 7500 LE, the same day) */
     if (!same(v, "on") && !known) {
         kprintf("GLOS-MTRR wc skip card=%04x:%04x reason=unchecked-card (MTRR LFB ON tries it)\n", card->vendor, card->device);
         return;
