@@ -397,6 +397,20 @@ static u32 win;                                 /* the three bytes (seg << 16 | 
 static u8 in_window;
 static u32 reentered;
 
+/* A disk wait's sleep to the next tick, where the VM's thread sleeps for anything (vm.waitq): an interrupt of
+   the PC's wakes it there at once and ahead of other threads (vm_kick), so the wait's next look takes that
+   interrupt (the window) before an app's thread has its own of the same tick. An app's timer handler that
+   reads the BIOS's count of ticks (DJGPP's, for its signals) found it one behind otherwise, whenever the app's
+   thread was the one running when the tick came: half an app's timer signals lost while its other threads
+   were in DOS (thr's `interrupts` case natively, on the 486 and the bf6: 8 to 14 of 27; 22 under FreeDOS, whose
+   code in the VM is woken so). */
+static void vd_nap(void)
+{
+    u32 now = timer_ticks();
+
+    thread_wait(&vm.waitq, now + 1 ? now + 1 : 1);
+}
+
 static void vd_window(void)
 {
     struct rmregs r;
@@ -468,7 +482,7 @@ int vdos_init(struct bootinfo *bi)
     a = vd.lay.misc + 0x10;                     /* the window: STI, NOP, RETF */
     mem[a] = 0xFB, mem[a + 1] = 0x90, mem[a + 2] = 0xCB;
     win = (u32)(a >> 4) << 16 | (u32)(a & 0xF);
-    ide_wait_hook(vd_window);
+    ide_wait_hook(vd_window, vd_nap);
     set_vec(0x21, arpl[V21]), set_vec(0x20, arpl[V20]), set_vec(0x29, arpl[V29]), set_vec(0x23, arpl[V23]);
     set_vec(0x2F, arpl[V21] + 2 * NV);          /* (INT 2Fh's chain ends here: GLOS's int2f_hook answers before it) */
     ready = 1;

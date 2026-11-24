@@ -52,7 +52,9 @@ static void (*wait_hook)(void);
 
 void ide_patient(int on) { patient = on ? current : 0; }
 
-void ide_wait_hook(void (*fn)(void)) { wait_hook = fn; }
+static void (*wait_nap)(void);
+
+void ide_wait_hook(void (*fn)(void), void (*nap)(void)) { wait_hook = fn, wait_nap = nap; }
 
 static unsigned long k_ms(void *ctx)
 {
@@ -77,7 +79,10 @@ static unsigned long k_ms(void *ctx)
         if (now != at)
             at = now, looks = 0;
         else if (++looks >= 64) {
-            thread_wait(&nap, now + 1 ? now + 1 : 1);       /* (0 would be no end to it) */
+            if (wait_nap)
+                wait_nap();
+            else
+                thread_wait(&nap, now + 1 ? now + 1 : 1);   /* (0 would be no end to it) */
             looks = 0;
             now = timer_ticks();
         }
