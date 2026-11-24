@@ -11276,14 +11276,17 @@ def backup_case(profile, vcard, card, bits):
         # The schedule: the clock a day on, so that 03:00 has passed; GLOS backs the folder up by itself (DISKS
         # -backup, no window), a set of 2030 there
         agent.ssh("glos time set 2030-01-01T12:00:00")
-        t0, sets = time.time(), ""
-        while time.time() - t0 < 180:
+        # (Waited for until the set's manifest is there, which the backup writes last: the set's folder alone was
+        # waited for until 2026-11-24, and on the 486, on a busy machine, the manifest was looked for before it
+        # had been written: one case of the native-dos session's gate.)
+        t0, sets, new, done = time.time(), "", [], False
+        while time.time() - t0 < 180 and not done:
             sets = srv.run("ls glos-backups/GUI")
-            if "20300101-" in sets:
-                break
-            time.sleep(5)
-        new = [x for x in sets.split() if x.startswith("20300101-")]
-        checks["scheduled-run"] = bool(new) and "MANIFEST.TXT" in srv.run("ls glos-backups/GUI/%s" % new[0])
+            new = [x for x in sets.split() if x.startswith("20300101-")]
+            done = bool(new) and "MANIFEST.TXT" in srv.run("ls glos-backups/GUI/%s" % new[0])
+            if not done:
+                time.sleep(5)
+        checks["scheduled-run"] = done
         if not checks["scheduled-run"]:
             notes.append("sets there: %r" % sets)
         agent.ssh("glos exit")
