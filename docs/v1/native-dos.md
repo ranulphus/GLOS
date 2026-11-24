@@ -1066,6 +1066,14 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
 - `install.py` onto a disk that has MS-DOS or Windows 9x: GLOS into `\GLOS`, its boot records with the DOS's
   sector saved (N3), the menu's default GLOS or DOS as asked.
 - The 486 (bench C) is the floppy's test, as for S3.
+- **Built (2026-11-24), beside the FreeDOS floppy for now:** `make native-floppy` (`tools/ndos/nfloppy.py`: GLOS's
+  boot sector, `GLOSLDR.SYS`, `\GLOS` with the packed kernel, COMMAND.COM, GLOS.CFG and the keys; 654 KB, room
+  for a 720 KB disk too) and `tools/floppy/install.py --native` (`--new-disk [--erase-existing]` or `--free`:
+  `DISK 1 INSTALL`, a restart from the floppy so that the new volume has its letter, the programs by SFTP).
+  `loopa-nboot`'s nsetup case on the bf6 and the 486 (the copy: 34 s and 7 minutes). Still owed here: ATTRIB
+  (the GLOS session's, coming), XCOPY, MORE, DELTREE as built-ins; the menu's default; the FreeDOS floppy's
+  retirement once the 486 has started from the new one; `install.py --native` onto a disk with MS-DOS or Windows
+  in its free space is `--free` (tested in Loop A by DISK's own cases; not yet through install.py).
 
 ## N6: several DOS programs at once
 
