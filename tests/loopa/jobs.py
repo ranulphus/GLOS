@@ -4278,7 +4278,7 @@ def display_case(profile, vcard, card, cfg_mode, accel="on"):
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
     text = agent.wait()
-    checks["text-at-exit"] = "HX-VMODE bios=03" in text
+    checks["text-at-exit"] = text_at_exit(text)
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
     checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text) and hx_vecchk(text)
     if vcard.startswith("g4"):                  # a G400: GLOS looked at its clocks once its settings were read, and
@@ -4393,7 +4393,7 @@ def desk_case(profile, vcard, card):
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
     text = agent.wait()
-    checks["text-at-exit"] = "HX-VMODE bios=03" in text
+    checks["text-at-exit"] = text_at_exit(text)
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
     checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text) and hx_vecchk(text)
     if vcard in MATROX_CARDS:                   # (M7 step C: the engine up on each mode, drawing nothing yet)
@@ -4912,7 +4912,7 @@ def win_case(profile, vcard, card, bits, bits2):
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
     text = agent.wait()
-    checks["text-at-exit"] = "HX-VMODE bios=03" in text
+    checks["text-at-exit"] = text_at_exit(text)
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
     checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text) and hx_vecchk(text)
     bad = [k for k, v in checks.items() if not v]
@@ -5191,7 +5191,7 @@ def gpu_case(profile, vcard, card):
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
     text = agent.wait()
-    checks["text-at-exit"] = "HX-VMODE bios=03" in text
+    checks["text-at-exit"] = text_at_exit(text)
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
     checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text) and hx_vecchk(text)
     bad = [k for k, v in checks.items() if not v]
@@ -7512,6 +7512,12 @@ def dosdiff_compare(got_text):
             if not any(name.startswith(k) for k in DOSDIFF_KNOWN):
                 out.append("%s | %s" % (w_, g_))
     return out
+
+
+def text_at_exit(text):
+    """The screen in text mode (BIOS mode 03h) once GLOS has ended: VMODE's word after GLOS.EXE under a DOS; a
+    native GLOS's loader's (it gets the PC back from the kernel, and no DOS runs after it)."""
+    return ("GLOS-NATIVE end mode=03" in text) if NATIVE else ("HX-VMODE bios=03" in text)
 
 
 def nboot_case(profile, card):
