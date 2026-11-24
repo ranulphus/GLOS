@@ -97,6 +97,29 @@ computer). SKIP, SEEK and COUNT are in sectors of 512 bytes. The same rules as `
 with `/Y`, after what would be lost is said, and never the disk, volume or floppy GLOS or DOS runs from. From
 the connection onto a disk is not there yet (the image goes by SFTP into a file first).
 
+## With no DOS (since 2026-11-24)
+
+The same job with nothing of FreeDOS's: the floppy starts GLOS by its own boot sector and loader (GLOS's
+native start: [v1/native-dos.md](v1/native-dos.md)), and GLOS's `DISK` lays out the hard disk, formats it, makes
+it start and copies GLOS there.
+
+    make native-floppy                                         build/floppy/nglos1440.img (FLOPPY_SIZE=720, 1200)
+    tools/floppy/install.py --native glos-setup.local --new-disk                  a disk with nothing on it
+    tools/floppy/install.py --native glos-setup.local --new-disk --erase-existing (everything on it is lost)
+    tools/floppy/install.py --native glos-setup.local --free                      beside the systems there
+
+- **On the floppy** (`tools/ndos/nfloppy.py`): `GLOSLDR.SYS` in the root, which its boot sector loads; `A:\GLOS`
+  with the kernel (packed), GLOS's own `COMMAND.COM`, a `GLOS.CFG` that names the PC, `KEYS\` (the setup floppy's
+  host key and `AUTHKEYS`, as above); an `AUTOEXEC.BAT` that says what to run on the other computer. 654 KB.
+- **The install:** `DISK 1 INSTALL` (`/ERASE` for `--erase-existing`, `/FREE` for `--free`): GLOS's MBR, a FAT
+  partition, GLOS's boot sector, and the floppy's GLOS copied there. The PC is restarted, from the floppy again,
+  so that GLOS has the new volume as a drive: C: on a disk of its own, D: beside another system's C: (MS-DOS's
+  letters); then the programs, the data files and a `GLOS.CFG` with `--name` go there over SFTP (23.7 MB).
+  Beside another system, GLOS's start-up menu offers it (5 seconds, then GLOS).
+- **Then** take the floppy out and restart the PC: it starts GLOS from its disk, as `NAME.local`.
+- **Tested** in Loop A: `loopa-nboot`'s nsetup case (the bf6 with a blank disk: the floppy, `install.py --native
+  --new-disk`, then the disk alone).
+
 ## Limits
 
 - **The network card** must be one GLOS drives, with DHCP on the network. An ISA NE2000 is found at 300h, 280h,

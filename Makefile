@@ -84,7 +84,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: census rbil fat-test fat-test-run floppy usb-stick loopa-floppy loopa-ndos loopa-nboot native-loader loopa-joy loopa-int2f loopa-cache loopa-mem-page loopa-umaprobe loopa-umb sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
+.PHONY: census rbil fat-test fat-test-run floppy native-floppy usb-stick loopa-floppy loopa-ndos loopa-nboot native-loader loopa-joy loopa-int2f loopa-cache loopa-mem-page loopa-umaprobe loopa-umb sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN build/glos/COMMAND.COM
 
 help:
@@ -1189,6 +1189,16 @@ floppy: all build/kernel/GLOSK.PAK build/floppy/keys/HOSTKEY check-deps
 	$(Q)$(DEV) env FREEDOS_FLOPPY_URL=$(FREEDOS_FLOPPY_URL) FREEDOS_FLOPPY_SHA256=$(FREEDOS_FLOPPY_SHA256) \
 	  tools/floppy/mkfloppy.sh build/floppy/glos$(FLOPPY_SIZE).img build/floppy/keys $(FLOPPY_HOST) $(FLOPPY_SIZE) "$(FLOPPY_CABLE)"
 	@echo "floppy: build/floppy/glos$(FLOPPY_SIZE).img for $(FLOPPY_HOST).local; then: tools/floppy/install.py $(FLOPPY_HOST).local"
+# GLOS's setup floppy with no DOS on it (tools/ndos/nfloppy.py; docs/floppy.md, "With no DOS"):
+# build/floppy/nglos$(FLOPPY_SIZE).img, with the setup floppy's host key and FLOPPY_AUTHKEYS; then
+# tools/floppy/install.py --native.
+native-floppy: all native-loader build/kernel/GLOSK.PAK build/floppy/keys/HOSTKEY check-deps
+	@[ -n "$(FLOPPY_AUTHKEYS)" ] && grep -q '^ssh-ed25519 ' "$(FLOPPY_AUTHKEYS)" \
+	  || { echo "native-floppy: FLOPPY_AUTHKEYS=FILE, an ed25519 public key (ssh-keygen -t ed25519): none found"; exit 1; }
+	$(Q)grep '^ssh-ed25519 ' "$(FLOPPY_AUTHKEYS)" > build/floppy/keys/AUTHKEYS
+	$(Q)$(DEV) python3 tools/ndos/nfloppy.py build/floppy/nglos$(FLOPPY_SIZE).img --keys build/floppy/keys \
+	  --name $(FLOPPY_HOST) --size $(FLOPPY_SIZE)
+	@echo "native-floppy: then tools/floppy/install.py --native $(FLOPPY_HOST).local --new-disk (or --free)"
 # A USB stick that starts GLOS with no DOS on it (tools/ndos/stick.py; docs/v1/native-dos.md, the BIOS's disks):
 # build/usb/glos-usb.img, the whole system, with a host key of its own and FLOPPY_AUTHKEYS as who may log in; then
 # written to the stick with dd, as stick.py says. USB_HOST: the PC's name; USB_MB: the image's size.

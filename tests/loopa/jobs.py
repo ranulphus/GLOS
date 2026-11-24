@@ -7852,6 +7852,81 @@ def nboot_fda_case(profile, card):
                                "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+def nboot_setup_case(profile, card):
+    """GLOS's setup floppy with no DOS (stage 5: tools/ndos/nfloppy.py, docs/floppy.md "With no DOS"): a PC with a
+    blank hard disk started from it; tools/floppy/install.py --native --new-disk from the host puts GLOS on the
+    disk (GLOS's DISK, the PC restarted from the floppy, the programs over SFTP); then the PC started from its disk
+    alone runs the installed GLOS, as the name given, with its programs."""
+    import shutil
+    import time
+    tag = "nsetup-" + profile
+    d = os.path.join(ROOT, "out", tag + "-img")
+    keys = os.path.join(d, "keys")
+    os.makedirs(keys, exist_ok=True)
+    for src, dst in (("hostkey", "HOSTKEY"), ("hostkey.pub", "HOSTKEY.pub"), ("AUTHKEYS", "AUTHKEYS")):
+        shutil.copyfile(os.path.join(ROOT, "tests/keys", src), os.path.join(keys, dst))
+    fimg, disk = os.path.join(d, "a.img"), os.path.join(d, "c.img")
+    mk = subprocess.run(["python3", "tools/ndos/nfloppy.py", fimg, "--keys", keys, "--name", "glos-setup"], cwd=ROOT,
+                        capture_output=True)
+    if os.path.exists(disk):
+        os.unlink(disk)
+    open(disk, "wb").truncate(130 * 16 * 63 * 512)     # (a blank disk of 64 MB)
+    checks, info = {"image": mk.returncode == 0}, ""
+    if not checks["image"]:
+        return "  %-22s FAIL image=%r" % (tag, (mk.stdout + mk.stderr).decode("latin-1")[-300:]), False
+    agent = Agent(tag + "a-" + card, profile, card, ["--hdd", disk, "--floppy", fimg], timeout=3000, files=False)
+    out, copied = "", ""
+    try:
+        checks["listen"] = agent.listening()
+        if checks["listen"]:
+            p = subprocess.run(["python3", "tools/floppy/install.py", "--native", "127.0.0.1", "--port", str(agent.port),
+                                "--key", agent.key, "--keys", keys, "--new-disk", "--name", "glos-tested"],
+                               cwd=ROOT, capture_output=True, timeout=2700)
+            out = (p.stdout + p.stderr).decode("latin-1")
+            checks["install"] = p.returncode == 0 and "Done. Take the floppy out" in out and "GLOS's volume is C:" in out
+            if not checks["install"]:
+                info += " install=%r" % out[-600:]
+            m = re.search(r"copied and checked in (\d+) seconds", out)
+            copied = " copy=%ss (23.7 MB by SFTP)" % m.group(1) if m else ""
+            agent.ssh("glos exit")
+            t0 = time.time()
+            while time.time() - t0 < 60 and agent.log().count("GLOS-EXIT code=") < 2:
+                time.sleep(0.5)                 # (the second start's end: a native end stops the PC)
+    except subprocess.TimeoutExpired:
+        checks["timeout-1"] = False
+    agent.proc.kill()
+    agent.proc.wait()
+    text = agent.log()
+    checks["restarted"] = text.count("GLOS-BOOT step=start") >= 2
+    checks["clean-1"] = "GLOS-PANIC" not in text and "GLOS-REFUSE" not in text
+    if not checks.get("install"):
+        bad = [k for k, v in checks.items() if not v]
+        return "  %-22s FAIL%s failed: %s" % (tag, info, " ".join(bad)), False
+    # the disk alone: the installed GLOS, its name, its programs
+    agent = Agent(tag + "b-" + card, profile, card, ["--hdd", disk], timeout=600, files=False)
+    try:
+        checks["from-disk"] = agent.listening()
+        if checks["from-disk"]:
+            ls = agent.ssh("dir C:\\GLOS")
+            name = agent.ssh("glos ver")
+            checks["programs"] = ls[0] == 0 and "FILES" in ls[1] and "GLOSK" in ls[1] and "COMMAND" in ls[1]
+            info += " ver=%r" % name[1][:80]
+            agent.ssh("glos exit")
+            t0 = time.time()
+            while time.time() - t0 < 60 and "GLOS-EXIT code=" not in agent.log():
+                time.sleep(0.5)
+    except subprocess.TimeoutExpired:
+        checks["timeout-2"] = False
+    agent.proc.kill()
+    agent.proc.wait()
+    text = agent.log()
+    checks["named"] = "glos-tested" in text
+    checks["clean-2"] = "GLOS-PANIC" not in text and "GLOS-REFUSE" not in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % (tag, "PASS" if not bad else "FAIL", info if bad else copied,
+                               "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 def nboot_floppy_case(profile, card):
     """A native start from a drive of the floppies' numbers (docs/v1/native-dos.md, the BIOS's disks): a 1.44 MB
     floppy of GLOS's own formatter with GLOS's boot code naming GLOSLDR.SYS, the kernel and GLOS's COMMAND.COM on
@@ -13202,6 +13277,9 @@ def main():
         if os.environ.get("NBOOT_MSDOS"):
             cases = [c + (True,) for c in cases if c[0] == "bf6"]
         return 0 if all(r[1] for r in matrix(nboot_dual_case, cases, a.jobs)) else 1
+    if a.suite == "nboot" and os.environ.get("NBOOT_ONLY") == "setup":    # (the setup floppy with no DOS alone)
+        cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
+        return 0 if all(r[1] for r in matrix(nboot_setup_case, cases, a.jobs)) else 1
     if a.suite == "nboot" and os.environ.get("NBOOT_ONLY") == "fda":      # (a floppy drive as A: alone)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(nboot_fda_case, cases, a.jobs)) else 1
@@ -13220,6 +13298,7 @@ def main():
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
         res += matrix(nboot_floppy_case, cases, a.jobs)         # (from a drive of the floppies' numbers)
         res += matrix(nboot_fda_case, cases, a.jobs)            # (from the disk, a floppy drive as A: beside it)
+        res += matrix(nboot_setup_case, [c for c in cases if c[0] == "bf6"], a.jobs)  # (the setup floppy, no DOS)
         res += matrix(nboot_dual_case, cases, a.jobs)           # (GLOS beside another system: the start-up menu)
         res += matrix(nboot_dual_case, [c + (True,) for c in cases if c[0] == "bf6"], a.jobs)  # (... beside MS-DOS 7.1)
         return 0 if all(r[1] for r in res) else 1

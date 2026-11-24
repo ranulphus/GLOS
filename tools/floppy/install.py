@@ -19,6 +19,16 @@ What goes to C:\\GLOS: GLOS.EXE and GLOSK.BIN, the programs (build/apps), CERTS.
 fonts' smoothing data, a GLOS.CFG with the PC's name (--name; one that is there already is kept), and KEYS\\ (the
 floppy's host key and AUTHKEYS, so the PC stays who it was and lets the same people in).
 
+With no DOS (--native): the PC was started from tools/ndos/nfloppy.py's floppy (make native-floppy), GLOS alone
+with its network. GLOS's DISK command puts GLOS on the first hard disk: its loader, kernel, COMMAND.COM, keys and
+its own boot records, on a disk with nothing on it (--new-disk), one erased (--new-disk --erase-existing), or in
+the disk's free space beside the systems there (--free: GLOS's start-up menu offers them). The PC is restarted,
+from the floppy again, so that the new volume has its drive letter (MS-DOS's: C:, or D: beside another system's
+C:), and the programs go there over SFTP.
+
+  tools/floppy/install.py --native glos-setup.local --new-disk
+  tools/floppy/install.py --native glos-setup.local --free
+
 Nothing is partitioned or formatted without --new-disk, and never a disk whose partition table has an entry
 (DOS's or any other system's: GLOS reads the table itself) without --erase-existing. The disk is laid out,
 formatted and made to start by GLOS's own DISK command; FreeDOS's FDISK, FORMAT and SYS are not on the floppy. Run from the repository's root, after `make all apps floppy`.
@@ -206,15 +216,15 @@ def glos_files(args):
     return files
 
 
-def put_glos(pc, args, files):
+def put_glos(pc, args, files, drive="C", new_cfg=False):
     total = sum(os.path.getsize(os.path.join(ROOT, src)) for src, _ in files)
-    print("GLOS into C:\\GLOS: %d files, %.1f MB" % (len(files), total / 1e6))
-    pc.sftp(["-mkdir /C/GLOS", "-mkdir /C/GLOS/KEYS", "-mkdir /C/GLOS/KEYS/PKG"])
+    print("GLOS into %s:\\GLOS: %d files, %.1f MB" % (drive, len(files), total / 1e6))
+    pc.sftp(["-mkdir /%s/GLOS" % drive, "-mkdir /%s/GLOS/KEYS" % drive, "-mkdir /%s/GLOS/KEYS/PKG" % drive])
     t0 = time.time()
-    rc, out = pc.sftp(["put %s /C/GLOS/%s" % (os.path.join(ROOT, src), dst) for src, dst in files])
+    rc, out = pc.sftp(["put %s /%s/GLOS/%s" % (os.path.join(ROOT, src), drive, dst) for src, dst in files])
     if rc != 0:
         die("copying failed: %s" % out.strip()[-300:])
-    rc, out = pc.sftp(["ls -l /C/GLOS", "ls -l /C/GLOS/KEYS", "ls -l /C/GLOS/KEYS/PKG"])
+    rc, out = pc.sftp(["ls -l /%s/GLOS" % drive, "ls -l /%s/GLOS/KEYS" % drive, "ls -l /%s/GLOS/KEYS/PKG" % drive])
     sizes = {}
     for line in out.split("\n"):
         w = line.split()
@@ -224,13 +234,45 @@ def put_glos(pc, args, files):
     if bad:
         die("these aren't there whole: %s" % ", ".join(bad))
     print("  copied and checked in %d seconds" % (time.time() - t0))
-    if pc.get_text("/C/GLOS/GLOS.CFG") is None:
-        pc.put_text("/C/GLOS/GLOS.CFG", ["[net]", "hostname = " + args.name]
+    if new_cfg or pc.get_text("/%s/GLOS/GLOS.CFG" % drive) is None:
+        pc.put_text("/%s/GLOS/GLOS.CFG" % drive, ["[net]", "hostname = " + args.name]
                     + (["cable = " + args.cable] if args.cable else [])
                     + ["[desktop]", "tour = on", "tips = on"])   # (Help's tour the first time the desktop comes on)
-        print("  C:\\GLOS\\GLOS.CFG: the PC's name is %s (%s.local)" % (args.name, args.name))
+        print("  %s:\\GLOS\\GLOS.CFG: the PC's name is %s (%s.local)" % (drive, args.name, args.name))
     else:
-        print("  C:\\GLOS\\GLOS.CFG is there already: kept")
+        print("  %s:\\GLOS\\GLOS.CFG is there already: kept" % drive)
+
+
+def native_install(pc, args, files):
+    """--native: GLOS put on the first hard disk by its own DISK command, the PC restarted (from the floppy again)
+    so that the new volume has its letter, and the programs copied there. The drive GLOS went to: its letter."""
+    parts = pc.parts()
+    if parts is None:
+        die("the PC's first hard disk can't be read (glos disk 1)")
+    if args.free:
+        how, what = "1 install /free /y", "GLOS put in the disk's free space"
+    elif not parts:
+        if not args.new_disk:
+            die("the first hard disk has nothing on it: --new-disk puts GLOS on it")
+        how, what = "1 install /y", "GLOS put on the new disk"
+    else:
+        if not (args.new_disk and args.erase_existing):
+            die("the first hard disk has partitions (%s): --free puts GLOS beside them; --new-disk --erase-existing "
+                "erases them" % ", ".join("type %s, %d MB" % p[1:3] for p in parts))
+        how, what = "1 install /erase /y", "GLOS put on the erased disk"
+    pc.disk(how, what)
+    print("Restarting the PC from the floppy again, so that GLOS has the new volume as a drive")
+    pc.ssh("glos reboot --force", timeout=30)
+    time.sleep(15)
+    ver = pc.up(900)
+    if not ver:
+        die("GLOS didn't come back after the restart (is the floppy still in, and the first to start?)")
+    for drive in "CDEFGHIJ":                    # (the first volume with GLOS's kernel that isn't the floppy)
+        rc, out = pc.sftp(["ls -l /%s/GLOS/GLOSK.BIN" % drive], timeout=120)
+        if rc == 0 and "GLOSK.BIN" in out.upper():
+            print("  GLOS's volume is %s:" % drive)
+            return drive
+    die("GLOS's new volume has no drive after the restart (glos disk 1, and the log, say why)")
 
 
 def autoexec(pc, do):
@@ -268,6 +310,10 @@ def main():
     ap.add_argument("--erase-existing", action="store_true", help="with --new-disk: even if the disk has a C: now")
     ap.add_argument("--autoexec", action="store_true", help="make C:\\AUTOEXEC.BAT of the DOS there start GLOS")
     ap.add_argument("--reboot", action="store_true", help="restart the PC when done")
+    ap.add_argument("--native", action="store_true", help="the PC runs GLOS from nfloppy.py's floppy, no DOS: "
+                                                          "GLOS's DISK puts GLOS on the disk (see above)")
+    ap.add_argument("--free", action="store_true", help="with --native: in the disk's free space, beside the "
+                                                        "systems there")
     args = ap.parse_args()
     os.chdir(ROOT)
     key = args.key or next((k for k in (os.path.expanduser("~/.ssh/glos_bench"), os.path.expanduser("~/.ssh/id_ed25519"))
@@ -283,6 +329,12 @@ def main():
         die("no answer from GLOS at %s port %d (is the PC started from the floppy, and on the network?)"
             % (args.host, args.port))
     print("GLOS there: " + ver)
+    if args.native:
+        drive = native_install(pc, args, files)
+        put_glos(pc, args, files, drive, new_cfg=True)
+        print("Done. Take the floppy out, then restart the PC (ssh ... glos reboot, or its reset button). It starts "
+              "GLOS from %s: and answers as %s.local, to the same keys." % (drive, args.name))
+        return
     if args.new_disk:
         new_disk(pc, args.erase_existing)
     else:
