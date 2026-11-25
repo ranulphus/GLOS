@@ -622,6 +622,12 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
   a `pmm-take-kernel` or `pmm-free-kernel` line in any run names the path; the Games Library's overwritten
   output above may be another face of the same loose frames.
 
+- **Two races of the GUI scripts under load, natively** (gates 57 and the native-dos session's, 2026-11-25):
+  `term-run` on the bf6 lost `TERM| MODE done` after `conin mode` (the program wrote it with the PC's screen its
+  own, and the Terminal had not taken it in when the screen came back; 9 of 9 alone pass); `studio-step` on the
+  486 lost the chord's third key (`z c b`: note 62 at 960 never said; 5 of 5 alone pass, one in three beside two
+  other emulators). Neither is new code's; both are to be chased like the Games Library's: instrument, then fix.
+
 - **Keys typed as the Terminal's window comes are lost** (gate 52, 2026-11-24, local: `native-486dx2-vbe-8
   term-run`, the 486 natively). `c:`, Enter and `cd \g` went nowhere; `ui` and what followed reached the shell.
   Neither end drops them by design: the Terminal's keys wait in its event queue until its shell's job exists
