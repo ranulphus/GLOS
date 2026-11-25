@@ -8442,7 +8442,15 @@ def nboot_dual_case(profile, card, msdos=False):
             checks["before"] = rc == 0 and re.search(one, out) is not None and "runs from" not in out
             rc, out = disk_cmd("1 install /free")
             checks["asks"] = rc == 2 and "Nothing was done" in out and "stay as they are" in out
-            rc, out = disk_cmd("1 install /free /y", 900)
+            # /SET: settings for GLOS.CFG's copy, checked first (the setup floppy's installer gives the PC's name and
+            # its keyboard so); a setting that doesn't exist, and a value the schema refuses, refused before anything
+            rc1, out1 = disk_cmd("1 install /free /set:net.bogus=1 /y")
+            rc2, out2 = disk_cmd("1 install /free /set:region.layout=xx /y")
+            checks["set-refused"] = rc1 == 2 and "no such setting: [net] bogus" in out1 and rc2 == 2 \
+                and "[region] layout = xx" in out2 and "Done" not in out1 + out2
+            if not checks["set-refused"]:
+                info += " set-refused=%r" % (out1[-150:] + out2[-150:])
+            rc, out = disk_cmd("1 install /free /set:net.hostname=dualpc /set:region.layout=uk /y", 900)
             m = re.search(r"Done: (\d+) files, (\d+) KB, in (\d+) seconds", out)
             checks["install"] = rc == 0 and m is not None and "after a menu" in out and "is kept in A:\\GLOS\\DISK1.MBR" in out
             kept = subprocess.run(agent.opts + ["glos@127.0.0.1", "glos dd if=a:\\glos\\disk1.mbr of=-"], capture_output=True,
@@ -8465,6 +8473,7 @@ def nboot_dual_case(profile, card, msdos=False):
         checks["timeout"] = False
     text = stopped(agent)
     checks["clean-1"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
+    used_floppy = os.path.join(ROOT, "out", agent.proc.run_name, "vm", "boot.img")     # (run.py's copy: the one GLOS ran from)
     sector = open(disk, "rb").read(512)
     checks["first-kept"] = sector[446:462] == table0 and sector[462 + 4] != 0 and sector[462] == 0
     start2 = int.from_bytes(sector[462 + 8:462 + 12], "little")
@@ -8481,6 +8490,12 @@ def nboot_dual_case(profile, card, msdos=False):
             ls = agent.ssh("dir D:\\GLOS")
             job = agent.ssh("D:\\GLOS\\COMMAND.COM /C VER")
             checks["runs"] = ls[0] == 0 and "GLOSK" in ls[1] and job[0] == 0 and "GLOS" in job[1]
+            # (/SET's settings in GLOS.CFG's copy, the floppy's own as it was: the image's, read below)
+            cfgt = agent.ssh("type D:\\GLOS\\GLOS.CFG")
+            checks["set-copied"] = cfgt[0] == 0 and "hostname = dualpc" in cfgt[1] and "layout = uk" in cfgt[1] \
+                and "; jobs.py nboot: GLOS beside another system" in cfgt[1]
+            if not checks["set-copied"]:
+                info += " cfg=%r" % cfgt[1][-200:]
             other = agent.ssh("dir C:\\")
             cd = agent.ssh("cd")
             checks["letters"] = other[0] == 0 and ("IO" in other[1] if msdos else "KERNEL" in other[1]) \
@@ -8499,6 +8514,9 @@ def nboot_dual_case(profile, card, msdos=False):
     if not (checks["menu"] and checks["volume"]):
         info += " log=%r" % [l for l in text.split("\n") if "menu" in l or "step=c" in l or "step=disk" in l][:6]
     checks["untouched"] = first_partition() == sum0    # (GLOS installed, and run: not a byte of the other's)
+    floppy_cfg = [subprocess.run(["mtype", "-i", f, "::GLOS/GLOS.CFG"], capture_output=True,
+                                 env=dict(os.environ, MTOOLS_SKIP_CHECK="1")).stdout for f in (fimg, used_floppy)]
+    checks["floppy-cfg-kept"] = floppy_cfg[0] == floppy_cfg[1] and b"jobs.py nboot" in floppy_cfg[1]
     # 3: 2 pressed at the menu: FreeDOS (or MS-DOS 7.1, which runs its AUTOEXEC.BAT's programs), from the first partition.
     st, serial = run(tag + "c", ["--hdd", disk, "--machine", profile, "--timeout", "400" if msdos else "120",
                                  "--idle", "200", "--keys", "@GLOS-BOOT menu choices,1:0x03"])

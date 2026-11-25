@@ -1134,6 +1134,13 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   hosted GLOS under MS-DOS 7.1): the volume's third sector, where MS-DOS's boot code goes on, unchanged, the menu
   offering "Windows 95/98 (on GLOS's volume)", MS-DOS 7.1 started again from it: PASS. Owed: a real bench (N3's
   item); an AUTOEXEC.BAT that starts GLOS.EXE still does so when DOS is chosen.
+- **DISK INSTALL's settings (2026-11-25, native-dos; for the on-PC installer):** `/SET:section.key=value` (up to
+  four, lower-cased as GLOS.CFG writes them) checked against the schema before anything is written, and applied to
+  GLOS.CFG as it is copied to the new volume (`cfg_text_set`, sdk/config/cfg.c: the key's line changed, or added at
+  its section's end, or the section added; host-tested in cfg_test); with no GLOS.CFG in GLOS's folder, one of the
+  settings alone. The medium GLOS runs from is not written. ndual's case: a setting that doesn't exist and a value
+  the schema refuses both refused; `/SET:net.hostname=dualpc /SET:region.layout=uk` in the new volume's copy; the
+  floppy GLOS ran from unchanged.
 
 ## N6: several DOS programs at once
 

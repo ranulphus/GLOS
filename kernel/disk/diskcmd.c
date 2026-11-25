@@ -20,6 +20,9 @@
  *                                    records (the first sector's code starts GLOS's partition whichever is
  *                                    active; GLOS's loader offers the others), the files
  *   DISK n INSTALL p [/ERASE] /Y     ... into partition p (one that holds a volume: only with /ERASE)
+ *   ... INSTALL ... /SET:section.key=value   (up to four) GLOS.CFG's copy on the new volume with that setting,
+ *                                    checked against the schema first (the setup floppy's installer: the PC's
+ *                                    name, its keyboard; the floppy's own GLOS.CFG as it was)
  *   DISK n INSTALL p /Y              p the volume GLOS's own folder is on (a GLOS that DOS starts): that GLOS
  *                                    made to start by itself, nothing erased: GLOSLDR.SYS into the volume's
  *                                    first folder, its boot sector kept as BOOTSECT.DOS beside GLOS's files (the
@@ -41,6 +44,7 @@
 #include <string.h>
 
 #include "glos/bootinfo.h"
+#include "glos/config.h"
 #include "bdisk.h"
 #include "clock.h"
 #include "diskcmd.h"
@@ -767,6 +771,33 @@ struct inst {
     u32 chunk, files, kb, bytes;
 };
 static struct fsv_vol ifs;                      /* (one DISK at a time) */
+static struct { char sec[24], key[24], val[64]; } sets[4];     /* /SET's, for GLOS.CFG's copy */
+static u32 nsets;
+static u8 cfg_copied;
+
+static int same_path(const char *a, const char *b)
+{
+    for (; *a && *b; a++, b++)
+        if ((*a >= 'a' && *a <= 'z' ? *a - 32 : *a) != (*b >= 'a' && *b <= 'z' ? *b - 32 : *b))
+            return 0;
+    return !*a && !*b;
+}
+
+/* GLOS.CFG's text (n bytes in t, room for more) with /SET's settings: its new length, or -1. */
+static int with_sets(char *t, int n, int room)
+{
+    char *tmp = kmalloc((u32)room);
+    u32 i;
+    if (!tmp)
+        return -1;
+    for (i = 0; i < nsets && n >= 0; i++) {
+        n = cfg_text_set(t, n, sets[i].sec, sets[i].key, sets[i].val, tmp, room);
+        if (n >= 0)
+            memcpy(t, tmp, (u32)n);
+    }
+    kfree(tmp);
+    return n;
+}
 
 static int i_read(void *ctx, unsigned long lba, unsigned char *buf, unsigned count)
 {
@@ -833,6 +864,37 @@ static int i_file(struct inst *I, const char *src, const char *dst, const u8 *dt
     u16 h;
     u32 got = 0;
     int e;
+    if (nsets && same_path(src, vm.bi->cfg_path)) {    /* GLOS.CFG with /SET's settings */
+        enum { ROOM = 32768 };
+        char *t = kmalloc(ROOM);
+        int n = 0;
+        if (!t) {
+            say(I->c, "DISK: no memory\n");
+            return 1;
+        }
+        if (f_open(src, 0, &h) == 0) {
+            while (n < ROOM / 2 && f_read(h, (u8 *)t + n, (u32)(ROOM / 2 - n), &got) == 0 && got)
+                n += (int)got;
+            f_close(h);
+        }
+        n = n < ROOM / 2 ? with_sets(t, n, ROOM) : -1;
+        e = n < 0;
+        if (e)
+            say(I->c, "DISK: %s is too long to change\n", src);
+        else if ((e = fsv_create(&ifs, dst, 0x20, 1, FSV_WRITE, FSV_DENY_NONE, &f)) != 0)
+            say(I->c, "DISK: %s can't be made on the new volume (%d)\n", dst, e);
+        else {
+            e = fsv_write(&f, t, (u32)n) != (long)n;
+            if (fsv_close(&f) != 0)
+                e = 1;
+            if (e)
+                bios_failed(I->c, I->bios, "the copy");
+        }
+        kfree(t);
+        I->files += !e;
+        cfg_copied = !e;
+        return e;
+    }
     if (f_open(src, 0, &h) != 0) {
         say(I->c, "DISK: %s can't be opened\n", src);
         return 1;
@@ -1089,8 +1151,15 @@ static int do_install(struct diskcmd *c, u32 n, u32 p, int into_free, int erase,
         return e;
     if (p && !into_free && !erase)              /* (GLOS's own volume: the upgrade) */
         for (i = 0; i < W.nv; i++)
-            if (W.v[i].n == p && W.v[i].fat && do_upgrade(c, n, p, &W.v[i], yes, &e))
-                return e;
+            if (W.v[i].n == p && W.v[i].fat && glos_volume(c, &W.v[i])) {
+                if (nsets) {
+                    say(c, "DISK: /SET is for GLOS copied to another volume; here GLOS.CFG is this GLOS's own "
+                        "(CONFIG SET)\n");
+                    return 2;
+                }
+                if (do_upgrade(c, n, p, &W.v[i], yes, &e))
+                    return e;
+            }
     if (own_disk(c, &W)) {
         say(c, "DISK: disk %u is the one GLOS runs from: GLOS is not installed over itself.\n", n);
         return 1;
@@ -1270,6 +1339,24 @@ static int do_install(struct diskcmd *c, u32 n, u32 p, int into_free, int erase,
         }
     if (!e)
         e = i_folder(&I, dir, dir + 2, 0);
+    if (!e && nsets && !cfg_copied && vm.bi->cfg_path[1] == ':') {     /* (no GLOS.CFG there: one of /SET's alone) */
+        char t[512];
+        struct fsv_file f;
+        int tn = with_sets(t, 0, (int)sizeof t);
+        if (tn < 0 || fsv_create(&ifs, vm.bi->cfg_path + 2, 0x20, 1, FSV_WRITE, FSV_DENY_NONE, &f) != 0) {
+            say(c, "DISK: GLOS.CFG can't be made on the new volume\n");
+            e = 1;
+        } else {
+            if (fsv_write(&f, t, (u32)tn) != (long)tn)
+                e = 1;
+            if (fsv_close(&f) != 0)
+                e = 1;
+            if (e)
+                bios_failed(c, I.bios, "the copy");
+        }
+    }
+    if (!e && nsets)
+        kprintf("GLOS-DISK install settings=%u\n", nsets);
     if (!e) {
         u8 dta[43];
         if (i_find(dir, dta, 1) == 0)
@@ -1579,6 +1666,8 @@ static const char usage[] =
     "DISK n INSTALL /FREE /Y           ... in a new partition in the disk's free space, beside\n"
     "                                  what is there (its start-up menu offers the others)\n"
     "DISK n INSTALL p [/ERASE] /Y      ... in partition p, which is made empty\n"
+    "DISK n INSTALL p /Y               p GLOS's own volume: this GLOS made to start with no DOS\n"
+    "  ... /SET:section.key=value      GLOS.CFG's copy with that setting (up to four)\n"
     "Without /Y a command says what would be lost and does nothing. The disk GLOS or DOS runs\n"
     "from is never written.\n";
 
@@ -1601,6 +1690,7 @@ static int run(struct diskcmd *c)
     char *w[8], *label = 0, *verb;
     u32 nw = 0, i, n = 0, p = 1;
     int yes = 0, native = 0, erase = 0, into_free = 0;
+    nsets = 0, cfg_copied = 0;
     char *a = c->args;
     while (*a) {                                /* words, in capitals; the switches taken out */
         while (*a == ' ' || *a == '\t')
@@ -1631,7 +1721,34 @@ static int run(struct diskcmd *c)
             into_free = 1;
         else if (!strncmp(w[i], "/V:", 3))
             label = w[i] + 3;
-        else {
+        else if (!strncmp(w[i], "/SET:", 5)) {
+            char *s = w[i] + 5, *dot = strchr(s, '.'), *eq = strchr(s, '='), why[96], *q;
+            const struct cfg_key *k;
+            if (!dot || !eq || dot > eq || nsets == ARRAY_SIZE(sets) || dot - s >= (int)sizeof sets[0].sec
+                || eq - dot - 1 >= (int)sizeof sets[0].key || strlen(eq + 1) >= sizeof sets[0].val || !eq[1]) {
+                say(c, "DISK: /SET:section.key=value, up to %u of them (%s)\n", (u32)ARRAY_SIZE(sets), w[i]);
+                return 2;
+            }
+            memset(&sets[nsets], 0, sizeof sets[nsets]);
+            memcpy(sets[nsets].sec, s, (u32)(dot - s));
+            memcpy(sets[nsets].key, dot + 1, (u32)(eq - dot - 1));
+            strcpy(sets[nsets].val, eq + 1);
+            for (q = sets[nsets].sec; *q; q++)  /* (as GLOS.CFG writes them: lower case, as the words came upper) */
+                *q = (char)(*q >= 'A' && *q <= 'Z' ? *q + 32 : *q);
+            for (q = sets[nsets].key; *q; q++)
+                *q = (char)(*q >= 'A' && *q <= 'Z' ? *q + 32 : *q);
+            for (q = sets[nsets].val; *q; q++)
+                *q = (char)(*q >= 'A' && *q <= 'Z' ? *q + 32 : *q);
+            if (!(k = cfg_find(sets[nsets].sec, sets[nsets].key)) || !cfg_section_ok(sets[nsets].sec)) {
+                say(c, "DISK: no such setting: [%s] %s\n", sets[nsets].sec, sets[nsets].key);
+                return 2;
+            }
+            if (cfg_check(k, sets[nsets].val, why, (int)sizeof why) != 0) {
+                say(c, "DISK: [%s] %s = %s: %s\n", sets[nsets].sec, sets[nsets].key, sets[nsets].val, why);
+                return 2;
+            }
+            nsets++;
+        } else {
             say(c, "%s", usage);
             return !strcmp(w[i], "/?") ? 0 : 2;
         }
@@ -1654,6 +1771,10 @@ static int run(struct diskcmd *c)
         return do_new(c, n, yes);
     if (!strcmp(verb, "INSTALL") && (nw == 2 || (nw == 3 && !into_free && number(w[2], &p) == 0)))
         return do_install(c, n, nw == 3 ? p : 0, into_free, erase, yes);
+    if (nsets) {
+        say(c, "DISK: /SET is DISK n INSTALL's alone\n");
+        return 2;
+    }
     if ((!strcmp(verb, "FORMAT") || !strcmp(verb, "BOOT")) && (nw == 2 || (nw == 3 && number(w[2], &p) == 0)))
         return verb[0] == 'F' ? do_format(c, n, p, label, yes) : do_boot(c, n, p, yes, native);
     say(c, "%s", usage);

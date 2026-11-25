@@ -346,6 +346,131 @@ long cfg_page(const char *v)
     return !v[4] && !(seg & 0xFF) && seg >= 0xC800 && seg <= 0xEF00 ? seg : -1;
 }
 
+/* (cfg_text_set's) out[at..] = s, n bytes, or room exceeded */
+static int put_n(char *out, int at, int room, const char *s, int n)
+{
+    int i;
+    if (at < 0 || at + n > room)
+        return -1;
+    for (i = 0; i < n; i++)
+        out[at + i] = s[i];
+    return at + n;
+}
+
+/* A line's text between its spaces: *b, *e */
+static void trim(const char *l, int n, int *b, int *e)
+{
+    *b = 0, *e = n;
+    while (*b < *e && (l[*b] == ' ' || l[*b] == '\t'))
+        (*b)++;
+    while (*e > *b && (l[*e - 1] == ' ' || l[*e - 1] == '\t'))
+        (*e)--;
+}
+
+int cfg_text_set(const char *in, int n, const char *section, const char *key, const char *value, char *out, int room)
+{
+    const char *eol = "\r\n";
+    int i, o = 0, in_it = 0, done = 0, found = 0, mark = -1, el, sl = len(section), kl = len(key);
+
+    for (i = 0; i < n && in[i] != '\n'; i++)
+        ;
+    if (i < n && (i == 0 || in[i - 1] != '\r'))
+        eol = "\n";
+    el = len(eol);
+    for (i = 0; i < n;) {
+        int s = i, e, b, t, set_here = 0, drop = 0;
+        while (i < n && in[i] != '\n')
+            i++;
+        e = i > s && in[i - 1] == '\r' ? i - 1 : i;
+        if (i < n)
+            i++;
+        trim(in + s, e - s, &b, &t);
+        if (t > b && in[s + b] == '[') {        /* a section begins: the one wanted left without the key, it goes in */
+            int nb = b + 1, ne;
+            for (ne = nb; ne < t && in[s + ne] != ']'; ne++)
+                ;
+            if (in_it && !done)
+                set_here = 1;
+            while (nb < ne && (in[s + nb] == ' ' || in[s + nb] == '\t'))
+                nb++;
+            while (ne > nb && (in[s + ne - 1] == ' ' || in[s + ne - 1] == '\t'))
+                ne--;
+            in_it = ne - nb == sl && same_n(in + s + nb, section, sl);
+            found |= in_it;
+        } else if (in_it && t > b && in[s + b] != ';' && in[s + b] != '#') {
+            int k = b, ke;
+            while (k < t && in[s + k] != '=')
+                k++;
+            for (ke = k; ke > b && (in[s + ke - 1] == ' ' || in[s + ke - 1] == '\t'); ke--)
+                ;
+            if (k < t && ke - b == kl && same_n(in + s + b, key, kl)) {
+                if (done)
+                    drop = 1;           /* (a second line of the key's) */
+                else {
+                    o = put_n(out, o, room, key, kl);
+                    o = put_n(out, o, room, " = ", 3);
+                    o = put_n(out, o, room, value, len(value));
+                    o = put_n(out, o, room, eol, el);
+                    done = 1, mark = o;
+                    continue;
+                }
+            }
+        }
+        if (set_here) {                         /* after the section's last line that isn't blank */
+            int at = mark, tail = o - mark, j;
+            char line[200];
+            int ln = 0;
+            ln = put_n(line, ln, (int)sizeof line, key, kl);
+            ln = put_n(line, ln, (int)sizeof line, " = ", 3);
+            ln = put_n(line, ln, (int)sizeof line, value, len(value));
+            ln = put_n(line, ln, (int)sizeof line, eol, el);
+            if (ln < 0 || o < 0 || o + ln > room)
+                return -1;
+            for (j = tail - 1; j >= 0; j--)
+                out[at + ln + j] = out[at + j];
+            for (j = 0; j < ln; j++)
+                out[at + j] = line[j];
+            o += ln;
+            done = 1;
+        }
+        if (drop)
+            continue;
+        o = put_n(out, o, room, in + s, e - s);
+        o = put_n(out, o, room, eol, el);
+        if (in_it && t > b)
+            mark = o;                           /* (the section's last line with something on it, so far) */
+        if (o < 0)
+            return -1;
+    }
+    if (in_it && !done) {
+        int at = mark, tail = o - mark, j, ln = kl + 3 + len(value) + el;
+        if (o + ln > room)
+            return -1;
+        for (j = tail - 1; j >= 0; j--)
+            out[at + ln + j] = out[at + j];
+        o = at;
+        o = put_n(out, o, room, key, kl);
+        o = put_n(out, o, room, " = ", 3);
+        o = put_n(out, o, room, value, len(value));
+        o = put_n(out, o, room, eol, el);
+        o += tail;
+        done = 1;
+    }
+    if (!found) {                               /* a new section at the end, after a blank line */
+        if (o > 0 && !(o >= 2 * el && out[o - el - 1] == '\n') && o >= el)
+            o = put_n(out, o, room, eol, el);
+        o = put_n(out, o, room, "[", 1);
+        o = put_n(out, o, room, section, sl);
+        o = put_n(out, o, room, "]", 1);
+        o = put_n(out, o, room, eol, el);
+        o = put_n(out, o, room, key, kl);
+        o = put_n(out, o, room, " = ", 3);
+        o = put_n(out, o, room, value, len(value));
+        o = put_n(out, o, room, eol, el);
+    }
+    return o;
+}
+
 int cfg_section_ok(const char *section)
 {
     char kind[16];

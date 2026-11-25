@@ -238,6 +238,29 @@ int main(void)
           && !strcmp(p.env + 4, "D=4") && !(p.flags & BI_PROF_DIRECT), "FWHEEL.EXE's profile");
     CHECK(kcfg_profile("DOOM", &p) == 0 && p.memory_kb == 8192, "DOOM's profile by its name alone");
     CHECK(kcfg_profile("OTHER.EXE", &p) == -1, "no profile");
+    {                                           /* cfg_text_set: GLOS.CFG's text with a key set (DISK INSTALL /SET) */
+        static const struct { const char *in, *sec, *key, *val, *want; } T[] = {
+            { "[net]\r\nname = old\r\n\r\n[region]\r\nlayout = us\r\n", "net", "name", "mypc",
+              "[net]\r\nname = mypc\r\n\r\n[region]\r\nlayout = us\r\n" },
+            { "[net]\r\ndhcp = on\r\n\r\n[region]\r\nlayout = us\r\n", "net", "name", "mypc",
+              "[net]\r\ndhcp = on\r\nname = mypc\r\n\r\n[region]\r\nlayout = us\r\n" },
+            { "; just a note\r\n", "region", "layout", "uk", "; just a note\r\n\r\n[region]\r\nlayout = uk\r\n" },
+            { "", "net", "name", "pc", "[net]\r\nname = pc\r\n" },
+            { "[NET]\nName=a\nname = b\n", "net", "name", "c", "[NET]\nname = c\n" },
+            { "[region]\r\n  ; comment\r\ncodepage = 850\r\n", "region", "layout", "uk",
+              "[region]\r\n  ; comment\r\ncodepage = 850\r\nlayout = uk\r\n" },
+            { "[a]\r\nx = 1\r\n[b]\r\ny = 2", "b", "z", "3", "[a]\r\nx = 1\r\n[b]\r\ny = 2\r\nz = 3\r\n" },
+        };
+        char out[512];
+        for (i = 0; i < sizeof T / sizeof *T; i++) {
+            int r = cfg_text_set(T[i].in, (int)strlen(T[i].in), T[i].sec, T[i].key, T[i].val, out, (int)sizeof out);
+            if (r >= 0)
+                out[r] = 0;
+            CHECK(r >= 0 && !strcmp(out, T[i].want), "cfg_text_set %u: got %d [%s] want [%s]", (unsigned)i, r,
+                  r >= 0 ? out : "", T[i].want);
+        }
+        CHECK(cfg_text_set("[net]\r\n", 7, "net", "name", "abcdefgh", out, 12) == -1, "cfg_text_set: no room");
+    }
     printf("cfg_test: %d failures\n", fails);
     return fails != 0;
 }

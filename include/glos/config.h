@@ -50,6 +50,13 @@ const struct cfg_key *cfg_find(const char *section, const char *key);  /* sectio
 /* 0 if value is right for k; else -1 and why (a line) in why. */
 int cfg_check(const struct cfg_key *k, const char *value, char *why, int room);
 
+/* GLOS.CFG's text (in, n bytes) with one key set, into out: its line in the section changed (the first; any more
+   taken out), or added after the section's last line that isn't blank, or the section added at the end with it.
+   Lines end as the text's first one does (CR LF if it has none); comments and other lines as they were. The new
+   length, or -1 if it doesn't fit in room. (DISK n INSTALL's /SET: GLOS.CFG as it is copied; no check of the
+   value: cfg_check's.) */
+int cfg_text_set(const char *in, int n, const char *section, const char *key, const char *value, char *out, int room);
+
 /* The section's kind: "program" for "program NAME.EXT", else the section itself (lower case) into out. */
 void cfg_kind(const char *section, char *out, int room);
 
