@@ -101,6 +101,7 @@ pblock          dw      0               ; EXEC parameter block: environment (0: 
 fcb1            db      37 dup (0)
 fcb2            db      37 dup (0)
 msg_exit        db      'GLOS-EXIT code=', 0
+msg_nend        db      'GLOS-NATIVE end mode=', 0
 msg_a20         db      ' a20=', 0
 msg_crlf        db      13, 10, 0
 msg_noshell     db      'GLOS-SHELL error=cannot-run', 13, 10
@@ -518,7 +519,10 @@ stub_exit:
         mov     ds, ax
         mov     ss, ax
         mov     sp, offset stub_stack_top
-        sti
+        cmp     sd_shell, 2             ; a native boot: no DOS to go back to, and the vectors GLOS's own DOS and
+        je      exit_quiet              ; its programs set are no one's now: interrupts stay off to the end
+        sti                             ; (nothing after needs them: COM1, INT 10h's teletype, the KBC's reset)
+exit_quiet:
         assume  ds:GLOSSTUB
         cmp     sd_mode, 1
         jne     raw_a20
@@ -558,8 +562,23 @@ raw_a20:
         out     60h, al
         call    kbc_wait
 a20_done:
+        cmp     sd_shell, 2
+        je      report
         sti
 report:
+        cmp     sd_shell, 2             ; a native boot: the screen GLOS leaves, the BIOS's video mode (as VMODE
+        jne     report_exit             ; says it after GLOS.EXE under a DOS), first; the loader's C code that
+        mov     si, offset msg_nend     ; said it there never runs again once the stub is resident (2026-11-25)
+        call    puts
+        push    es
+        mov     ax, 40h
+        mov     es, ax
+        mov     al, es:[49h]
+        pop     es
+        call    puthex
+        mov     si, offset msg_crlf
+        call    puts
+report_exit:
         mov     si, offset msg_exit
         call    puts
         mov     al, exit_code
@@ -713,6 +732,19 @@ ps:     mov     al, cs:[si]
         jmp     ps
 pd:     ret
 puts endp
+
+puthex proc near                        ; AL as two hex digits
+        push    ax
+        shr     al, 4
+        call    hexdig
+        pop     ax
+        and     al, 0Fh
+hexdig: add     al, '0'
+        cmp     al, '9'
+        jbe     hexput
+        add     al, 7
+hexput: jmp     putc
+puthex endp
 
 putdec proc near                        ; AL in decimal
         xor     ah, ah

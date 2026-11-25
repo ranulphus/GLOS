@@ -1764,13 +1764,7 @@ void __cdecl native_main(void)
         stub_data.env_paras = ((envsize > n ? envsize : n) + 15) >> 4;
         say("GLOS-BOOT step=shell comspec=%s autoexec=%s", bi.comspec, bi.autoexec);
     }
-    {
-        int code = glos_main(1, argv);
-
-        /* (the screen GLOS leaves: the BIOS's video mode, as VMODE says it after GLOS.EXE under a DOS) */
-        say("GLOS-NATIVE end mode=%02x", *(unsigned char __far *)MK_FP(0x40, 0x49));
-        say("GLOS-EXIT code=%d", code);
-    }
+    say("GLOS-EXIT code=%d", glos_main(1, argv));      /* (a start that failed: once resident, the stub ends) */
 }
 #else
 int main(int argc, char **argv)
