@@ -353,7 +353,7 @@ two command sets that don't match). Before phase C, because the Terminal is one 
 | ISA Plug and Play, `glos pnp`, the Devices page's PnP cards | main and phase-h | host model; Loop A's Crystal cards |
 | PnP Sound Blaster 16 and ALS100 | main | nowhere yet (bench C, once the ALS100 is fitted) |
 | A native boot's jumpered SB16 (no BLASTER) | phase-h | Loop A natively |
-| OPTi 82C93x | planned | - |
+| OPTi 82C929 and 82C930 (the 931, Plug and Play, not) | phase-h | Loop A (AcerMagic S20, 82C930) |
 | D2's second half (a line shared with a DOS driver) | planned | - |
 
 Owed by the owner's hands: GLOS on benches D and E (their setup floppies are made), the ALS100 into C, and a

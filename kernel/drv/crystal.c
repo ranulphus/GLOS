@@ -279,6 +279,31 @@ int crystal_init(const char *cfg)
     return 0;
 }
 
+/* A CS4231-class codec another chip's driver has set up (opti.c: the OPTi 82C929's Windows Sound System side): its
+   index port, its interrupt and its DMA channels (cap: recording's; 4 none). 0 if it answers there; its playing,
+   recording and mixer are then this driver's (crystal_card's functions), with none of the Crystal part's own
+   set-up. sb and blaster: the chip's Sound Blaster side, as its driver says it. */
+int crystal_codec_at(u16 wss, u8 irq, u8 dma, u8 cap, u16 sb, const char *blaster)
+{
+    cs.wss = wss, cs.irq = irq, cs.dma = dma, cs.cap = cap, cs.sb = sb;
+    cs.mpu_on = 0, cs.game_on = 0;
+    if (!codec_there())
+        return -1;
+    wr(0x0C, 0x40);                             /* MODE 2 */
+    ksnprintf(cs.blaster, sizeof cs.blaster, "%s", blaster);
+    cs.found = 1;
+    return 0;
+}
+
+/* One of the codec's indexed registers written, for a chip with registers of its own there (the OPTi 82C930's
+   master volume, I22 and I23). */
+void crystal_codec_wr(u8 idx, u8 v)
+{
+    u32 f = irq_save();
+    wr(idx, v);
+    irq_restore(f);
+}
+
 u16 crystal_sb(void) { return cs.found ? cs.sb : 0; }
 u16 crystal_fm(void) { return cs.found ? cs.syn : 0; }
 u16 crystal_mpu(void) { return cs.found && cs.mpu_on ? cs.mpu : 0; }

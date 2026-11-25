@@ -627,6 +627,7 @@ static void vm_leave(u32 code)
     nic_leave();
     cmi8738_leave();                            /* (a bus master's channels stopped before DOS has its memory back) */
     ess_leave();
+    opti_leave();
     es1371_leave();
     ich97_leave();
     via686_leave();

@@ -144,7 +144,11 @@ static void late(void)
         return;
     v[0] = 0;                                   /* (kcfg_get leaves it alone for a key the schema lacks) */
     kcfg_get("sound", "crystal", v, sizeof v);
-    if (crystal_init(v) == 0)
+    if (opti_init(mx.bi) == 0)                  /* (phase H: an OPTi 82C929 (MAD16 Pro), its codec through crystal.c:
+                                                   opti.c. First: its password protocol is its own, and its codec at
+                                                   534h answers Crystal's automatic look too, unset) */
+        mx.card = &opti_card;
+    else if (crystal_init(v) == 0)
         mx.card = &crystal_card;
     else if (ess_init(mx.bi) == 0)              /* (phase H: BLASTER's card an ESS AudioDrive, a Sound Blaster Pro
                                                    to sb16.c: ess.c) */

@@ -5,6 +5,8 @@ GLOS plays every program's sound at once through the PC's sound card. It knows t
 - a Sound Blaster 16, or a card that is one to DOS (an ALS100, say);
 - a Crystal CS423x chip, as many PCs of the late 1990s have on the main board;
 - an ESS AudioDrive (ES688 to ES1888);
+- an OPTi 82C929 (MAD16 Pro) or 82C930: GLOS plays its Windows Sound System side, and gives its Sound Blaster
+  Pro side back to DOS programs when it stops;
 - the PCI cards and main-board sound of 1998 to 2003: C-Media CMI8738; Ensoniq and Creative ES1371, ES1373
   and CT5880 (the Sound Blaster PCI 64 and 128); the AC'97 sound of Intel and VIA main boards.
 

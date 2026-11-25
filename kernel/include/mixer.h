@@ -71,7 +71,8 @@ int mixer_wants(struct app *a, u32 *id);                        /* a stream of a
 const char *mixer_card(void);                                   /* the card the mixer plays through, or NULL */
 int mixer_chan(int chan, int set, u8 *left, u8 *right, u8 *mute);
 int mixer_input(int set, int *input);
-extern const struct sound_card sb16_card, crystal_card, cmi8738_card, es1371_card, ich97_card, via686_card, ess_card;
+extern const struct sound_card sb16_card, crystal_card, cmi8738_card, es1371_card, ich97_card, via686_card, ess_card,
+    opti_card;
 extern const struct sound_card via8233_card;    /* (via686.c's, for the VT8233 family) */
 int via686_is8233(void);
 int via686_init(void);                          /* (phase H) VIA's VT82C686 AC'97 found and its codec ready: 0 */
@@ -87,6 +88,10 @@ int sb16_init_pnp(void);                        /* (phase H) no BLASTER: a Plug 
 int sb16_init_legacy(void);                     /* ... a native boot's: a jumpered SB16 at 220h-280h: 0 */
 int sb16_legacy(void);                          /* ... it was found so (its MPU-401 looked for: midi.c) */
 void ess_leave(void);                           /* glos exit: stopped, a Sound Blaster Pro again */
+int crystal_codec_at(u16 wss, u8 irq, u8 dma, u8 cap, u16 sb, const char *blaster);    /* another chip's CS4231: 0 */
+void crystal_codec_wr(u8 idx, u8 v);           /* ... one of its indexed registers written */
+int opti_init(const struct bootinfo *bi);       /* (phase H) an OPTi 82C929 (MAD16 Pro), its codec through crystal.c */
+void opti_leave(void);                          /* glos exit: a Sound Blaster Pro again, as found */
 void cmi8738_leave(void);                       /* glos exit: its channels stopped, its legacy parts as they were */
 void mixer_refresh(void);                       /* the card started or stopped as things stand now */
 const char *mixer_blaster(void);                /* BLASTER for programs: the virtual Sound Blaster's, a Crystal chip's, 0 */

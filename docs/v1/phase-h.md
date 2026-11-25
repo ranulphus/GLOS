@@ -330,3 +330,29 @@ up. The list never scans the bus itself (`pnpbus_scanned`): the cards appear on 
 `glos pnp`. Loop A's three Crystal cases check it (`pnp-list`: the WSS device GLOS's); the CS4232's second DMA
 channel is 3 where the others' is 0.
 
+## Tier 2: OPTi 82C929 and 82C930 (2026-11-25; the owner's choice: H finished first, OPTi then line sharing)
+
+`kernel/drv/opti.c` plays OPTi's ISA sound chips through their Windows Sound System side: a CS4231-class codec
+that `crystal.c`'s codec code plays (`crystal_codec_at`: the Crystal driver split, its codec half used for a
+chip another driver has set up).
+
+- **82C929 (MAD16 Pro):** MC1-MC6 at F8Dh-F92h, each access after the password E3h at F8Fh. Found by MC1 reading
+  otherwise without the password and a bit written with it reading back changed. GLOS puts MC1 in WSS mode at
+  530h and sets the WSS configuration register (its interrupt and channel the Sound Blaster side had, from MC3
+  or BLASTER; full duplex on the other of channels 0 and 1).
+- **82C930:** the password E4h, its registers behind an index and data pair at MCBase (E0Eh after a reset), in
+  the order its own drivers use (index, password, data). MC3 one interrupt and channel for both sides, MC4 bit
+  2 the Sound Blaster side's output, MC5 bit 5 the codec's MODE 2, and its master volume the codec's I22/I23,
+  muted after a reset: set to 0 dB.
+- When the mixer stops, and at glos exit, the chip is as found: its Sound Blaster Pro for DOS programs.
+- **First in the mixer's order:** its password protocol is its own, and its codec at 534h answered Crystal's
+  automatic look, unset (an AcerMagic S20 was taken for a Crystal part and played silence).
+- **Tests:** Loop A's audio suite on 86Box's AcerMagic S20 (82C929 + CS4231) and 82C930, BLASTER as each chip's
+  Sound Blaster side starts (220h, IRQ 7 or 5, DMA 1): the whole case, every tone in 86Box's recording, the SB
+  side's DMA stopped after GLOS (SBCHK). The Crystal and ESS cases unchanged.
+- **Not done:** the 82C931 (Plug and Play, its password at F8Dh: 86Box's needs its PnP ROM, which RetroGPU's
+  sparse ROM set hasn't); no bench has an OPTi chip.
+- **Still open:** Crystal's automatic look takes any CS4231 answering at 534h for a Crystal part (another
+  maker's Windows Sound System card at 530h would play silence the same way). A Crystal-only check (its control
+  port, or I25's version) would close it.
+

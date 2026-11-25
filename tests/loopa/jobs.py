@@ -5222,6 +5222,8 @@ AUDIO_CASES = [("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k"),
                ("bf6", "g200", "ne2kpci", "cmi8738"),     # offers these three Crystal cards, given MGA-Glide's
                ("bf6", "g200", "ne2kpci", "es1371"),      # sound/crystal ROMs) (phase H's PCI cards: kernel/drv/
                ("bf6", "g200", "ne2kpci", "ess_es1688"),  # (... and an ESS AudioDrive, kernel/drv/ess.c)
+               ("bf6", "g200", "ne2kpci", "acermagic_s20"),       # (... and an OPTi 82C929, kernel/drv/opti.c)
+               ("bf6", "g200", "ne2kpci", "opti_82c930"),         # (... and an 82C930)
                ("bf6", "g200", "ne2kpci", "es1371", True, True)]  # (... and the ES1371 on the network card's line:
 #   GLOS.EXE /SHAREIRQ, two of GLOS's drivers on one line, docs/devices.md step D2)
 #   cmi8738.c and es1371.c; their lost edges on IRQ 12 are the mixer's watchdog's: docs/v1/phase-h.md)
@@ -5305,6 +5307,8 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True, share=False):
     cmi = sound == "cmi8738"                    # (phase H: a PCI card GLOS finds by itself; no BLASTER of its own)
     es = sound in ("es1371", "es1373", "ct5880")     # (... another, with an AC'97 codec and no FM synthesiser)
     ess = sound.startswith("ess_")              # (... an ESS AudioDrive, ISA, BLASTER's: ess.c; no recording yet)
+    opti = {"acermagic_s20": ("29", 7), "opti_82c930": ("30", 5)}.get(sound)   # (... an OPTi 82C929 or 82C930, ISA,
+    #   found by its password: opti.c; BLASTER as its Sound Blaster Pro side starts in 86Box: 220h, its IRQ, DMA 1)
     tag = "%s-%s" % (profile, vcard) + ("-" + sound if sound != "sb16" else "")
     # (Then phase F's Mixer, Sound Recorder and Player, the real programs: below.)
     # With the virtual Sound Blaster (the rule since 2026-11-19; docs/v1/vsb.md) the mixer plays from GLOS's
@@ -5315,7 +5319,8 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True, share=False):
         tag += "-real"
     if share:                                   # (GLOS.EXE /SHAREIRQ: the sound card's line made the network card's)
         tag += "-share"
-    blaster = "A220 I5 D1 T4" if (crystal and not virtual) or ess else "A220 I5 D1 H5 T6"
+    blaster = ("A220 I5 D1 T4" if (crystal and not virtual) or ess else "A220 I%d D1 T3" % opti[1] if opti
+               else "A220 I5 D1 H5 T6")
     # The Player's files (phase F): five seconds of 1175 Hz as a WAV (16 bits, one channel, 22050 Hz), and a
     # module of one long note: a sine of 32 bytes at the period 428, 259 Hz, for a pattern (7.7 seconds).
     snd = os.path.join(ROOT, "out", "bat", "audio-" + tag)       # (beside the case's other inputs: its own folder
@@ -5344,7 +5349,7 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True, share=False):
         "; jobs.py audio, the virtual Sound Blaster off", "[time]", "sntp = off", "[sound]", "virtual = off"])
         + "=/TEST/GLOS.CFG"]
     agent = Agent("audio-" + tag, profile, card, ["--card", vcard, "--sound", sound, "--wav"] + off_cfg
-        + ([] if sound != "sb16" and not ess else ["--pre", "SET BLASTER=" + blaster]) + [
+        + ([] if sound != "sb16" and not ess and not opti else ["--pre", "SET BLASTER=" + blaster]) + [
         "--file", "build/dj/AUDTEST.EXE=/TEST/AUDTEST.EXE", "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE",
         "--file", "build/ow/dos/FMTEST.EXE=/TEST/FMTEST.EXE", "--file", "build/apps/MIXER.EXE=/TEST/MIXER.EXE",
         "--file", "build/apps/RECORDER.EXE=/TEST/RECORDER.EXE", "--file", "build/apps/PLAYER.EXE=/TEST/PLAYER.EXE",
@@ -5385,7 +5390,8 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True, share=False):
         while time.time() - t0 < 30 and not agent.ssh("glos audio")[1].startswith(want):
             time.sleep(0.5)
         checks["idle"] = agent.ssh("glos audio")[1].startswith(want)
-        checks["said"] = ("blaster virtual " + (blaster if not ess else "A220 I5 D1 T6")      # (an ESS: the virtual
+        checks["said"] = ("blaster virtual " + (blaster if not ess and not opti else "A220 I%d D1 T6" % opti[1] if opti
+                                                else "A220 I5 D1 T6")        # (an ESS, an OPTi: the virtual
                           in agent.ssh("glos audio")[1]) == virtual    # SB16's 16-bit on its 8-bit channel, no H)
         if crystal:                             # (GLOS set it up: the data sheet's resources, BLASTER for sessions)
             checks["setup"] = "GLOS-SOUND crystal wss=534 sb=220 fm=388 irq=5 dma=1 " in agent.log()
@@ -5404,6 +5410,9 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True, share=False):
                 print("    %s share: %r" % (tag, re.findall(r"GLOS-(?:PCI shareirq|DEV)[^\n]*", lg)[:8]))
         if ess:                                 # (found at BLASTER's port: an AudioDrive by its E7h answer)
             checks["setup"] = re.search(r"GLOS-ESS found port=220 irq=5 dma=1 dsp=3\.\d+ id=688", agent.log()) is not None
+        if opti:                                # (found by its password, put in WSS mode at 530h; not Crystal's)
+            checks["setup"] = (re.search(r"GLOS-OPTI found chip=82c9%s mc1=\w\w mc3=\w\w sb=220 wss=530 irq=%d dma=1 "
+                                         r"cap=0" % opti, agent.log()) is not None and "GLOS-SOUND crystal wss=" not in agent.log())
         checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0
         t0 = time.time()
         while time.time() - t0 < 60 and not agent.ssh("glos audio")[1].startswith("audio on "):
