@@ -1068,6 +1068,23 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   until the next 01h. MOUSEHND gcursor in loopa-input (natively; CuteMouse's pixels differ): 13h, 12h, 04h, 06h,
   0Dh and the arrow OK on the bf6. Owed: a silicon check of the planar modes on a bench's real VGA (the latches
   above all). Mode 0Fh and SVGA modes: no cursor drawn (as CuteMouse).
+- **N4, the CD-ROM (planned 2026-11-25, native-dos; phase G's "CD-ROM: ATAPI on GLOS's IDE driver, ISO 9660,
+  MSCDEX's INT 2Fh 15xxh with its device requests, CD audio read digitally into GLOS's mixer (the drive's analog
+  output where it can't), ISO and CUE/BIN images as drives"; the boot CD of G3 on top). The steps:
+  C1 ATAPI packets in kernel/drv/ata.c (ata_packet), an ATAPI drive in ata_test's model; Loop A's `run.py
+  --cdrom` (RetroGPU branch cdrom); tools/ndos/mkiso.py for the images (Python alone; El Torito floppy
+  emulation): **built**. C2 kernel/drv/cdrom.c, the drives: found from ide.c's probe, sectors of 2048 bytes with
+  a small cache, the disc's change (UNIT ATTENTION) and its absence (NOT READY), the TOC. C3 kernel/fs/iso.c, ISO
+  9660 read-only over a sector reader (level 1 names as DOS sees them, path tables not needed: folders walked),
+  host-tested on mkiso's images and, where it is, xorriso's. C4 GLOS's DOS: a CD drive as DOS has one under
+  MSCDEX, a redirected drive (its CDS's network bit) whose reads, finds, folders and attributes go to iso.c and
+  whose writes are refused (access denied); letters after the hard disks'. C5 MSCDEX's INT 2Fh 15xxh (install
+  check, drive check, version 2.23, letters, VTOC and absolute reads, the device requests 1510h: IOCTL input and
+  output, READ LONG, PLAY and STOP AUDIO), with a DOS test program asking each. C6 CD audio: PLAY AUDIO by the
+  drive's own output first, then digital (READ CD of the audio frames into GLOS's mixer), digital the default
+  where the drive gives it. C7 images as drives: `glos cd mount FILE` (ISO, CUE/BIN) through the same iso.c. C8
+  the boot CD: `make cd-image`, the setup floppy by floppy emulation, the install with the apps on ISO 9660, the
+  text installer copying from it; Loop A starting it (the BIOS's boot order).
 - **N4, the keyboard's layout (2026-11-25, native-dos; KEYB's work):** the system VM's INT 09h is an ARPL of GLOS's
   in front of the BIOS's handler (kernel/vm/vkeyb.c). A key pressed whose character on [region] layout (keymap.h:
   Shift, Caps Lock, Num Lock, AltGr from the BIOS's flags) differs from the US one, and the 102nd key, GLOS answers:
