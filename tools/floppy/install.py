@@ -237,10 +237,45 @@ def put_glos(pc, args, files, drive="C", new_cfg=False):
     if new_cfg or pc.get_text("/%s/GLOS/GLOS.CFG" % drive) is None:
         pc.put_text("/%s/GLOS/GLOS.CFG" % drive, ["[net]", "hostname = " + args.name]
                     + (["cable = " + args.cable] if args.cable else [])
-                    + ["[desktop]", "tour = on", "tips = on"])   # (Help's tour the first time the desktop comes on)
+                    + ["[desktop]", "tour = on", "tips = on"]    # (Help's tour the first time the desktop comes on)
+                    + (["[sound]", "blaster = " + args.old_blaster] if getattr(args, "old_blaster", None) else []))
         print("  %s:\\GLOS\\GLOS.CFG: the PC's name is %s (%s.local)" % (drive, args.name, args.name))
     else:
         print("  %s:\\GLOS\\GLOS.CFG is there already: kept" % drive)
+
+
+BLASTER_SET = re.compile(r"(?i)^\s*@?\s*SET\s+BLASTER\s*=\s*(\S.*?)\s*$")
+
+
+def blaster_of(lines):
+    """The value the last SET BLASTER= of a batch file's lines gives, or None."""
+    found = None
+    for line in lines or []:
+        m = BLASTER_SET.match(line)
+        if m:
+            found = m.group(1)
+    return found
+
+
+def old_blaster(pc):
+    """The Sound Blaster's resources as a DOS already on the PC's disks has them (AUTOEXEC.BAT's SET BLASTER, or
+    FreeDOS's FDAUTO.BAT's), read before DISK changes anything: GLOS.CFG's [sound] blaster for the native GLOS,
+    which has no DOS to set it (a card jumpered away from 220h, or an ESS AudioDrive). (drive, file, value) or
+    None. One SFTP batch; a drive or file that isn't there is passed over."""
+    tmp = os.path.join(pc.tmp, "old")
+    os.makedirs(tmp, exist_ok=True)
+    names = [(d, n) for d in "CDEFGHIJ" for n in ("AUTOEXEC.BAT", "FDAUTO.BAT")]
+    for d, n in names:
+        if os.path.exists(os.path.join(tmp, d + n)):
+            os.unlink(os.path.join(tmp, d + n))
+    pc.sftp(["-get /%s/%s %s" % (d, n, os.path.join(tmp, d + n)) for d, n in names], timeout=600)
+    for d, n in names:
+        f = os.path.join(tmp, d + n)
+        if os.path.exists(f):
+            b = blaster_of(open(f, "rb").read().decode("latin-1").replace("\r", "").split("\n"))
+            if b:
+                return d, n, b
+    return None
 
 
 def native_install(pc, args, files):
@@ -249,6 +284,10 @@ def native_install(pc, args, files):
     parts = pc.parts()
     if parts is None:
         die("the PC's first hard disk can't be read (glos disk 1)")
+    old = old_blaster(pc) if parts else None
+    if old:
+        args.old_blaster = old[2]
+        print("  %s:\\%s sets BLASTER=%s: GLOS.CFG's [sound] blaster" % old)
     if args.free:
         how, what = "1 install /free /y", "GLOS put in the disk's free space"
     elif not parts:
