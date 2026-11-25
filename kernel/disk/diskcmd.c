@@ -20,6 +20,11 @@
  *                                    records (the first sector's code starts GLOS's partition whichever is
  *                                    active; GLOS's loader offers the others), the files
  *   DISK n INSTALL p [/ERASE] /Y     ... into partition p (one that holds a volume: only with /ERASE)
+ *   DISK n INSTALL p /Y              p the volume GLOS's own folder is on (a GLOS that DOS starts): that GLOS
+ *                                    made to start by itself, nothing erased: GLOSLDR.SYS into the volume's
+ *                                    first folder, its boot sector kept as BOOTSECT.DOS beside GLOS's files (the
+ *                                    start-up menu starts it again), GLOS's boot code in its place (phase G's
+ *                                    upgrade, docs/v1/native-dos.md)
  *
  * The rules of whatever writes a disk (the owner, 2026-11-12):
  *   - It says what would be lost, and does nothing without /Y: the command as typed is the question, the same
@@ -915,6 +920,160 @@ static int i_folder(struct inst *I, const char *src, const char *dst, u32 depth)
     return e;
 }
 
+/* ---- DISK n INSTALL p on GLOS's own volume: a GLOS that DOS starts made to start by itself (phase G's upgrade)
+ *
+ * The volume GLOS.CFG's folder is on (the one DOS started from, as a rule) is neither formatted nor emptied, and no
+ * file of DOS's or GLOS's is touched. GLOSLDR.SYS (GLOS's folder's) is copied into its first folder through DOS,
+ * which has the volume (GLOS's own FAT code would write behind DOS's buffers); its boot sector as it is now is kept
+ * as BOOTSECT.DOS in GLOS's folder, which the loader's start-up menu starts again ("on GLOS's volume", as NT starts
+ * a BOOTSECT.DOS); then GLOS's boot code is written in its place, and in FAT32's copy, the volume's own figures
+ * kept. MS-DOS 7.1's FAT32 code goes on in the volume's third sector, which is not written. The disk's first sector
+ * is not written either: its code (DOS's, or a boot manager's) starts the volume as before, which then starts
+ * GLOS. 1 if p is GLOS's volume (*ret: the command's result), 0 if it isn't (DISK INSTALL's other cases). */
+static int glos_volume(struct diskcmd *c, struct vol *v)
+{
+    u32 serial;
+    u8 l = (u8)vm.bi->cfg_path[0];
+    int e;
+
+    if (l >= 'a' && l <= 'z')
+        l = (u8)(l - 32);
+    if (!v->has_serial || l < 'C' || l > 'Z' || vm.bi->cfg_path[1] != ':')
+        return 0;
+    dos_hold();
+    e = dos_serial(l, &serial);
+    dos_release();
+    (void)c;
+    return e == 0 && serial == v->serial;
+}
+
+static int do_upgrade(struct diskcmd *c, u32 n, u32 p, struct vol *v, int yes, int *ret)
+{
+    u8 s[512], old[512], *buf;
+    u8 d = (u8)(0x7F + n);
+    char dir[80], src[96], dst[16], keep[96];
+    u32 i, copy, got, total = 0;
+    u16 h, out;
+    int e, from_dir;
+    const char *sys;
+
+    if (!glos_volume(c, v))
+        return 0;
+    *ret = 1;
+    if (v->n > 4) {
+        say(c, "DISK: GLOS's volume is a logical drive (partition %u of disk %u): a PC starts only a primary one.\n", p, n);
+        return 1;
+    }
+    if ((e = bdisk_read(d, v->start, 1, s)) != 0) {
+        *ret = bios_failed(c, e, "the read");
+        return 1;
+    }
+    for (i = 0; i + 11 <= 510 && memcmp(s + i, "GLOSLDR SYS", 11); i++)
+        ;
+    if (i + 11 <= 510) {
+        say(c, "Partition %u of disk %u, GLOS's volume, starts GLOS by itself already: nothing to do.\n", p, n);
+        *ret = 0;
+        return 1;
+    }
+    if (s[510] != 0x55 || s[511] != 0xAA) {
+        say(c, "DISK: GLOS's volume (partition %u of disk %u) has no boot code of DOS's to keep: DISK %u BOOT %u /GLOS\n"
+            "makes it start GLOS (no other system on it is then started).\n", p, n, n, p);
+        return 1;
+    }
+    memset(dir, 0, sizeof dir);
+    strncpy(dir, vm.bi->cfg_path, sizeof dir - 1);
+    if (dir[1] != ':' || dir[2] != '\\' || !strrchr(dir + 3, '\\')) {
+        say(c, "DISK: GLOS's own folder isn't known (%s)\n", vm.bi->cfg_path);
+        return 1;
+    }
+    *strrchr(dir, '\\') = 0;
+    ksnprintf(src, sizeof src, "%s\\GLOSLDR.SYS", dir);
+    ksnprintf(dst, sizeof dst, "%c:\\GLOSLDR.SYS", dir[0]);
+    ksnprintf(keep, sizeof keep, "%s\\BOOTSECT.DOS", dir);
+    dos_hold();
+    from_dir = f_open(src, 0, &h) == 0;
+    if (from_dir)
+        f_close(h);
+    else if (f_open(dst, 0, &h) == 0)
+        f_close(h);                             /* (one in the root already: that one) */
+    else {
+        dos_release();
+        say(c, "DISK: no GLOSLDR.SYS in %s or in %c:\\: this GLOS has no loader of its own to start it.\n", dir, dir[0]);
+        return 1;
+    }
+    dos_release();
+    for (i = 0; i + 11 <= 510 && memcmp(s + i, "KERNEL  SYS", 11); i++)
+        ;
+    sys = !memcmp(s + 3, "MSWIN4", 6) ? "Windows 95/98's or MS-DOS 7's"
+          : !memcmp(s + 3, "FRDOS", 5) || !memcmp(s + 3, "FreeDOS", 7) || i + 11 <= 510 ? "FreeDOS's"
+          : !memcmp(s + 3, "MSDOS", 5) || !memcmp(s + 3, "IBM ", 4) ? "MS-DOS's" : "the other system's";
+    say(c, "Partition %u of disk %u (%s, %u MB), the volume GLOS's folder %s is on: made to start GLOS by itself,\n"
+        "with no DOS. Nothing on it is erased: GLOSLDR.SYS goes into its first folder, its boot sector as it is now\n"
+        "(%s) is kept as %s, and GLOS's start-up code takes its place. GLOS's start-up menu\n"
+        "then offers that system on this volume beside GLOS. The disk's first sector is not written.\n",
+        p, n, type_name(v->type), mb(v->sectors), dir, sys, keep);
+    if (!v->active)
+        say(c, "Partition %u isn't the disk's active one: its first sector's code starts another (a boot manager may\n"
+            "offer this one).\n", p);
+    if (!yes) {
+        say(c, "Nothing was done. To do it: DISK %u INSTALL %u /Y\n", n, p);
+        *ret = 2;
+        return 1;
+    }
+    memcpy(old, s, 512);
+    copy = v->fat == 32 ? rd16(s + 50) : 0;     /* (FAT32's copy of its first sector) */
+    if (fat_boot(s, v->fat) != 0) {
+        say(c, "DISK: no boot code for this volume\n");
+        return 1;
+    }
+    for (i = 0; i + 11 <= 510 && memcmp(s + i, "KERNEL  SYS", 11); i++)
+        ;
+    if (i + 11 > 510) {
+        say(c, "DISK: no boot code for this volume\n");
+        return 1;
+    }
+    memcpy(s + i, "GLOSLDR SYS", 11);
+    /* The files first, through DOS: if one can't be written, the boot sector is as it was. */
+    if (!(buf = kmalloc(4096))) {
+        say(c, "DISK: no memory\n");
+        return 1;
+    }
+    dos_hold();
+    e = f_open(keep, 1, &out);
+    if (e == 0) {
+        e = f_write(out, old, 512);
+        f_close(out);
+    }
+    if (e == 0 && from_dir) {
+        if ((e = f_open(src, 0, &h)) == 0) {
+            if ((e = f_open(dst, 1, &out)) == 0) {
+                while ((e = f_read(h, buf, 4096, &got)) == 0 && got && (e = f_write(out, buf, got)) == 0)
+                    total += got;
+                f_close(out);
+            }
+            f_close(h);
+        }
+    }
+    dos_release();
+    kfree(buf);
+    if (e != 0) {
+        say(c, "DISK: %s or %s couldn't be written (%s): the volume's boot sector is as it was.\n", keep, dst,
+            e == -2 ? "the disk is full" : "DOS's error");
+        return 1;
+    }
+    if ((e = bdisk_write(d, v->start, 1, s)) != 0
+        || (copy && copy < rd16(s + 14) && (e = bdisk_write(d, v->start + copy, 1, s)) != 0)) {
+        *ret = bios_failed(c, e, "the write");
+        return 1;
+    }
+    kprintf("GLOS-DISK upgrade disk=%02x part=%u fat=%u loader=%u kept=%s\n", d, p, v->fat, total, keep);
+    say(c, "Done. Restarted, the PC starts GLOS by itself; its start-up menu offers the old system too (from %s).\n"
+        "DOS started from there runs its AUTOEXEC.BAT as before. To undo: DD IF=%s OF=DISK%u SEEK=%u COUNT=1 /Y\n",
+        keep, keep, n, v->start);
+    *ret = 0;
+    return 1;
+}
+
 static int do_install(struct diskcmd *c, u32 n, u32 p, int into_free, int erase, int yes)
 {
     struct inst I;
@@ -928,6 +1087,10 @@ static int do_install(struct diskcmd *c, u32 n, u32 p, int into_free, int erase,
     int e;
     if ((e = target(c, n)) != 0)
         return e;
+    if (p && !into_free && !erase)              /* (GLOS's own volume: the upgrade) */
+        for (i = 0; i < W.nv; i++)
+            if (W.v[i].n == p && W.v[i].fat && do_upgrade(c, n, p, &W.v[i], yes, &e))
+                return e;
     if (own_disk(c, &W)) {
         say(c, "DISK: disk %u is the one GLOS runs from: GLOS is not installed over itself.\n", n);
         return 1;

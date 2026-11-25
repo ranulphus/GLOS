@@ -8215,6 +8215,130 @@ def nboot_floppy_case(profile, card):
         not bad
 
 
+def nboot_upgrade_case(profile, card, fat=16):
+    """Phase G's upgrade (docs/v1/native-dos.md): a GLOS that DOS starts made to start by itself on the same volume.
+    A hard disk of one partition (FAT16, or a FAT32 one just under 2 GiB, sparse) that starts FreeDOS (GLOS's formatter
+    and boot code naming KERNEL.SYS, FreeDOS's kernel and COMMAND.COM from Loop A's boot floppy), its AUTOEXEC.BAT
+    starting GLOS from C:\\GLOS while C:\\GLOS\\HOSTED.ON is there. 1: FreeDOS and GLOS on it; DISK 1 INSTALL 1 says
+    what it would do, then does it (/Y): GLOSLDR.SYS in C:\\, the boot sector kept as C:\\GLOS\\BOOTSECT.DOS, GLOS's
+    boot code in its place with the volume's figures as they were, the disk's first sector untouched. 2: the disk
+    alone, no key: the start-up menu offers FreeDOS on GLOS's volume, and GLOS starts natively. 3: 2 pressed at the
+    menu: FreeDOS starts from the kept sector (HOSTED.ON was deleted in 1: its AUTOEXEC.BAT ends the run)."""
+    import time
+    tag = "nupg%d-%s" % (fat, profile)
+    d = os.path.join(ROOT, "out", tag + "-img")
+    os.makedirs(d, exist_ok=True)
+    disk = os.path.join(d, "c.img")
+    cfg = batfile(tag + "/GLOS.CFG", ["; jobs.py nboot: hosted, then upgraded"])
+    auto = batfile(tag + "/AUTOEXEC.BAT", ["@ECHO OFF", "SERSAY HX-FREEDOS started", "IF EXIST C:\\GLOS\\HOSTED.ON C:\\GLOS\\GLOS.EXE",
+                                           "SERSAY HX-DONE 0"])
+    flag = batfile(tag + "/HOSTED.ON", ["on"])
+    gold = subprocess.run([os.path.join(MGA, "tools/loopa/mkgolden.sh")], capture_output=True,
+                          cwd=MGA).stdout.decode().strip().splitlines()[-1]
+    cyls = 64 if fat == 16 else 4161            # (32 MB; or past FAT16's most, FAT32, yet under 2 GiB: the 32-bit
+                                                # image tools open no larger file)
+    script = "\n".join([
+        "set -e", "t=$(mktemp -d)", "trap 'rm -rf $t' EXIT", "export MTOOLS_SKIP_CHECK=1",
+        "gcc -m32 -O1 -Ikernel/include -Iinclude -o $t/mkvol tools/ndos/mkvol.c kernel/disk/fatfmt.c kernel/disk/mbr.c "
+        "kernel/disk/mbrboot.S kernel/disk/fdboot.S sdk/config/cp.c sdk/config/cp_tables.c",
+        "gcc -m32 -O1 -o $t/mkmbr tools/ndos/mkmbr.c kernel/disk/mbr.c kernel/disk/mbrboot.S",
+        "rm -f %s" % disk, "$t/mkmbr %d 0 16 > $t/mbr 2> $t/part" % (cyls * 16 * 63), "read start sectors < $t/part",
+        "truncate -s %d %s" % (cyls * 16 * 63 * 512, disk), "dd if=$t/mbr of=%s conv=notrunc status=none" % disk,
+        "MKVOL_BOOT='KERNEL  SYS' $t/mkvol %s $start $sectors FREEDOS 16" % disk,
+        "i=%s@@$((start * 512))" % disk,
+        "mcopy -i %s/boot.img ::KERNEL.SYS $t/" % gold,
+        "mcopy -i %s/boot.img ::COMMAND.COM $t/ 2> /dev/null || mcopy -i %s/boot.img ::FREEDOS/BIN/COMMAND.COM $t/" % (gold, gold),
+        "mcopy -i $i $t/KERNEL.SYS $t/COMMAND.COM %s %s ::" % (os.path.join(MGA, "build/ow/dos/SERSAY.COM"), auto),
+        "mmd -i $i ::GLOS ::GLOS/KEYS",
+        "mcopy -i $i build/ow/GLOS.EXE build/kernel/GLOSK.BIN build/glos/COMMAND.COM build/ow/GLOSLDR.SYS %s %s ::GLOS/"
+        % (cfg, flag),
+        "mcopy -i $i tests/keys/hostkey ::GLOS/KEYS/HOSTKEY", "mcopy -i $i tests/keys/AUTHKEYS ::GLOS/KEYS/AUTHKEYS"])
+    mk = subprocess.run(["sh", "-c", script], cwd=ROOT, capture_output=True)
+    checks, info = {"image": mk.returncode == 0}, ""
+    if not checks["image"]:
+        return "  %-22s FAIL image=%r" % (tag, mk.stderr.decode("latin-1")[-400:]), False
+    mbr0 = open(disk, "rb").read(512)
+    start = int.from_bytes(mbr0[446 + 8:446 + 12], "little")
+
+    def vbr():
+        with open(disk, "rb") as f:
+            f.seek(start * 512)
+            return f.read(512)
+
+    vbr0 = vbr()
+    bpb = (11, 90) if fat == 32 else (11, 62)   # (the volume's figures: what GLOS's boot code must keep)
+
+    def stopped(agent):
+        t0 = time.time()
+        while time.time() - t0 < 60 and "GLOS-EXIT code=" not in agent.log():
+            time.sleep(0.5)
+        agent.proc.kill()
+        agent.proc.wait()
+        return agent.log()
+
+    # 1: FreeDOS, GLOS started by its AUTOEXEC.BAT; the upgrade.
+    agent = Agent(tag + "a-" + card, profile, card, ["--hdd", disk], timeout=1200, files=False)
+    try:
+        checks["listen"] = agent.listening()
+        if checks["listen"]:
+            disk_cmd = lambda a, t=180: (lambda r: (r[0], (r[1] + r[2]).replace("\r", "")))(agent.ssh("disk " + a, timeout=t))
+            rc, out = disk_cmd("1 install 1")
+            checks["asks"] = rc == 2 and "Nothing was done. To do it: DISK 1 INSTALL 1 /Y" in out \
+                and "BOOTSECT.DOS" in out and "FreeDOS's" in out
+            if not checks["asks"]:
+                info += " asks=%r" % out[-400:]
+            rc, out = disk_cmd("1 install 1 /y", 300)
+            checks["upgrade"] = rc == 0 and "Done. Restarted, the PC starts GLOS by itself" in out
+            if not checks["upgrade"]:
+                info += " upgrade=%r" % out[-400:]
+            rc, out = disk_cmd("1 install 1", 120)
+            checks["again"] = rc == 0 and "starts GLOS by itself already" in out
+            ls = agent.ssh("dir C:\\")
+            checks["loader"] = ls[0] == 0 and "GLOSLDR" in ls[1]
+            agent.ssh("del C:\\GLOS\\HOSTED.ON")
+            agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = stopped(agent)
+    checks["clean-1"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
+    checks["logged"] = re.search(r"GLOS-DISK upgrade disk=80 part=1 fat=%d loader=\d+ kept=C:\\GLOS\\BOOTSECT.DOS" % fat,
+                                 text) is not None
+    vbr1 = vbr()
+    kept = subprocess.run(["mtype", "-i", "%s@@%d" % (disk, start * 512), "::GLOS/BOOTSECT.DOS"], capture_output=True,
+                          env=dict(os.environ, MTOOLS_SKIP_CHECK="1")).stdout
+    checks["mbr-kept"] = open(disk, "rb").read(512) == mbr0
+    checks["sector-kept"] = kept == vbr0
+    checks["glos-code"] = b"GLOSLDR SYS" in vbr1 and vbr1[bpb[0]:bpb[1]] == vbr0[bpb[0]:bpb[1]] and vbr1[510:] == b"\x55\xaa"
+    if not checks.get("upgrade"):
+        bad = [k for k, v in checks.items() if not v]
+        return "  %-22s FAIL%s failed: %s" % (tag, info, " ".join(bad)), False
+    # 2: the disk alone, no key: the menu, then GLOS by itself.
+    agent = Agent(tag + "b-" + card, profile, card, ["--hdd", disk], timeout=600, files=False)
+    try:
+        checks["native"] = agent.listening()
+        if checks["native"]:
+            ls = agent.ssh("dir C:\\GLOS")
+            checks["runs"] = ls[0] == 0 and "BOOTSECT" in ls[1]
+            agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        checks["timeout-2"] = False
+    text = stopped(agent)
+    checks["menu"] = "GLOS-BOOT dos-here partition=1 FreeDOS" in text and "  2  FreeDOS (on GLOS's volume)" in text \
+        and "GLOS-BOOT menu chosen=1 glos" in text and "GLOS-BOOT step=start" in text
+    checks["clean-2"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-REFUSE" not in text
+    if not checks["menu"]:
+        info += " log=%r" % [l for l in text.split("\n") if "GLOS-BOOT" in l or "  2  " in l][:8]
+    # 3: 2 pressed at the menu: FreeDOS from the kept sector.
+    st, serial = run(tag + "c", ["--hdd", disk, "--machine", profile, "--timeout", "120", "--idle", "100",
+                                 "--keys", "@GLOS-BOOT menu choices,1:0x03"])
+    checks["dos-again"] = "GLOS-BOOT menu chosen=2 partition=1 FreeDOS" in serial and "HX-FREEDOS started" in serial
+    if not checks["dos-again"]:
+        info += " dos=%r" % serial[-300:]
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % (tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad) + info), \
+        not bad
+
+
 def nboot_dual_case(profile, card, msdos=False):
     """GLOS installed beside another system, and the start-up menu (docs/v1/native-dos.md, the boot manager). A hard
     disk with FreeDOS on its first partition (GLOS's formatter and boot code naming KERNEL.SYS, FreeDOS's kernel and
@@ -13545,6 +13669,10 @@ def main():
         if os.environ.get("NBOOT_MSDOS"):
             cases = [c + (True,) for c in cases if c[0] == "bf6"]
         return 0 if all(r[1] for r in matrix(nboot_dual_case, cases, a.jobs)) else 1
+    if a.suite == "nboot" and os.environ.get("NBOOT_ONLY") == "upgrade":  # (a hosted GLOS made native on its volume)
+        cases = [c + (f,) for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile
+                 for f in (16, 32) if c[0] == "bf6" or f == 16]       # (the 486's FAT16 alone, as in the suite)
+        return 0 if all(r[1] for r in matrix(nboot_upgrade_case, cases, a.jobs)) else 1
     if a.suite == "nboot" and os.environ.get("NBOOT_ONLY") == "setup":    # (the setup floppy with no DOS alone)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(nboot_setup_case, cases, a.jobs)) else 1
@@ -13569,6 +13697,8 @@ def main():
         res += matrix(nboot_setup_case, cases, a.jobs)          # (the setup floppy with no DOS: the 486 for 13 min)
         res += matrix(nboot_dual_case, cases, a.jobs)           # (GLOS beside another system: the start-up menu)
         res += matrix(nboot_dual_case, [c + (True,) for c in cases if c[0] == "bf6"], a.jobs)  # (... beside MS-DOS 7.1)
+        res += matrix(nboot_upgrade_case, [c + (f,) for c in cases for f in (16, 32) if c[0] == "bf6" or f == 16],
+                      a.jobs)                   # (a hosted GLOS made to start by itself on its own volume)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "ndos":                       # (native machines: the bf6 with VME, the 486 without)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]

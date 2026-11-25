@@ -1528,6 +1528,7 @@ static char native_letters(void)
    (seconds, or off: until a key) and the names it shows. Read before the menu, from GLOS.CFG beside GLOS's files
    (the command line's folder): the rest of GLOS.CFG is read after it, by read_cfg. */
 static int boot_kind = 'g', boot_part, boot_timeout = 5;
+static char boot_dir[128];                      /* GLOS's folder, with its backslash ("C:\\GLOS\\") */
 static char boot_glos_name[32], boot_dos_name[32];
 
 static void read_boot(const char *self)
@@ -1541,6 +1542,8 @@ static void read_boot(const char *self)
     if (!slash || (size_t)(slash - self) + 10 > sizeof path)
         return;
     memcpy(path, self, (size_t)(slash - self + 1));
+    path[slash - self + 1] = 0;
+    strcpy(boot_dir, path);
     strcpy(path + (slash - self + 1), "GLOS.CFG");
     if (!(f = fopen(path, "r")))
         return;
@@ -1579,16 +1582,40 @@ static void read_boot(const char *self)
 
 static void native_menu(void)
 {
-    static unsigned char mbr[512], bs[4][512];
-    static char names[4][28];
-    unsigned entry[4], n = 0, i, k;
-    unsigned long mb[4], __far *ticks = (unsigned long __far *)MK_FP(0x40, 0x6C), t0, left = 99;
+    static unsigned char mbr[512], bs[5][512];
+    static char names[5][28];
+    unsigned entry[5], n = 0, i, k, here = 99;
+    unsigned long mb[5], __far *ticks = (unsigned long __far *)MK_FP(0x40, 0x6C), t0, left = 99;
     union REGS r;
     int choice = 0, def = 0;
     const char *gname = boot_glos_name[0] ? boot_glos_name : "GLOS";
+    char path[160];
+    FILE *f;
 
     if (native_disk < 0x80 || native_sector(0, mbr) != 0 || mbr[510] != 0x55 || mbr[511] != 0xAA)
         return;
+    /* The system that started from GLOS's own volume before GLOS did (DISK n INSTALL p's upgrade kept its boot
+       sector as BOOTSECT.DOS in GLOS's folder): first, so that [boot] default = dos is it. */
+    sprintf(path, "%sBOOTSECT.DOS", boot_dir);
+    for (i = 0; boot_dir[0] && i < 4; i++) {
+        unsigned char *e = mbr + 446 + i * 16;
+
+        if (!e[4] || *(unsigned long *)(e + 8) != native_vol_lba())
+            continue;
+        if ((f = fopen(path, "rb")) != NULL) {
+            if (fread(bs[0], 1, 512, f) == 512 && bs[0][510] == 0x55 && bs[0][511] == 0xAA
+                && !loads(bs[0], "GLOSLDR SYS")) {
+                entry[0] = i;
+                mb[0] = *(unsigned long *)(e + 12) / 2048;
+                strcpy(names[0], system_name(bs[0]));
+                here = 0;
+                n = 1;
+                say("GLOS-BOOT dos-here partition=%u %s", i + 1, names[0]);
+            }
+            fclose(f);
+        }
+        break;
+    }
     for (i = 0; i < 4; i++) {
         unsigned char *e = mbr + 446 + i * 16;
         unsigned long start = *(unsigned long *)(e + 8);
@@ -1619,7 +1646,10 @@ static void native_menu(void)
     say("This disk can start:");
     say("  1  %s", gname);
     for (k = 0; k < n; k++)
-        say("  %u  %s (partition %u, %lu MB)", k + 2, names[k], entry[k] + 1, mb[k]);
+        if (k == here)
+            say("  %u  %s (on GLOS's volume)", k + 2, names[k]);
+        else
+            say("  %u  %s (partition %u, %lu MB)", k + 2, names[k], entry[k] + 1, mb[k]);
     say("GLOS-BOOT menu choices=%u default=%d timeout=%d", n + 1, def + 1, boot_timeout);
     choice = def;
     t0 = *ticks;

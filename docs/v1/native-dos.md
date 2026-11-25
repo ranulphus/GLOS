@@ -1116,6 +1116,22 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   default; the FreeDOS floppy's
   retirement once the 486 has started from the new one; `install.py --native` onto a disk with MS-DOS or Windows
   in its free space is `--free` (tested in Loop A by DISK's own cases; not yet through install.py).
+- **The upgrade, built (2026-11-25, native-dos; phase G's "one command that turns a hosted install into a native
+  one on the same volume"):** `DISK n INSTALL p /Y` where partition p holds GLOS.CFG's own volume (known by its
+  serial number, which DOS gives) erases nothing: GLOSLDR.SYS (GLOS's folder's) goes into the volume's root through
+  DOS, which has the volume mounted (GLOS's own FAT code would write behind DOS's buffers); the boot sector as it
+  is is kept as `BOOTSECT.DOS` in GLOS's folder; GLOS's boot code takes its place, and that of FAT32's copy, the
+  volume's figures kept. MS-DOS 7.1's FAT32 code goes on in the volume's third sector, which nothing writes. The
+  disk's first sector is not written (a boot manager there, as on bench F, survives); a volume that isn't the
+  active one is said so. Run again, it says there's nothing to do. The loader's start-up menu reads `BOOTSECT.DOS`
+  and offers "FreeDOS (on GLOS's volume)" (or MS-DOS, Windows 95/98, by the sector's own words) first, so `[boot]
+  default = dos` is it; chosen, the sector is started as NT starts a BOOTSECT.DOS (native_chain). Undo: `DD
+  IF=...\BOOTSECT.DOS OF=DISKn SEEK=start COUNT=1 /Y`, which the command prints. `loopa-nboot`'s upgrade case
+  (NBOOT_ONLY=upgrade; FAT16 on the bf6 and the 486, FAT32 just under 2 GiB on the bf6): hosted FreeDOS and GLOS on one
+  partition, the question, the upgrade, the disk's first sector and the volume's figures unchanged and the kept
+  sector the old one; the disk alone then starts GLOS by itself, the menu offering FreeDOS; 2 pressed, FreeDOS
+  starts from the kept sector. Owed: MS-DOS 7.1 on the same volume in Loop A (the private disk) and on a real
+  bench (N3's item); an AUTOEXEC.BAT that starts GLOS.EXE still does so when DOS is chosen.
 
 ## N6: several DOS programs at once
 
