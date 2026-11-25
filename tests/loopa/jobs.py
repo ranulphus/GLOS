@@ -306,7 +306,9 @@ def native_args(name, args):
         # (C:\OUT: the harness's tools keep their files there, VECCHK's saved vectors for one; Loop A's own disk has it)
         f.write("@ECHO OFF\r\nSET PATH=C:\\HX;C:\\FREEDOS\\BIN\r\nMD C:\\OUT\r\nIF EXIST C:\\RUN.BAT CALL C:\\RUN.BAT\r\n"
                 + ("IF EXIST C:\\RUN.BAT C:\\HX\\UTEXIT 125\r\n" if boot == "glosshell" else ""))
-    mouse = "--mouse" in rest and rest[rest.index("--mouse") + 1] != "none"
+    # (natively the DOS programs' mouse is GLOS's own INT 33h, kernel/vm/vmouse.c: no CuteMouse, unless
+    # LOOPA_CTMOUSE=1 asks for it, to compare)
+    mouse = "--mouse" in rest and rest[rest.index("--mouse") + 1] != "none" and bool(os.environ.get("LOOPA_CTMOUSE"))
     with open(os.path.join(work, "RUN.BAT"), "w", newline="") as f:
         f.write("\r\n".join(["C:", "CD \\TEST", "SERSAY HX-BOOT loop=A test=%s" % name]
                             + (["CTMOUSE"] if mouse else []) + lines) + "\r\n")      # (as run.py's RUN.BAT has it)

@@ -64,6 +64,7 @@ static u16 inj[QSIZE];                          /* direct mode: injected bytes w
 static u32 injh, injt;
 static u8 aux_on, aux_wheel, aux_rate[3], aux_arg, aux_buttons;        /* the mouse, as the program set it */
 static u8 desk_on;                              /* the desktop has the keyboard and the mouse */
+static u8 vm_mouse;                             /* GLOS's INT 33h has the mouse (vmouse.c: native boots) */
 static u8 aux_port;                             /* the controller has an AUX port */
 static u8 desk_acks;                            /* the mouse's answers to the desktop's own commands, to drop */
 static u8 kbd_acks;                             /* ... and the keyboard's (the desktop's key repeat, M9) */
@@ -135,8 +136,8 @@ static u16 chip_byte = 0x100;                   /* what the chip was given last;
 static void write_cmd_byte(void)
 {
     u8 v = (u8)((cmd | 0x01) & ~0x10);
-    if (desk_on && aux_port)
-        v = (u8)((v | 0x02) & ~0x20);           /* the desktop's mouse: IRQ 12, and its clock */
+    if ((desk_on || vm_mouse) && aux_port)
+        v = (u8)((v | 0x02) & ~0x20);           /* the desktop's mouse, or GLOS's INT 33h's: IRQ 12, its clock */
     if (v == chip_byte)
         return;
     chip_cmd(0x60);
@@ -229,6 +230,8 @@ static void drain(void)
         } else if (s & 0x20) {
             if (desk_on)
                 desk_in(DESK_AUX, b, aux_wheel, 0);
+            else if (vm_mouse)
+                vmouse_aux(b, aux_wheel);       /* (GLOS's INT 33h: the packets its own) */
             else
                 enqueue(b, 1);
         } else if (replies && (b == 0xFA || b == 0xFE)) {       /* its ACK or "resend": ahead of the keys */
@@ -589,6 +592,8 @@ int vkbc_mouse_wheel(int dx, int dy, int wheel, int buttons)
             desk_in(DESK_MOUSE, dx, dy, aux_buttons);
         if (wheel)
             desk_in(DESK_WHEEL, wheel, 0, 0);
+    } else if (vm_mouse) {
+        vmouse_move(dx, dy, buttons >= 0 ? buttons & 7 : -1);
     } else if (!aux_on || (cmd & 0x20)) {
         r = -2;
     } else {
@@ -720,6 +725,29 @@ void vkbc_desk(int on)
         mods = e0 = 0;                          /* (keys held across the change mean nothing to the other side) */
     }
     desk_in(DESK_RESET, 0, 0, 0);
+}
+
+/* GLOS's INT 33h (vmouse.c) takes the mouse, from a program's first reset on: the AUX port and the mouse's
+   reporting on if no program turned them on, as for the desktop; its bytes vmouse_aux's from then on. */
+void vkbc_vmouse(int on)
+{
+    u32 f = irq_save();
+
+    if ((on != 0) == vm_mouse) {
+        irq_restore(f);
+        return;
+    }
+    vm_mouse = (u8)(on != 0);
+    if (on && aux_port && !aux_on && !desk_on) {
+        chip_cmd(0xA8);
+        write_cmd_byte();
+        chip_cmd(0xD4);
+        chip_data(0xF4);
+        desk_acks++;
+    } else {
+        write_cmd_byte();
+    }
+    irq_restore(f);
 }
 
 void vkbc_direct(int on)

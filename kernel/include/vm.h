@@ -176,6 +176,14 @@ void vkbc_irq(struct trapframe *tf);
 void vkbc_tick(void);
 u8 vkbc_cmd(void);
 void vkbc_restore(u8 cmd);
+void vkbc_vmouse(int on);                       /* GLOS's INT 33h takes the mouse (native boots) */
+
+/* vmouse.c: INT 33h of GLOS's own for DOS programs (native boots, vdos.c's vector) */
+struct dos_regs86;
+void vmouse_int33(struct dos_regs86 *r);
+void vmouse_aux(u8 b, int wheel);               /* a PS/2 mouse byte (vkbc.c) */
+void vmouse_move(int dx, int dy, int buttons);  /* an injected move (buttons -1: as they were) */
+int  vmouse_on(void);
 void vkbc_direct(int on);                       /* a direct-mode session begins (1) or ends (0) */
 void vkbc_typematic(u32 delay_ms, u32 rate);   /* the keyboard's repeat while the desktop has it (M9) */
 void vkbc_desk(int on);                         /* the desktop has the keyboard and the mouse (1), or the VM again (0) */
