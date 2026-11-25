@@ -177,7 +177,9 @@ void vkbc_irq(struct trapframe *tf);
 void vkbc_tick(void);
 u8 vkbc_cmd(void);
 void vkbc_restore(u8 cmd);
-void vkbc_vmouse(int on);                       /* GLOS's INT 33h takes the mouse (native boots) */
+void vkbc_vmouse(int on);
+int  vkbc_peek(u8 *b);                          /* the output buffer's byte (0: the mouse's) */
+int  vkeyb_int09(void);                         /* vkeyb.c: INT 09h's ARPL, 1 if GLOS answered the key */                       /* GLOS's INT 33h takes the mouse (native boots) */
 
 /* vmouse.c: INT 33h of GLOS's own for DOS programs (native boots, vdos.c's vector) */
 struct dos_regs86;

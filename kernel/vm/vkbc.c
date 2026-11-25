@@ -415,6 +415,16 @@ u8 vkbc_in(u16 port)
     }
 }
 
+/* The byte the output buffer has, as the data register keeps it after a read too (vkeyb.c's INT 09h may come after
+   a program's own handler read it): 0 if it is the mouse's. */
+int vkbc_peek(u8 *b)
+{
+    if (out_aux)
+        return 0;
+    *b = out;
+    return 1;
+}
+
 static u8 kbd_last;                     /* the last byte to the keyboard: after EDh, its LEDs come */
 
 void vkbc_out(u16 port, u8 v)

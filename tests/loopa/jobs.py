@@ -3995,6 +3995,8 @@ MOUSE_KEYS = "1:mouse:40:-20:1,2:mouse:40:-20:0"        # MGA-Glide's selftest-m
 # glos type on a British keyboard, and the line a DOS that reads keys as a US keyboard's makes of those keys.
 UK_TEXT = 'a"b@c#d~e\\\\f|g\u00a3h'
 UK_READ = 'a@b"c\\d|e\\f|g#h'
+UK_NATIVE = 'a"b@c#d~e\\f|g\x9ch'                # (natively GLOS's own KEYB: the British characters, the pound
+                                                # sign as code page 437 has it)
 
 
 def input_case(profile, card, mouse_too):
@@ -4060,6 +4062,8 @@ def input_case(profile, card, mouse_too):
         # Shift-2, Shift-', the key beside Enter alone and with Shift, the 102nd key the same, Shift-3.
         checks["uk-set"] = agent.ssh("glos config set region layout uk")[0] == 0
         checks["uk-rc"] = job("C:\\TEST\\TYPEIN.EXE", "HX-TYPE ready", 2, "glos type " + UK_TEXT + "\\n") == (0, 0)
+        if NATIVE:                              # AltGr: GLOS's own KEYB gives the accented letter (CP437's 82h)
+            checks["uk-altgr"] = job("C:\\TEST\\TYPEIN.EXE", "HX-TYPE ready", 3, "glos type caf\xe9\\n") == (0, 0)
         checks["uk-refuse"] = agent.ssh("glos type \u03b1")[0] == 2    # (no key for an alpha)
         checks["uk-unset"] = agent.ssh("glos config set region layout us")[0] == 0 \
             and agent.ssh("glos config set region layout xx")[0] != 0
@@ -4087,7 +4091,9 @@ def input_case(profile, card, mouse_too):
         ours = re.match(r"dx=(-?\d+) dy=(-?\d+) ", mouse[1]) if len(mouse) == 2 else None
         checks["mouse-exact"] = bool(ours) and int(ours.group(1)) > 0 and int(ours.group(1)) == -2 * int(ours.group(2))
     checks["type"] = "HX-TYPE got=" + text + "\n" in log
-    checks["type-uk"] = "HX-TYPE got=" + UK_READ + "\n" in log
+    checks["type-uk"] = "HX-TYPE got=" + (UK_NATIVE if NATIVE else UK_READ) + "\n" in log
+    if NATIVE:
+        checks["type-altgr"] = "HX-TYPE got=caf\x82\n" in log
     if not checks["type-uk"]:
         info += " uk=%r" % re.findall(r"HX-TYPE got=(.*)", log)[1:]
     checks["hotkey-reason"] = bool(re.search(r"GLOS-KILL psp=\w+ at=\S+ ticks=\d+ reason=hotkey", log))

@@ -513,8 +513,10 @@ static int vd_wait(void *ctx)
 
 /* DOS's bytes for the vectors (the layout's misc + 4 on): ARPLs for INT 21h, 20h, 29h and 23h (DOS's own Ctrl-C
    handler), one a program's INT 23h returns to, and an IRET that ends INT 2Fh's chain. */
-enum { V21, V20, V29, V23, VC23, V33, V74, V74R, NV };  /* (V33: GLOS's INT 33h, the mouse: vmouse.c; V74 its IRQ 12,
-                                                           V74R where the program's mouse routine returns to) */
+enum { V21, V20, V29, V23, VC23, V33, V74, V74R, V09, NV };    /* (V33: GLOS's INT 33h, the mouse: vmouse.c; V74
+                                                           its IRQ 12, V74R where the program's mouse routine
+                                                           returns to; V09 the keyboard's layout, vkeyb.c) */
+static u32 old09;                               /* the BIOS's INT 09h, which V09 chains to */
 static u32 arpl[NV];                            /* (seg << 16 | off) */
 
 /* ---- interrupts during a call
@@ -636,6 +638,8 @@ int vdos_init(struct bootinfo *bi)
     ide_wait_hook(vd_window, vd_nap);
     set_vec(0x21, arpl[V21]), set_vec(0x20, arpl[V20]), set_vec(0x29, arpl[V29]), set_vec(0x23, arpl[V23]);
     set_vec(0x33, arpl[V33]);                   /* (the mouse's: no CuteMouse; a driver loaded later takes it over) */
+    old09 = vec(0x09);
+    set_vec(0x09, arpl[V09]);                   /* (the layout's, in front of the BIOS's handler: vkeyb.c) */
     set_vec(0x2F, arpl[V21] + 2 * NV);          /* (INT 2Fh's chain ends here: GLOS's int2f_hook answers before it) */
     ready = 1;
     kprintf("GLOS-NATIVE step=dos psp=%04x top=%04x tables=%05x sda=%05x\n", psp, top, (u32)(vd.lay.lol - 0x12),
@@ -830,6 +834,11 @@ int vdos_arpl(struct trapframe *tf)
     if (i == NV)
         return 0;
     lin = (tf->ss & 0xFFFF) * 16 + (tf->esp & 0xFFFF);
+    if (i == V09 && !vkeyb_int09()) {           /* a key the BIOS's handler is to have: there, its frame as it is */
+        tf->cs = old09 >> 16;
+        tf->eip = old09 & 0xFFFF;
+        return 1;
+    }
     if (i == V74R) {                            /* back from the program's mouse routine (its RETF) */
         from_regs(tf, &m74);
         vm.thread->vif = m74_vif;
@@ -884,6 +893,8 @@ int vdos_arpl(struct trapframe *tf)
         vm.thread->vif = 0;
         break;
     }
+    case V09:                                   /* (a key GLOS answered: the IRET only) */
+        break;
     case V33:                                   /* the mouse (vmouse.c) */
         to_regs(tf, &r, ip);
         vmouse_int33(&r);

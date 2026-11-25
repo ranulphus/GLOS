@@ -1068,6 +1068,15 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   until the next 01h. MOUSEHND gcursor in loopa-input (natively; CuteMouse's pixels differ): 13h, 12h, 04h, 06h,
   0Dh and the arrow OK on the bf6. Owed: a silicon check of the planar modes on a bench's real VGA (the latches
   above all). Mode 0Fh and SVGA modes: no cursor drawn (as CuteMouse).
+- **N4, the keyboard's layout (2026-11-25, native-dos; KEYB's work):** the system VM's INT 09h is an ARPL of GLOS's
+  in front of the BIOS's handler (kernel/vm/vkeyb.c). A key pressed whose character on [region] layout (keymap.h:
+  Shift, Caps Lock, Num Lock, AltGr from the BIOS's flags) differs from the US one, and the 102nd key, GLOS answers:
+  the byte read from the virtual 8042, key and character (in [region] codepage) into the BIOS's buffer, the VM's
+  PIC acknowledged; everything else (releases, E0 codes, Ctrl and Alt combinations, keys alike on both) chains to
+  the BIOS with its frame untouched. AltGr with a key that types nothing types nothing; a character the code page
+  lacks is dropped; direct-mode sessions keep the BIOS's US keys. The layout is read at every key, so `glos config
+  set region layout` takes effect at once. loopa-input natively: the British line (" @ # ~ \ | and the pound sign
+  as CP437's 9Ch) and AltGr's é (82h) as typed; hosted unchanged (FreeDOS without KEYB reads US keys).
 - **Long names:** in the personality (N2, 71xxh). No DOSLFN.
 - **The keyboard's layout:** `[region] layout` reaches the desktop and apps today; native, the machine's INT 16h
   and INT 09h see the layout's characters too. No KEYB.
