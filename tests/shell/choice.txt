@@ -26,6 +26,13 @@ nokeys
 > choice /c:ab Nobody, no default
 > echo %errorlevel%
 keys
+# a wrong key, then nobody to press another (a job's input ended): /T's answer, not the first key
+> choice /c:yn /t:n,5 Install now
+key x
+nokeys
+key z
+> echo %errorlevel%
+keys
 # what it refuses
 > choice /c:yn /t:x,5 Wrong default
 > echo %errorlevel%

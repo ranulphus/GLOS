@@ -8076,6 +8076,106 @@ def nboot_fda_case(profile, card):
                                "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+def nboot_setup_text_case(profile, card):
+    """Phase G's on-PC installer (tools/ndos/SETUP.BAT on nfloppy.py's floppy, text in GLOS's shell, CHOICE and SET
+    /P): a PC with a blank hard disk started from the floppy. At the PC's own prompt, as a person types there
+    (glos type, the screen read by glos shot --text): SETUP stopped at its first question (0), the disk still
+    blank (CHOICE's answers for nobody at a keyboard are tests/shell/choice.txt's); then SETUP, disk 1, all of it, yes, the
+    name setuppc, the UK keyboard, yes: DISK INSTALL with /SET. The disk alone then starts the installed GLOS, its
+    GLOS.CFG with the name and the layout."""
+    import shutil
+    import time
+    tag = "nsetupt-" + profile
+    d = os.path.join(ROOT, "out", tag + "-img")
+    keys = os.path.join(d, "keys")
+    os.makedirs(keys, exist_ok=True)
+    for src, dst in (("hostkey", "HOSTKEY"), ("hostkey.pub", "HOSTKEY.pub"), ("AUTHKEYS", "AUTHKEYS")):
+        shutil.copyfile(os.path.join(ROOT, "tests/keys", src), os.path.join(keys, dst))
+    fimg, disk = os.path.join(d, "a.img"), os.path.join(d, "c.img")
+    mk = subprocess.run(["python3", "tools/ndos/nfloppy.py", fimg, "--keys", keys, "--name", "glos-setup"], cwd=ROOT,
+                        capture_output=True)
+    if os.path.exists(disk):
+        os.unlink(disk)
+    open(disk, "wb").truncate(130 * 16 * 63 * 512)     # (a blank disk of 64 MB)
+    checks, info = {"image": mk.returncode == 0}, ""
+    if not checks["image"]:
+        return "  %-22s FAIL image=%r" % (tag, (mk.stdout + mk.stderr).decode("latin-1")[-300:]), False
+    agent = Agent(tag + "a-" + card, profile, card, ["--hdd", disk, "--floppy", fimg], timeout=1500, files=False)
+
+    def screen():
+        return agent.ssh("glos shot --text")[1].replace("\r", "")
+
+    def until(text, limit=120):
+        t0 = time.time()
+        while time.time() - t0 < limit:
+            if text in screen():
+                return True
+            time.sleep(1)
+        return False
+
+    try:
+        checks["listen"] = agent.listening()
+        if checks["listen"]:
+            # (stopped at the first question: nothing written; CHOICE's answers for nobody at a keyboard are
+            # tests/shell/choice.txt's)
+            checks["prompt"] = until("A:\\>", 180)          # (the PC's own prompt, after AUTOEXEC.BAT: keys typed
+                                                    # before it are lost)
+            agent.ssh("glos type SETUP\\n")
+            checks["asks-disk"] = until("Which disk?")
+            agent.ssh("glos type 0")
+            checks["stop-unchanged"] = until("nothing was changed") and open(disk, "rb").read(512) == b"\0" * 512
+            until("A:\\>", 30)
+            steps = [("SETUP\\n", "Which disk?"), ("1", "How?"), ("2", "Erase it"), ("y", "name on the network"),
+                     ("setuppc\\n", "Keyboard?"), ("2", "Put GLOS there now")]
+            ok = True
+            for keys_, want in steps:
+                agent.ssh("glos type " + keys_)
+                if not until(want):
+                    ok = False
+                    info += " stuck-before=%r screen=%r" % (want, screen()[-300:])
+                    break
+            checks["questions"] = ok
+            if ok:
+                agent.ssh("glos type y")
+                t0 = time.time()
+                while time.time() - t0 < 600 and not re.search(r"GLOS-DISK install disk=80 .* ok=1", agent.log()):
+                    time.sleep(1)
+                checks["installed"] = re.search(r"GLOS-DISK install disk=80 .* ok=1", agent.log()) is not None \
+                    and "GLOS-DISK install settings=2" in agent.log() and until("press a key", 60)
+            agent.ssh("glos exit")
+            t0 = time.time()
+            while time.time() - t0 < 60 and "GLOS-EXIT code=" not in agent.log():
+                time.sleep(0.5)
+    except subprocess.TimeoutExpired:
+        checks["timeout-1"] = False
+    agent.proc.kill()
+    agent.proc.wait()
+    text = agent.log()
+    checks["clean-1"] = "GLOS-PANIC" not in text and "GLOS-REFUSE" not in text
+    if not checks.get("installed"):
+        bad = [k for k, v in checks.items() if not v]
+        return "  %-22s FAIL%s failed: %s" % (tag, info, " ".join(bad)), False
+    agent = Agent(tag + "b-" + card, profile, card, ["--hdd", disk], timeout=600, files=False)
+    try:
+        checks["from-disk"] = agent.listening()
+        if checks["from-disk"]:
+            cfg = agent.ssh("type C:\\GLOS\\GLOS.CFG")[1]
+            checks["settings"] = "hostname = setuppc" in cfg and "layout = uk" in cfg
+            if not checks["settings"]:
+                info += " cfg=%r" % cfg[-300:]
+            agent.ssh("glos exit")
+            t0 = time.time()
+            while time.time() - t0 < 60 and "GLOS-EXIT code=" not in agent.log():
+                time.sleep(0.5)
+    except subprocess.TimeoutExpired:
+        checks["timeout-2"] = False
+    agent.proc.kill()
+    agent.proc.wait()
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % (tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad) + info), \
+        not bad
+
+
 def nboot_setup_case(profile, card):
     """GLOS's setup floppy with no DOS (stage 5: tools/ndos/nfloppy.py, docs/floppy.md "With no DOS"): a PC with a
     blank hard disk started from it; tools/floppy/install.py --native --new-disk from the host puts GLOS on the
@@ -13898,6 +13998,9 @@ def main():
         if os.environ.get("NBOOT_MSDOS"):
             cases = [c[:2] + (32, True) for c in cases if c[0] == "bf6" and c[2] == 32]
         return 0 if all(r[1] for r in matrix(nboot_upgrade_case, cases, a.jobs)) else 1
+    if a.suite == "nboot" and os.environ.get("NBOOT_ONLY") == "setuptext":    # (the on-PC installer alone)
+        cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
+        return 0 if all(r[1] for r in matrix(nboot_setup_text_case, cases, a.jobs)) else 1
     if a.suite == "nboot" and os.environ.get("NBOOT_ONLY") == "setup":    # (the setup floppy with no DOS alone)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(nboot_setup_case, cases, a.jobs)) else 1
@@ -13920,6 +14023,7 @@ def main():
         res += matrix(nboot_floppy_case, cases, a.jobs)         # (from a drive of the floppies' numbers)
         res += matrix(nboot_fda_case, cases, a.jobs)            # (from the disk, a floppy drive as A: beside it)
         res += matrix(nboot_setup_case, cases, a.jobs)          # (the setup floppy with no DOS: the 486 for 13 min)
+        res += matrix(nboot_setup_text_case, cases, a.jobs)     # (... and its installer at the PC itself)
         res += matrix(nboot_dual_case, cases, a.jobs)           # (GLOS beside another system: the start-up menu)
         res += matrix(nboot_dual_case, [c + (True,) for c in cases if c[0] == "bf6"], a.jobs)  # (... beside MS-DOS 7.1)
         res += matrix(nboot_upgrade_case, [c + (f,) for c in cases for f in (16, 32) if c[0] == "bf6" or f == 16],

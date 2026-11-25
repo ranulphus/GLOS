@@ -1182,6 +1182,17 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   settings alone. The medium GLOS runs from is not written. ndual's case: a setting that doesn't exist and a value
   the schema refuses both refused; `/SET:net.hostname=dualpc /SET:region.layout=uk` in the new volume's copy; the
   floppy GLOS ran from unchanged.
+- **The on-PC installer (2026-11-25, native-dos; phase G: "text, in GLOS's shell, from the setup floppy
+  alone"):** tools/ndos/SETUP.BAT on nfloppy.py's floppy (its AUTOEXEC.BAT says to type SETUP), in GLOS's own
+  shell's batch language with CHOICE and SET /P (sdk/shell, built for it): DISK's listing; which disk; beside
+  what is there or all of it (erasing asked again); the PC's name; its keyboard; the last question; then `DISK n
+  INSTALL /FREE|/ERASE /SET:net.hostname=... /SET:region.layout=... /Y`, and a key to restart from the disk.
+  Every question has an answer for nobody at a keyboard (CHOICE's /T) that stops it, and CHOICE falls back to
+  that answer, never its first key, when input ends (tests/shell/choice.txt). `loopa-nboot`'s setuptext case
+  (NBOOT_ONLY=setuptext): at the PC's own prompt as a person types (glos type, glos shot --text), SETUP stopped
+  at its first question (the disk blank), then the whole install with the name setuppc and the UK keyboard; the
+  disk alone starts the installed GLOS, its GLOS.CFG with both: bf6 and 486 PASS. A DOS program's COMMAND.COM
+  (an agent job) can't run it: DISK is GLOS's own prompt's alone.
 
 ## N6: several DOS programs at once
 

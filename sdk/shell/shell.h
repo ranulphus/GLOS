@@ -152,6 +152,7 @@ struct sh {
         int yes, code;                  /* DELTREE: /Y; the exit code so far */
         char choices[40];               /* CHOICE: its keys (/C), ... */
         int sens;                       /* ... told apart by case (/S) */
+        int def;                        /* ... /T's key (0: none): the answer when nobody is at a keyboard */
         char var[64];                   /* SET /P: the variable, ... */
         char edit[128];                 /* ... and the line being typed */
         int nedit;

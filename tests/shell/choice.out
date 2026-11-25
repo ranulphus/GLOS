@@ -65,6 +65,16 @@ Nobody, no default [A,B]?A
 echo %errorlevel%
 1
 [[C:\>]]
+choice /c:yn /t:n,5 Install now
+Install now [Y,N]?(KEY?)
+(KEY x)
+(KEY?)
+(KEY z)
+N
+[[C:\>]]
+echo %errorlevel%
+2
+[[C:\>]]
 choice /c:yn /t:x,5 Wrong default
 <<CHOICE: /T's key isn't one of /C's
 >>[[C:\>]]

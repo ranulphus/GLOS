@@ -2,9 +2,10 @@
 """nfloppy.py OUT.img: GLOS's setup floppy with no DOS on it (docs/floppy.md, "With no DOS"; docs/v1/native-dos.md,
 N5). A FAT12 floppy of GLOS's own formatter whose boot sector loads GLOSLDR.SYS; in A:\\GLOS the kernel (packed),
 GLOS's own COMMAND.COM, a GLOS.CFG that names the PC, and KEYS\\ (a host key of the floppy's own, kept from one
-image to the next; AUTHKEYS: who may log in). Started from it, a PC runs GLOS with its network and SSH, and
-`tools/floppy/install.py --native` puts GLOS on its hard disk from another computer: GLOS's DISK command lays
-out and formats the disk and copies GLOS there, then the programs go over SFTP.
+image to the next; AUTHKEYS: who may log in), and SETUP.BAT (tools/ndos/SETUP.BAT: GLOS put on a hard disk from
+the PC itself, text in GLOS's shell: phase G's installer). Started from it, a PC runs GLOS with its network and
+SSH: SETUP at its prompt, or `tools/floppy/install.py --native` from another computer (GLOS's DISK command lays
+out and formats the disk and copies GLOS there, then the programs go over SFTP).
 
   tools/ndos/nfloppy.py build/floppy/nglos1440.img --keys build/floppy/keys [--name glos-setup] [--size 1440]
 
@@ -50,8 +51,9 @@ def main():
         open(cfg, "w", newline="").write("\r\n".join(lines) + "\r\n")
         bat = os.path.join(tmp, "AUTOEXEC.BAT")
         open(bat, "w", newline="").write("\r\n".join([
-            "@ECHO OFF", "ECHO.", "ECHO This PC runs GLOS from its setup floppy, with no DOS. From another computer,",
-            "ECHO in GLOS's checkout:", "ECHO.", "ECHO   tools/floppy/install.py --native %s.local --new-disk" % a.name,
+            "@ECHO OFF", "ECHO.", "ECHO This PC runs GLOS from its setup floppy, with no DOS. Type SETUP to put GLOS",
+            "ECHO on one of its hard disks. Or from another computer, in GLOS's checkout:",
+            "ECHO.", "ECHO   tools/floppy/install.py --native %s.local --new-disk" % a.name,
             "ECHO.", "ECHO (or --free, beside another system on the disk). Then take the floppy out and",
             "ECHO restart the PC.", "ECHO."]) + "\r\n")
         mkvol = os.path.join(tmp, "mkvol")
@@ -63,6 +65,7 @@ def main():
             [mkvol, out, "0", str(sectors), "GLOSSETUP", str(heads), "0"],
             ["mmd", "-i", out, "::GLOS", "::GLOS/KEYS", "::GLOS/KEYS/PKG"],
             ["mcopy", "-i", out, cfg, "::GLOS/GLOS.CFG"], ["mcopy", "-i", out, bat, "::AUTOEXEC.BAT"],
+            ["mcopy", "-i", out, os.path.join(ROOT, "tools/ndos/SETUP.BAT"), "::SETUP.BAT"],
         ] + [["mcopy", "-i", out, os.path.join(ROOT, src), "::" + dst] for src, dst in files]
         env = dict(os.environ, MTOOLS_SKIP_CHECK="1")
         for s in steps:

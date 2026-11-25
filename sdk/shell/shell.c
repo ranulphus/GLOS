@@ -1460,7 +1460,9 @@ static int choice_step(struct sh *s, int key)
         out(s, "\a");
         if (s->h->key && s->h->key(s->h->ctx) == SH_UNDER_WAY)
             return SH_UNDER_WAY;
-        at = 1;                                 /* (nobody to press another: the first) */
+        /* (nobody to press another, as when a job's input has ended: /T's answer, else the first; never a key the
+           batch file didn't name as the answer for no one, so a question whose /T says "stop" stops) */
+        at = s->tool.def ? choice_at(s, s->tool.def) : 1;
     }
     e[0] = s->tool.choices[at - 1], e[1] = '\r', e[2] = '\n', e[3] = 0;
     out(s, e);
@@ -1474,7 +1476,7 @@ static int cmd_choice(struct sh *s, int argc, char **argv)
     int i, n = 0, quiet = 0, def = 0, k;
     unsigned t = 0;
     sh_fmt(s->tool.choices, sizeof s->tool.choices, "%s", "YN");
-    s->tool.sens = 0;
+    s->tool.sens = 0, s->tool.def = 0;
     text[0] = 0;
     for (i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -1520,6 +1522,7 @@ static int cmd_choice(struct sh *s, int argc, char **argv)
         err(s, "CHOICE: /T's key isn't one of /C's\r\n");
         return 255;
     }
+    s->tool.def = def;
     n = sh_fmt(prompt, sizeof prompt, "%s", text);
     if (!quiet) {
         n += sh_fmt(prompt + n, sizeof prompt - (unsigned)n, "%s[", text[0] ? " " : "");
