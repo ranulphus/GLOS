@@ -136,6 +136,7 @@ static int remode_to(u8 mode)
     struct rmregs r;
     if ((session_bios_mode() & 0x7F) == (mode & 0x7F))
         return 0;
+    display_card_settle();                      /* (a program's stuck engine would hold the BIOS's writes: radeon.c) */
     memset(&r, 0, sizeof r);
     r.eax = mode & 0x7F;
     bios(&r, 0x10);

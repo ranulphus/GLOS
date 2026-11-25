@@ -312,6 +312,10 @@ static void radeon_settle(int surfaces)
         radeon_settle_regs(regs, pit2_wait, surfaces);
 }
 
+/* Before a mode set the BIOS makes for GLOS outside this file (a session's end puts its first mode back:
+   vm/session.c), which on a PC with no desktop is the only one: the P3's freeze at a kill was there. */
+void display_card_settle(void) { radeon_settle(0); }
+
 /* The desktop's mode set: 0, or -1 with why in the log. */
 static int mode_set(void)
 {
