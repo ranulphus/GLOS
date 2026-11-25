@@ -151,9 +151,11 @@ def memory_room():
 
 def runpy_cmd():
     """run.py, directly in the dev container, else through it (on the host network)."""
+    runpy = os.environ.get("LOOPA_RUNPY", os.path.join(MGA, "tools/loopa/run.py"))     # (LOOPA_RUNPY: a RetroGPU
+                                                # branch's run.py, the rest of RetroGPU from RETROGPU's main)
     if IN_CONTAINER:
-        return [sys.executable, os.path.join(MGA, "tools/loopa/run.py")]
-    return [os.path.join(MGA, "tools/dev"), "python3", os.path.join(MGA, "tools/loopa/run.py")]
+        return [sys.executable, runpy]
+    return [os.path.join(MGA, "tools/dev"), "python3", runpy]
 
 
 def power_off(name):
