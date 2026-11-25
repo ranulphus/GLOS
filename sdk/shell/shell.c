@@ -1,6 +1,6 @@
 /* GLOS's shell (shell.h; docs/v1/shell.md; PRD D50): DOS's commands and syntax, modernised.
  *
- * Built in: CD (CHDIR), a drive's letter, DIR [/W] [/B], COPY, MOVE, XCOPY, REN (RENAME), DEL (ERASE), DELTREE,
+ * Built in: CD (CHDIR), a drive's letter, DIR [/W] [/B], COPY, MOVE, XCOPY, REN (RENAME), DEL (ERASE), DELTREE, CHOICE,
  * MD (MKDIR), RD (RMDIR), TYPE, MORE, ECHO, SET, PATH, PROMPT, CLS, VER, EXIT, HISTORY, HELP, WHERE, START, and
  * what the host adds. A built-in's output goes to a file with > or >>.
  *
@@ -1428,11 +1428,197 @@ static int cmd_cd(struct sh *s, int argc, char **argv)
     return 0;
 }
 
+/* ---- CHOICE and SET /P (2026-11-25: phase G's installer, and DOS batch files with no FreeDOS CHOICE.COM)
+ *
+ * CHOICE [/C[:]keys] [/N] [/S] [/T[:]c,nn] [text]: MS-DOS 6's. The text, then "[Y,N]?" (unless /N), and a key
+ * from the list (any case, unless /S); the key is written and the line ended, and ERRORLEVEL is its place in the
+ * list (1 for the first), for IF ERRORLEVEL as from MS-DOS's CHOICE.COM. A key not in the list beeps. Ctrl+C:
+ * 0. With nobody at a keyboard, /T's key, else the first, as if typed. /T's time is not waited out: the host has
+ * no timed wait for a key yet, so at a keyboard CHOICE waits for one.
+ *
+ * SET /P name=prompt (or SET /P "name=prompt", which keeps a space at the prompt's end): the prompt, then a line
+ * typed (Backspace, Esc clears it, Enter ends it, Ctrl+C gives up) as the variable's value. An empty line, Ctrl+C, or nobody at a keyboard: the variable as it was, exit code 1. */
+static int choice_at(const struct sh *s, int key)
+{
+    int i;
+    for (i = 0; s->tool.choices[i]; i++)
+        if (s->tool.sens ? s->tool.choices[i] == key : upper(s->tool.choices[i]) == upper(key))
+            return i + 1;
+    return 0;
+}
+
+static int choice_step(struct sh *s, int key)
+{
+    char e[4];
+    int at;
+    if (key == 3) {
+        out(s, "^C\r\n");
+        s->level = 0;
+        return 0;
+    }
+    if (!(at = choice_at(s, key))) {
+        out(s, "\a");
+        if (s->h->key && s->h->key(s->h->ctx) == SH_UNDER_WAY)
+            return SH_UNDER_WAY;
+        at = 1;                                 /* (nobody to press another: the first) */
+    }
+    e[0] = s->tool.choices[at - 1], e[1] = '\r', e[2] = '\n', e[3] = 0;
+    out(s, e);
+    s->level = at;
+    return at;
+}
+
+static int cmd_choice(struct sh *s, int argc, char **argv)
+{
+    char text[SH_LINE], prompt[SH_LINE + 64];
+    int i, n = 0, quiet = 0, def = 0, k;
+    unsigned t = 0;
+    sh_fmt(s->tool.choices, sizeof s->tool.choices, "%s", "YN");
+    s->tool.sens = 0;
+    text[0] = 0;
+    for (i = 1; i < argc; i++) {
+        const char *a = argv[i];
+        if (a[0] == '/' && (upper(a[1]) == 'C') && (!a[2] || a[2] == ':' || a[2] != ' ')) {
+            const char *keys = a + 2 + (a[2] == ':');
+            if (!*keys && i + 1 < argc)
+                keys = argv[++i];               /* (/C YN) */
+            if (!*keys) {
+                err(s, "CHOICE: /C needs its keys\r\n");
+                return 255;
+            }
+            sh_fmt(s->tool.choices, sizeof s->tool.choices, "%s", keys);
+        } else if (a[0] == '/' && upper(a[1]) == 'N' && !a[2]) {
+            quiet = 1;
+        } else if (a[0] == '/' && upper(a[1]) == 'S' && !a[2]) {
+            s->tool.sens = 1;
+        } else if (a[0] == '/' && upper(a[1]) == 'T') {
+            const char *v = a + 2 + (a[2] == ':');
+            if (!v[0] || v[1] != ',' || v[2] < '0' || v[2] > '9') {
+                err(s, "CHOICE: /T:key,seconds\r\n");
+                return 255;
+            }
+            def = (unsigned char)v[0];
+            for (v += 2; *v >= '0' && *v <= '9'; v++)
+                t = t * 10 + (unsigned)(*v - '0');
+        } else if (a[0] == '/') {
+            sh_fmt(prompt, sizeof prompt, "CHOICE: invalid switch - %s\r\n", a);
+            err(s, prompt);
+            return 255;
+        } else {
+            n += sh_fmt(text + n, sizeof text - (unsigned)n, "%s%s", n ? " " : "", a);
+        }
+    }
+    (void)t;
+    if (!s->tool.sens)                          /* (as MS-DOS's: the keys shown and answered in capitals) */
+        for (k = 0; s->tool.choices[k]; k++)
+            s->tool.choices[k] = (char)upper((unsigned char)s->tool.choices[k]);
+    if (n >= 2 && text[0] == '"' && text[n - 1] == '"') {
+        memmove(text, text + 1, (size_t)n - 2);
+        text[n - 2] = 0;
+    }
+    if (def && !choice_at(s, def)) {
+        err(s, "CHOICE: /T's key isn't one of /C's\r\n");
+        return 255;
+    }
+    n = sh_fmt(prompt, sizeof prompt, "%s", text);
+    if (!quiet) {
+        n += sh_fmt(prompt + n, sizeof prompt - (unsigned)n, "%s[", text[0] ? " " : "");
+        for (k = 0; s->tool.choices[k]; k++)
+            n += sh_fmt(prompt + n, sizeof prompt - (unsigned)n, "%s%c", k ? "," : "", s->tool.choices[k]);
+        sh_fmt(prompt + n, sizeof prompt - (unsigned)n, "]?");
+    }
+    out(s, prompt);
+    if (s->h->key && s->h->key(s->h->ctx) == SH_UNDER_WAY) {
+        s->tool.step = choice_step;
+        s->key_for = 3;
+        return SH_UNDER_WAY;
+    }
+    return choice_step(s, def ? def : (unsigned char)s->tool.choices[0]);     /* (nobody at a keyboard) */
+}
+
+static int set_p_step(struct sh *s, int key)
+{
+    char e[2];
+    for (;;) {
+        if (key == 13) {
+            out(s, "\r\n");
+            if (!s->tool.nedit)
+                return 1;
+            s->tool.edit[s->tool.nedit] = 0;
+            var_set(s, s->tool.var, s->tool.edit);
+            return 0;
+        }
+        if (key == 3) {
+            out(s, "^C\r\n");
+            return 1;
+        }
+        if (key == 8 && s->tool.nedit) {
+            s->tool.nedit--;
+            out(s, "\b \b");
+        } else if (key == 27) {
+            for (; s->tool.nedit; s->tool.nedit--)
+                out(s, "\b \b");
+        } else if ((key >= 32 && key != 127) && s->tool.nedit < (int)sizeof s->tool.edit - 1) {
+            s->tool.edit[s->tool.nedit++] = (char)key;
+            e[0] = (char)key, e[1] = 0;
+            out(s, e);
+        }
+        if (s->h->key && s->h->key(s->h->ctx) == SH_UNDER_WAY)
+            return SH_UNDER_WAY;
+        out(s, "\r\n");                         /* (nobody at a keyboard any more: nothing set) */
+        return 1;
+    }
+}
+
+static int cmd_set_p(struct sh *s, const char *raw)
+{
+    const char *eq;
+    char quoted[SH_LINE];
+    size_t n;
+    if (raw[0] == '"') {                        /* SET /P "name=prompt ": to its last quote */
+        const char *end = strrchr(raw + 1, '"');
+        n = end ? (size_t)(end - raw - 1) : strlen(raw + 1);
+        if (n >= sizeof quoted)
+            n = sizeof quoted - 1;
+        memcpy(quoted, raw + 1, n);
+        quoted[n] = 0;
+        raw = quoted;
+    }
+    eq = strchr(raw, '=');
+    if (!eq || eq == raw) {
+        err(s, "SET /P name=prompt\r\n");
+        return 1;
+    }
+    n = (size_t)(eq - raw) < sizeof s->tool.var - 1 ? (size_t)(eq - raw) : sizeof s->tool.var - 1;
+    memcpy(s->tool.var, raw, n);
+    while (n && (s->tool.var[n - 1] == ' ' || s->tool.var[n - 1] == '\t'))
+        n--;
+    s->tool.var[n] = 0;
+    s->tool.nedit = 0;
+    out(s, eq + 1);
+    if (s->h->key && s->h->key(s->h->ctx) == SH_UNDER_WAY) {
+        s->tool.step = set_p_step;
+        s->key_for = 3;
+        return SH_UNDER_WAY;
+    }
+    out(s, "\r\n");
+    return 1;                                   /* (nobody at a keyboard: nothing typed) */
+}
+
 static int cmd_set(struct sh *s, int argc, char **argv, const char *raw)
 {
     const char *eq;
     int i;
     char line[300];
+    if (argc > 1 && same(argv[1], "/P")) {      /* SET /P name=prompt */
+        const char *p = strchr(raw, ' ');
+        while (p && *p == ' ')
+            p++;
+        p = p ? strchr(p, ' ') : 0;             /* (past /P) */
+        while (p && *p == ' ')
+            p++;
+        return cmd_set_p(s, p ? p : "");
+    }
     if (argc < 2) {
         for (i = 0; i < s->nvars; i++) {
             sh_fmt(line, sizeof line, "%s\r\n", s->vars[i]);
@@ -1466,7 +1652,7 @@ static int cmd_set(struct sh *s, int argc, char **argv, const char *raw)
 static const char *const builtins[] = { "CD", "CHDIR", "DIR", "COPY", "MOVE", "REN", "RENAME", "DEL", "ERASE", "MD",
     "MKDIR", "RD", "RMDIR", "TYPE", "ECHO", "SET", "PATH", "PROMPT", "CLS", "VER", "EXIT", "HISTORY", "HELP", "WHERE",
     "START", "DF", "DU", "CALL", "FOR", "GOTO", "IF", "PAUSE", "REM", "SHIFT", "VOL", "TRUENAME", "BREAK", "VERIFY",
-    "LH", "LOADHIGH", "CTTY", "ATTRIB", "XCOPY", "MORE", "DELTREE", 0 };
+    "LH", "LOADHIGH", "CTTY", "ATTRIB", "XCOPY", "MORE", "DELTREE", "CHOICE", 0 };
 
 static const char *const helps[] = {
     "CD [path]           the folder (of a drive: CD X:); X: changes drive",
@@ -1485,6 +1671,8 @@ static const char *const helps[] = {
     "TYPE file           a file shown",
     "ECHO [text]         text written",
     "SET [name[=value]]  the variables; PATH and PROMPT as SET does",
+    "SET /P name=prompt  a variable from a line typed",
+    "CHOICE [/C:keys] [/N] [/S] [/T:c,nn] [text]  a key asked for: ERRORLEVEL its place in keys",
     "CLS                 a clean window",
     "HISTORY             the lines typed before (Up and Down)",
     "WHERE program       where it is along PATH",
@@ -2265,6 +2453,8 @@ static int run_line(struct sh *s, char *line)
         r = cmd_more(s, argc, argv, source);
     } else if (same(argv[0], "DELTREE")) {
         r = cmd_deltree(s, argc, argv);
+    } else if (same(argv[0], "CHOICE")) {
+        r = cmd_choice(s, argc, argv);
     } else if (same(argv[0], "MD") || same(argv[0], "MKDIR") || same(argv[0], "RD") || same(argv[0], "RMDIR")) {
         char p[SH_PATH];
         int make = upper((unsigned char)argv[0][0]) == 'M';

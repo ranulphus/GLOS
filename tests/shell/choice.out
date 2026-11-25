@@ -1,0 +1,138 @@
+GLOS shell 1.0. HELP lists its commands.
+
+[[C:\>]]
+choice
+[Y,N]?(KEY?)
+(KEY n)
+N
+[[C:\>]]
+echo %errorlevel%
+2
+[[C:\>]]
+if errorlevel 2 echo two or more
+two or more
+[[C:\>]]
+choice /c:abc Pick one
+Pick one [A,B,C]?(KEY?)
+(KEY x)
+(KEY?)
+(KEY B)
+B
+[[C:\>]]
+echo %errorlevel%
+2
+[[C:\>]]
+if errorlevel 3 echo three
+[[C:\>]]
+if errorlevel 2 echo two
+two
+[[C:\>]]
+choice /c:yn /s Case counts
+Case counts [y,n]?(KEY?)
+(KEY Y)
+(KEY?)
+(KEY y)
+y
+[[C:\>]]
+echo %errorlevel%
+1
+[[C:\>]]
+choice /n /c:12 "Quiet:"
+Quiet:(KEY?)
+(KEY 2)
+2
+[[C:\>]]
+echo %errorlevel%
+2
+[[C:\>]]
+choice /c:yn Ctrl+C
+Ctrl+C [Y,N]?(KEY?)
+(KEY CTRLC)
+^C
+[[C:\>]]
+echo %errorlevel%
+0
+[[C:\>]]
+choice /c:ynq /t:q,5 Nobody here
+Nobody here [Y,N,Q]?Q
+[[C:\>]]
+echo %errorlevel%
+3
+[[C:\>]]
+choice /c:ab Nobody, no default
+Nobody, no default [A,B]?A
+[[C:\>]]
+echo %errorlevel%
+1
+[[C:\>]]
+choice /c:yn /t:x,5 Wrong default
+<<CHOICE: /T's key isn't one of /C's
+>>[[C:\>]]
+echo %errorlevel%
+255
+[[C:\>]]
+choice /z
+<<CHOICE: invalid switch - /z
+>>[[C:\>]]
+choice /t:y
+<<CHOICE: /T:key,seconds
+>>[[C:\>]]
+set /p "name=Name of this PC: "
+Name of this PC: (KEY?)
+(KEY m)
+m(KEY?)
+(KEY y)
+y(KEY?)
+(KEY x)
+x(KEY?)
+(KEY BS)
+ (KEY?)
+(KEY p)
+p(KEY?)
+(KEY c)
+c(KEY?)
+(KEY ENTER)
+
+[[C:\>]]
+echo [%name%]
+[mypc]
+[[C:\>]]
+set /p name=Again: 
+Again:(KEY?)
+(KEY a)
+a(KEY?)
+(KEY ESC)
+ (KEY?)
+(KEY ENTER)
+
+[[C:\>]]
+echo [%name%] %errorlevel%
+[mypc] 1
+[[C:\>]]
+set /p other=Two words: 
+Two words:(KEY?)
+(KEY a)
+a(KEY?)
+(KEY  )
+ (KEY?)
+(KEY b)
+b(KEY?)
+(KEY ENTER)
+
+[[C:\>]]
+echo [%other%]
+[a b]
+[[C:\>]]
+set /p third=Nobody: 
+Nobody:
+[[C:\>]]
+echo [%third%] %errorlevel%
+[%third%] 1
+[[C:\>]]
+set /p
+<<SET /P name=prompt
+>>[[C:\>]]
+set /p =x
+<<SET /P name=prompt
+>>[[C:\>]]
+

@@ -150,6 +150,11 @@ struct sh {
         const char *at;                 /* ... the one being done */
         unsigned long pos;              /* MORE: where its next page begins */
         int yes, code;                  /* DELTREE: /Y; the exit code so far */
+        char choices[40];               /* CHOICE: its keys (/C), ... */
+        int sens;                       /* ... told apart by case (/S) */
+        char var[64];                   /* SET /P: the variable, ... */
+        char edit[128];                 /* ... and the line being typed */
+        int nedit;
     } tool;
 };
 

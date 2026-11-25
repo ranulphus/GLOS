@@ -366,8 +366,14 @@ int main(int argc, char **argv)
                 fclose(f);
             }
         } else if (!strncmp(line, "key ", 4)) {
-            printf("(KEY %c)\n", arg[0]);
-            sh_key(&sh, arg[0]);
+            /* (a character; or ENTER, BS, ESC, CTRLC: SET /P's line, CHOICE's Ctrl+C) */
+            int k = !strcmp(arg, "ENTER") ? 13 : !strcmp(arg, "BS") ? 8 : !strcmp(arg, "ESC") ? 27
+                    : !strcmp(arg, "CTRLC") ? 3 : (unsigned char)arg[0];
+            if (arg[0] && arg[1])
+                printf("(KEY %s)\n", arg);
+            else
+                printf("(KEY %c)\n", arg[0]);
+            sh_key(&sh, k);
         } else if (!strcmp(line, "stop")) {
             printf("(CTRL+C)\n");
             stopped = 1;

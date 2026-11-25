@@ -228,6 +228,8 @@ DU [folder] [/S]    what a folder's files take, with all under it
 TYPE file           a file shown
 ECHO [text]         text written
 SET [name[=value]]  the variables; PATH and PROMPT as SET does
+SET /P name=prompt  a variable from a line typed
+CHOICE [/C:keys] [/N] [/S] [/T:c,nn] [text]  a key asked for: ERRORLEVEL its place in keys
 CLS                 a clean window
 HISTORY             the lines typed before (Up and Down)
 WHERE program       where it is along PATH

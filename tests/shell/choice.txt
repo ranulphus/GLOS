@@ -1,0 +1,60 @@
+# CHOICE and SET /P (sdk/shell, 2026-11-25: the setup floppy's installer, and DOS batch files natively): CHOICE
+# as MS-DOS 6's (ERRORLEVEL the key's place, for IF ERRORLEVEL too); SET /P a line typed.
+> choice
+key n
+> echo %errorlevel%
+> if errorlevel 2 echo two or more
+> choice /c:abc Pick one
+key x
+key B
+> echo %errorlevel%
+> if errorlevel 3 echo three
+> if errorlevel 2 echo two
+> choice /c:yn /s Case counts
+key Y
+key y
+> echo %errorlevel%
+> choice /n /c:12 "Quiet:"
+key 2
+> echo %errorlevel%
+> choice /c:yn Ctrl+C
+key CTRLC
+> echo %errorlevel%
+nokeys
+> choice /c:ynq /t:q,5 Nobody here
+> echo %errorlevel%
+> choice /c:ab Nobody, no default
+> echo %errorlevel%
+keys
+# what it refuses
+> choice /c:yn /t:x,5 Wrong default
+> echo %errorlevel%
+> choice /z
+> choice /t:y
+# SET /P: typed, Backspace and Esc on the way; an empty line; nobody at a keyboard
+> set /p "name=Name of this PC: "
+key m
+key y
+key x
+key BS
+key p
+key c
+key ENTER
+> echo [%name%]
+> set /p name=Again: 
+key a
+key ESC
+key ENTER
+> echo [%name%] %errorlevel%
+> set /p other=Two words: 
+key a
+key  
+key b
+key ENTER
+> echo [%other%]
+nokeys
+> set /p third=Nobody: 
+> echo [%third%] %errorlevel%
+keys
+> set /p
+> set /p =x
