@@ -5,11 +5,11 @@ Every setting of GLOS, a page for each kind, the pages listed at the left. Type 
 takes effect: at once, when a program next starts, or when GLOS next starts.
 
 **OK** keeps your changes and closes, **Apply** keeps them and stays, **Cancel** forgets them. A new screen
-mode is tried for fifteen seconds and kept only if you say so, in case the monitor cannot show it.
+mode or refresh rate is tried for fifteen seconds and kept only if you say so, in case the monitor cannot show it.
 
 | Page | What is there |
 |---|---|
-| Display | The screen's size and colours, smooth text, the drawing engine |
+| Display | The screen's size and colours, its refresh rate, smooth text, the drawing engine |
 | Input | How fast keys repeat, the pointer's speed, the double-click time; a place to try them |
 | Joystick | Game pads and how their sticks and buttons become a joystick's; the pads as they move |
 | USB | Whether GLOS runs the USB ports itself |
@@ -27,6 +27,7 @@ mode is tried for fifteen seconds and kept only if you say so, in case the monit
 | Shell | The command line and what DOS programs get as COMMAND.COM |
 | File Types | Which program opens which kind of file |
 | Programs | A DOS program's own settings: see [DOS programs and games](DOSPROGS.MD) |
+| Start-up | The start-up menu of a PC that starts GLOS by itself: what it starts and how long it waits |
 | Secrets | The store of passwords that programs keep, and its master password |
 
 The Start menu finds these pages by name: type "sound" or "desktop" there.
@@ -59,3 +60,12 @@ The same list is the command `DEVICES` at GLOS's prompt.
 
 The same settings are lines in the file GLOS.CFG, for when there is no desktop to change them from: see
 [Settings](SETTINGS.MD).
+
+## The refresh rate
+
+**Refresh rate** on the Display page sets how many times a second the screen is drawn: 60, 70, 75 or 85, or
+*auto* for what the video card does by itself. A higher rate flickers less on a CRT monitor; a flat panel is best
+left at 60 or auto. GLOS can set it only where the card's BIOS knows how (VBE 3.0), and never above what the
+monitor says it takes. Under the settings, **Now:** shows the rate the card was set to; with none shown, the card
+uses its own.
+
