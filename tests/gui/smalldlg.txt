@@ -2,6 +2,8 @@
 # "Don't ask again" box: Shift+Tab to the box, Space, and No (the app gets No and the box's state); About (its
 # icon, name, version, copyright, licence, its credit line and the toolkit's fonts' and icons'); Folder from
 # C:\GUI: the tree open at it, New folder makes NEWDIR there and chooses it, OK.
+# (The tree's scrollbar masked in its shots: how many folders C: has above C:\GUI, scrolled out of sight, sizes
+# its thumb; a native disk has \GLOS too. 2026-11-25.)
 run GUITEST.EXE smalldlg
 wait "GUITEST Small dialogs"
 key alt+m
@@ -18,13 +20,13 @@ key enter
 gone "About GUITEST"
 key alt+f
 wait "Choose a folder"
-shot folder "Choose a folder"
+shot folder "Choose a folder" 313 6 18 204
 key alt+n
 wait "New folder"
 type NEWDIR
 key enter
 gone "New folder"
-shot folder-new "Choose a folder"
+shot folder-new "Choose a folder" 313 6 18 204
 key tab enter
 gone "Choose a folder"
 key alt+f4
