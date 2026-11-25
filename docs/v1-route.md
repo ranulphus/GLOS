@@ -335,27 +335,29 @@ two command sets that don't match). Before phase C, because the Terminal is one 
 - The ALS100 goes in C, and an ES1373 or CT5880 card in B or F.
 - No new 86Box models.
 
-**Where H stands (2026-11-23, midnight; the detail is `docs/v1/phase-h.md`):**
+**Where H stands (2026-11-25; the detail is `docs/v1/phase-h.md`):**
 
 | Part | Built | Proven |
 |---|---|---|
-| EHCI hand-off | main | bench B's controller; F's and G's owed |
-| CMI8738 | main; its legacy FM and MPU-401 on phase-h | Loop A; bench B's real chip plays (not yet listened to) |
-| ES1371, ES1373, CT5880 | main | Loop A (playback); a card in a bench owed |
-| Intel ICH AC'97 | main | nowhere yet (bench E, if its controller is one) |
-| VIA 686 AC'97 | main | nowhere yet |
-| VIA VT8233/8235 AC'97 | phase-h | nowhere yet (bench G, a new Pentium 4 with a G550) |
-| The mixer's watchdog for lost edges | main | Loop A (it was 86Box's keyboard controller wiping IRQ 12) |
-| AMD PCnet-PCI | main | Loop A |
-| DEC 21140, 21143 | main | Loop A |
-| Write-combining: Rage 128 Pro, G550 | main | benches A and G |
-| ESS AudioDrive | phase-h | Loop A (ES1688); bench D's ES1887 owed |
-| ISA Plug and Play, `glos pnp` | phase-h | host model; Loop A against the Crystal cards |
-| PnP Sound Blaster 16 and ALS100 | phase-h | nowhere yet (bench C, once the ALS100 is fitted) |
+| EHCI hand-off | main | benches B, F; G's owed |
+| CMI8738, its legacy FM and MPU-401 | main | Loop A; bench B's real chip plays (not yet listened to) |
+| ES1371, ES1373, CT5880 | main | Loop A; bench F's CT5880 plays (its codec reset and converter fixes) |
+| Intel ICH AC'97 | main | Loop A only |
+| VIA 686 AC'97 | main | Loop A only |
+| VIA VT8233/8235 AC'97 | main | bench G plays (not yet listened to) |
+| The mixer's watchdog for lost edges | main | Loop A |
+| Shared lines: GLOS's own drivers chained (D2, first half); quiet drivers for EHCI, SMBus and the sound chips | main | Loop A (`es1371-share`); benches B and F |
+| AMD PCnet-PCI; DEC 21140, 21143 | main | Loop A |
+| Write-combining: Rage 128 Pro, G550, Radeon 7000 and 7500 | main | benches A, G, B |
+| ESS AudioDrive (its FM as an OPL3) | main | Loop A (ES1688); bench D's ES1887 owed |
+| ISA Plug and Play, `glos pnp`, the Devices page's PnP cards | main and phase-h | host model; Loop A's Crystal cards |
+| PnP Sound Blaster 16 and ALS100 | main | nowhere yet (bench C, once the ALS100 is fitted) |
+| A native boot's jumpered SB16 (no BLASTER) | phase-h | Loop A natively |
 | OPTi 82C93x | planned | - |
+| D2's second half (a line shared with a DOS driver) | planned | - |
 
-Owed by the owner's hands: GLOS on benches D and E (their setup floppies are made), the ALS100 into C, an
-ES1373 or CT5880 card into B or F, and a listen to bench B's sound.
+Owed by the owner's hands: GLOS on benches D and E (their setup floppies are made), the ALS100 into C, and a
+listen to benches B, F and G.
 
 **The owner's decision (2026-11-06):** a phase for the hardware GLOS drives. It holds the drivers the benches and
 typical PCs of the period need. Its contents are settled after a hardware compatibility audit, and nothing is built

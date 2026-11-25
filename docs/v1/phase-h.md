@@ -195,8 +195,10 @@ on many cards and boards of 1995-1999, bench D's among them (an ES1887). As a So
 The mixer tries it after a Crystal chip and before the PCI cards. The virtual Sound Blaster then offers sessions
 "A220 I5 D1 T6": an SB16 doing its 16-bit transfers on the 8-bit channel, as an SB16 does when BLASTER has no H.
 
-- **Not yet:** recording (the first DMA channel plays or records, not both; full duplex needs the second); its FM
-  (ESFM) and MPU-401 for `midi.c`; setting up the PnP chips itself (the BIOS or ESS's DOS program does it now).
+- **Its FM** answers as an OPL3 at 388h, where `midi.c` looks at every start: Loop A's ES1688 case finds it
+  (`GLOS-MIDI fm port=388 chip=opl3`) and MIDI Studio plays through it (2026-11-25).
+- **Not yet:** recording (the first DMA channel plays or records, not both; full duplex needs the second, which
+  the ES1868 and later have and 86Box's ES1688 hasn't); its MPU-401; both wait for bench D's ES1887.
 - **Tests:** Loop A's audio suite gains bf6 + G200 + 86Box's `ess_es1688` (BLASTER "A220 I5 D1 T4"). The Sound
   Recorder must say it can't record. Bench D's ES1887 is owed.
 
