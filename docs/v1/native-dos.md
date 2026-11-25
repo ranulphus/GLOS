@@ -1054,8 +1054,13 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   GLOS's ARPL); there the routine is called far (AX the events, BX the buttons, CX DX the position, SI DI the
   mickeys' totals, interrupts off) and its RETF reaches another ARPL that puts the interrupted code back; events
   meanwhile wait for its return. MOUSEHND (tests/dos/mousehnd.c) in loopa-input: natively under GLOS's driver and
-  hosted under CuteMouse, the move and the left press and release reach its routine. Next: the cursor drawn
-  (text mode first).
+  hosted under CuteMouse, the move and the left press and release reach its routine. **Step 3 (the same day):** the text cursor: the cell
+  under the mouse on the BIOS's active page written as (word AND screen mask) XOR cursor mask (77FFh, 7700h by
+  default; 0Ah sets them), put back when the mouse leaves or the cursor is hidden if the cell still holds the
+  driver's word (a program's own writing kept); at a session's end the cursor is taken off and the program's routine
+  forgotten (a killed program's routine would otherwise be called next). MOUSEHND cursor in loopa-input: native and
+  hosted (CuteMouse) alike. Next: the graphics cursor (09h's shapes; modes 4-6, 0Dh-13h), for programs that let the
+  driver draw it.
 - **Long names:** in the personality (N2, 71xxh). No DOSLFN.
 - **The keyboard's layout:** `[region] layout` reaches the desktop and apps today; native, the machine's INT 16h
   and INT 09h see the layout's characters too. No KEYB.

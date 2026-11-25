@@ -148,6 +148,7 @@ static inline u8 vm_rd8(u32 lin) { return *vm_ptr(lin); }
 static inline u16 vm_rd16(u32 lin) { return (u16)(vm_rd8(lin) | (vm_rd8(lin + 1) << 8)); }
 static inline u32 vm_rd32(u32 lin) { return vm_rd16(lin) | ((u32)vm_rd16(lin + 2) << 16); }
 static inline void vm_wr8(u32 lin, u8 v) { *vm_ptr(lin) = v; }
+static inline void vm_wr16(u32 lin, u16 v) { *(volatile u16 *)vm_ptr(lin) = v; }  /* (one word write: a text cell) */
 
 /* the low 8 and 16 bits of a register in a trapframe */
 #define SET16(r, v) ((r) = ((r) & 0xFFFF0000u) | ((v) & 0xFFFFu))
@@ -184,6 +185,7 @@ void vmouse_int33(struct dos_regs86 *r);
 void vmouse_aux(u8 b, int wheel);               /* a PS/2 mouse byte (vkbc.c) */
 void vmouse_move(int dx, int dy, int buttons);  /* an injected move (buttons -1: as they were) */
 int  vmouse_on(void);
+void vmouse_session_end(void);                  /* a session ended: the mouse's cursor taken off the screen */
 int  vmouse_event(struct dos_regs86 *r, u32 *handler);  /* INT 74h's ARPL: the routine's call, if one is due */
 void vmouse_event_done(void);                   /* ... and its return */
 void vdos_mouse_irq(void);                      /* vdos.c: INT 74h to GLOS's ARPL, IRQ 12 unmasked */

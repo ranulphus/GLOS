@@ -31,12 +31,6 @@
 #include "cache.h"
 #include "vdos.h"
 
-static void vm_wr16(u32 lin, u32 v)
-{
-    vm_wr8(lin, (u8)v);
-    vm_wr8(lin + 1, (u8)(v >> 8));
-}
-
 static struct dos_m vd;
 static struct ata_dev *cdev;
 static unsigned long cbase;

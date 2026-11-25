@@ -4042,6 +4042,10 @@ def input_case(profile, card, mouse_too):
             # far routine (GLOS's INT 33h natively, vmouse.c's step 2; CuteMouse hosted)
             checks["mouse-handler"] = job("C:\\TEST\\MOUSEHND.EXE", "HX-MOUSEHND ready", 1,
                                           "glos key " + MOUSE_KEYS) == (0, 0)
+            # The text cursor (04h, 01h, 02h; the cells read back): drawn, moved and taken away
+            rc, out, _ = agent.ssh("C:\\TEST\\MOUSEHND.EXE cursor")
+            checks["mouse-cursor"] = rc == 0
+            info += " " + " ".join(l.strip() for l in out.splitlines() if "MOUSECUR" in l)
         else:                                   # no mouse, so no program has it on
             rc, _, err = agent.ssh("glos mouse 5 5")
             checks["mouse-off"] = rc == 1 and "mouse" in err

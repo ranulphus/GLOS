@@ -9,7 +9,13 @@
  * vector (INT 74h, set at the first reset, the line unmasked as a driver unmasks it) is an ARPL of GLOS's (vdos.c):
  * there the program's routine is called far with the events in AX, the buttons in BX, the position in CX and DX,
  * the mickeys' running totals in SI and DI, interrupts off; its RETF comes back to another ARPL, which puts the
- * interrupted code's registers back. Events that come meanwhile wait for its return. No cursor is drawn yet.
+ * interrupted code's registers back. Events that come meanwhile wait for its return.
+ *
+ * The cursor (step 3): in a text mode, the software cursor a Microsoft driver draws by default: the cell under the
+ * mouse, on the BIOS's active page, written as (its word AND the screen mask) XOR the cursor mask (77FFh, 7700h:
+ * the character kept, its colours turned round; 0Ah sets them); put back as it was when the mouse leaves it or the
+ * cursor is hidden, if the cell still holds what the driver wrote (a program that wrote there since keeps its
+ * own). Taken away at a session's end. Not drawn in graphics modes yet.
  *
  * Positions are in the virtual screen a Microsoft driver gives each BIOS mode: 640 wide in every text and CGA/EGA
  * mode (a text cell 8 or 16 wide, 8 high, positions in its multiples), 200, 350 or 480 high; mode 13h's 320 too is
@@ -40,6 +46,10 @@ static struct {
     u16 pend;                           /* events not yet given to the handler */
     u8 in_handler;
     int rawx, rawy;                     /* the mickeys' running totals (the handler's SI and DI) */
+    u16 smask, cmask;                   /* the text cursor's screen and cursor masks (0Ah) */
+    u8 tc_drawn;                        /* the text cursor is on the screen: at tc_off, tc_word over tc_save */
+    u32 tc_off;
+    u16 tc_save, tc_word;
 } m;
 static u32 said;                        /* (functions seen, first time each: what programs ask of it) */
 
@@ -76,6 +86,46 @@ static int line_open(void) { return !(vpic_imr(&vm.pic) & ((1u << 12) | (1u << 2
 static int px_x(void) { return m.x - m.x % m.cellx; }
 static int px_y(void) { return m.y - m.y % m.celly; }
 
+/* The text cursor where it should be now: taken off its old cell (put back if that still holds the driver's
+   word), drawn on the new one; nothing in a graphics mode or while hidden. Interrupts off. */
+static void cursor(void)
+{
+    u8 mode = vm_rd8(0x449) & 0x7F;
+    int text = mode <= 3 || mode == 7, want = m.on && m.shown >= 0 && text && mode == m.mode;
+    u32 off = 0;
+
+    if (want) {
+        int cols = vm_rd16(0x44A) ? vm_rd16(0x44A) : 80, col = m.x / m.cellx, row = m.y / m.celly;
+        off = (mode == 7 ? 0xB0000u : 0xB8000u) + vm_rd16(0x44E) + (u32)(row * cols + col) * 2;
+    }
+    if (m.tc_drawn && (!want || off != m.tc_off)) {
+        if (m.mode == mode && vm_rd16(m.tc_off) == m.tc_word)
+            vm_wr16(m.tc_off, m.tc_save);
+        m.tc_drawn = 0;
+    }
+    if (want && !m.tc_drawn) {
+        m.tc_save = vm_rd16(off);
+        m.tc_word = (u16)((m.tc_save & m.smask) ^ m.cmask);
+        vm_wr16(off, m.tc_word);
+        m.tc_off = off;
+        m.tc_drawn = 1;
+    }
+}
+
+/* A session ended (session.c): the cursor taken off the screen and hidden, and the program's routine forgotten
+   (its code is gone: a program killed, or one that never took its routine away, would be called there next). */
+void vmouse_session_end(void)
+{
+    u32 f = irq_save();
+
+    if (m.on) {
+        m.shown = -1;
+        cursor();
+    }
+    m.handler = 0, m.hmask = 0, m.pend = 0, m.in_handler = 0;
+    irq_restore(f);
+}
+
 /* The mouse moved by dx, dy mickeys (down and right positive), its buttons now b (bit 0 left, 1 right, 2 middle;
    -1: as they were). Interrupt context or the VM's: with interrupts off. */
 void vmouse_move(int dx, int dy, int b)
@@ -98,6 +148,8 @@ void vmouse_move(int dx, int dy, int b)
     }
     m.x = clampi(m.x, m.minx, m.maxx);
     m.y = clampi(m.y, m.miny, m.maxy);
+    if (m.tc_drawn || m.shown >= 0)
+        cursor();
     if (b >= 0) {
         for (i = 0; i < 3; i++) {
             u8 bit = (u8)(1u << i);
@@ -173,6 +225,9 @@ static void reset(void)
 {
     u32 f = irq_save();
 
+    m.shown = -1;
+    cursor();                           /* (off the screen first, while the old mode's geometry holds) */
+    m.smask = 0x77FF, m.cmask = 0x7700;
     memset(&m.press, 0, sizeof m.press), memset(&m.release, 0, sizeof m.release);
     geometry();
     m.x = (m.maxx + 1) / 2, m.y = (m.maxy + 1) / 2, m.fx = m.fy = 0;
@@ -204,7 +259,8 @@ void vmouse_int33(struct dos_regs86 *r)
         kprintf("GLOS-MOUSE int33 ax=%02x first\n", ax);
     }
     if (m.on && (vm_rd8(0x449) & 0x7F) != m.mode && ax != 0 && ax != 0x21) {
-        u32 f = irq_save();             /* (a mode set since: the virtual screen of the new one) */
+        u32 f = irq_save();             /* (a mode set since: the virtual screen of the new one; the old */
+        m.tc_drawn = 0;                 /* screen and the cursor on it are gone) */
         geometry();
         m.x = clampi(m.x, m.minx, m.maxx), m.y = clampi(m.y, m.miny, m.maxy);
         irq_restore(f);
@@ -216,18 +272,23 @@ void vmouse_int33(struct dos_regs86 *r)
         r->ax = 0xFFFF, r->bx = 2;
         break;
     case 0x01:
-        if (m.shown < 0)
+    case 0x02: {
+        u32 f = irq_save();
+        if (ax == 1 && m.shown < 0)
             m.shown++;
+        else if (ax == 2)
+            m.shown--;
+        cursor();
+        irq_restore(f);
         break;
-    case 0x02:
-        m.shown--;
-        break;
+    }
     case 0x03:
         r->bx = m.buttons, r->cx = (unsigned)px_x(), r->dx = (unsigned)px_y();
         break;
     case 0x04: {
         u32 f = irq_save();
         m.x = clampi((short)r->cx, m.minx, m.maxx), m.y = clampi((short)r->dx, m.miny, m.maxy), m.fx = m.fy = 0;
+        cursor();
         irq_restore(f);
         break;
     }
@@ -248,6 +309,7 @@ void vmouse_int33(struct dos_regs86 *r)
             m.minx = lo, m.maxx = hi, m.x = clampi(m.x, lo, hi);
         else
             m.miny = lo, m.maxy = hi, m.y = clampi(m.y, lo, hi);
+        cursor();
         irq_restore(f);
         break;
     }
@@ -264,6 +326,21 @@ void vmouse_int33(struct dos_regs86 *r)
         irq_restore(f);
         if (m.handler && m.hmask)
             vdos_mouse_irq();
+        break;
+    }
+    case 0x0A: {                        /* the text cursor: BX 0 a software one, CX the screen mask, DX the cursor's */
+        u32 f = irq_save();
+        if (!r->bx) {
+            u8 shown = m.tc_drawn;
+            int keep = m.shown;
+            m.shown = -1;
+            cursor();
+            m.smask = (u16)r->cx, m.cmask = (u16)r->dx;
+            m.shown = keep;
+            if (shown)
+                cursor();
+        }
+        irq_restore(f);
         break;
     }
     case 0x0F:

@@ -293,6 +293,8 @@ static void end(const char *why)
         bios(&r, 0x21);
         ses.env_seg = 0;
     }
+    vmouse_session_end();                       /* (GLOS's INT 33h: its cursor off the program's screen, its routine
+                                                   forgotten; before the card is settled for the mode set) */
     display_card_settle();                      /* (a Radeon's engine looked at even with no mode to set: a program
                                                    that set text mode itself could leave it stuck for the next one,
                                                    the P3 at 20:55, 2026-11-25) */
