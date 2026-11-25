@@ -327,6 +327,8 @@ static void status_lines(const struct dev *d, char *a, char *b, size_t room)
             snprintf(b, room, "%s.", d->why);
     } else if (!strcmp(d->state, "quiet")) {
         snprintf(a, room, "%s", GUI_T("Kept quiet: no driver; GLOS keeps its interrupts off."));
+    } else if (!strcmp(d->state, "none") && !strncmp(d->id, "pnp", 3)) {
+        snprintf(a, room, "%s", GUI_T("Not in use: nothing has set this Plug and Play device up."));
     } else if (!strcmp(d->state, "none")) {
         snprintf(a, room, "%s", GUI_T("No driver: GLOS has none for this kind yet."));
     } else {
@@ -435,6 +437,9 @@ static void info(void)
         else if (d->usb)
             snprintf(t[k++], sizeof t[0], GUI_T("USB port %s, %s speed, under the controller %s"), strchr(d->id, ':') + 1,
                      !strcmp(d->speed, "low") ? GUI_T("low") : GUI_T("full"), d->parent);
+        else if (!strncmp(d->id, "pnp", 3) && strchr(d->id, '.'))   /* (pnpCSN.LDN: devlist.c) */
+            snprintf(t[k++], sizeof t[0], GUI_T("ISA Plug and Play card %.*s, its device %s"),
+                     (int)(strchr(d->id, '.') - d->id - 3), d->id + 3, strchr(d->id, '.') + 1);
         else
             snprintf(t[k++], sizeof t[0], GUI_T("Built into the PC, or an ISA card (%s)"), d->id);
         status_lines(&shown, a, b, sizeof a);
