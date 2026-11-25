@@ -383,10 +383,13 @@ void mm_fault_note(u32 lin)
 }
 
 /* (A user address alone: the kernel's own entries are never changed through these; one that tries is a bug
-   found, and named with its caller.) */
+   found, and named with its caller. The kernel's are C0000000h-DFFFFFFFh and the page tables' window from
+   FFC00000h; E0000000h-FFBFFFFFh is the clients' PCI window, where DPMI 0800h maps a BAR at its own address
+   (supervisor.md §4): refusing it, as this did at first, broke every mapping of a BAR up there: bench F's X550's
+   registers at E9000000h, 2026-11-25.) */
 static int kernel_lin(u32 lin, const char *what, void *from)
 {
-    if (lin < 0xC0000000u)
+    if (lin < 0xC0000000u || (lin >= 0xE0000000u && lin < RECURSIVE))
         return 0;
     kprintf("GLOS-WARN mm-kernel-lin %s lin=%p from=%p\n", what, lin, from);
     return 1;
