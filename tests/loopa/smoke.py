@@ -20,6 +20,7 @@ it is imported) and hosted ones go side by side."""
 import argparse
 import concurrent.futures
 import os
+import shutil
 import random
 import re
 import subprocess
@@ -39,7 +40,10 @@ PROFILES = {
     "es1371-share": ("bf6", "ne2kpci", "g200", 16, False, "es1371", " /SHAREIRQ"),
 }
 GUI_SCRIPT = "calc"                             # (a short one: the Calculator opened, sums typed, shot, closed)
-FLOPPY_ROOM = 607232                            # (GLOSK.PAK on the 720 KB setup floppy: loopa-floppy's room)
+# (the kernel's room: the native setup floppy at 1.2 MB, the smallest disk G3 keeps (the owner's plan, 2026-11-25:
+# 720 KB dropped, and with it the hosted FreeDOS floppy's 607,232 bytes); made by tools/ndos/nfloppy.py, which fails
+# if the files don't fit)
+FLOPPY_KB = 1200
 # APITEST's cases that fail natively for a reason known and owed, shown on the step's line (never hidden): a case
 # that starts to pass is said too, so the entry goes.
 APITEST_KNOWN_NATIVE = {}               # (fs-watch, until 2026-11-24's kernel/dos/watch.c: long-name calls' paths)
@@ -360,9 +364,20 @@ def main():
     t0 = time.time()
     pak = os.path.join(ROOT, "build", "kernel", "GLOSK.PAK")
     size = os.path.getsize(pak) if os.path.exists(pak) else -1
-    room_ok = 0 < size <= FLOPPY_ROOM
-    print("smoke-host floppy-room %s GLOSK.PAK %d of %d" % ("PASS" if room_ok else "FAIL", size, FLOPPY_ROOM),
-          flush=True)
+    keys, img = os.path.join(ROOT, "out", "smoke-keys"), os.path.join("out", "smoke-nf%d.img" % FLOPPY_KB)
+    os.makedirs(keys, exist_ok=True)
+    for src, dst in (("hostkey", "HOSTKEY"), ("AUTHKEYS", "AUTHKEYS")):
+        shutil.copyfile(os.path.join(ROOT, "tests", "keys", src), os.path.join(keys, dst))
+    import jobs                                 # (the parent's: not native, only its in_dev here)
+    mk = subprocess.run(jobs.in_dev(["sh", "-c", "python3 tools/ndos/nfloppy.py %s --keys out/smoke-keys --size %d --quiet "
+                                     "&& MTOOLS_SKIP_CHECK=1 mdir -i %s ::/ | grep \"bytes free\"" % (img, FLOPPY_KB, img)]),
+                        cwd=ROOT, capture_output=True)
+    free = re.search(r"([\d ]+) bytes free", mk.stdout.decode("latin-1"))
+    room_ok = mk.returncode == 0 and free is not None
+    print("smoke-host floppy-room %s GLOSK.PAK %d, the native %d KB floppy %s" % (
+        "PASS" if room_ok else "FAIL", size, FLOPPY_KB,
+        "%s bytes free" % free.group(1).replace(" ", "") if free else "not made: %r" % (mk.stdout + mk.stderr)
+        .decode("latin-1")[-200:]), flush=True)
     while gate_running() and not os.environ.get("SMOKE_FORCE"):
         print("smoke: a merge gate runs on this machine: waiting (SMOKE_FORCE=1 starts anyway)", flush=True)
         time.sleep(60)
