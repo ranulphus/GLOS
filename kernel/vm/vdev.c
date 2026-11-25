@@ -386,6 +386,7 @@ void vdev_tick(struct trapframe *tf, u8 c)
     agent_vm_tick(now);
     midi_tick();
     mixer_tick();
+    vm_lines_tick();                            /* (a line shared with DOS: its guards, v86.c) */
     app_tick();
     if (vm.waiting && ((vm.wait_deadline && (s32)(now - vm.wait_deadline) >= 0) || vm_work_due()))
         vm_kick();

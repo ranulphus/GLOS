@@ -356,3 +356,9 @@ chip another driver has set up).
   maker's Windows Sound System card at 530h would play silence the same way). A Crystal-only check (its control
   port, or I25's version) would close it.
 
+## Shared lines, the second half (2026-11-25)
+
+A line GLOS takes may now be shared with a device DOS's drivers have: every interrupt goes to GLOS's handlers and
+to the VM, the line masked until both have done, with a storm guard and a stall guard. `docs/devices.md` has the
+detail; Loop A's `sharedos` case (a DOS program driving a CMI8738 on the network card's line) proves it.
+

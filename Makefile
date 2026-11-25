@@ -568,6 +568,7 @@ $(eval $(call dos_test,HOSTILE,hostile))
 $(eval $(call dos_test,XMSTEST,xmstest))
 $(eval $(call dos_test,XMSBIG,xmsbig))
 $(eval $(call dos_test,ECHOARGS,echoargs))
+$(eval $(call dos_test,SHAREDOS,sharedos))
 $(eval $(call dos_test,SCRTEXT,scrtext))
 $(eval $(call dos_test,CLOCKCHK,clockchk))
 $(eval $(call dos_test,SBTEST,sbtest))
@@ -617,7 +618,7 @@ build/ow/dos/DPMI16.EXE: tests/dos/dpmi16/dpmi16.c tests/dos/dpmi16/dpmi16a.asm
 	  file build/ow/dos/obj/dpmi16.obj,build/ow/dos/obj/dpmi16a.obj
 DOS_TESTS := build/ow/dos/HOSTILE.EXE build/ow/dos/XMSTEST.EXE build/ow/dos/XMSBIG.EXE build/ow/dos/ECHOARGS.EXE build/ow/dos/DPMIMINI.COM \
              build/ow/dos/RUNOUT.EXE build/ow/dos/DPMI16.EXE build/ow/dos/SESSTEST.EXE build/ow/dos/TIMECHK.EXE \
-             build/ow/dos/SHOTTEST.EXE build/ow/dos/TYPEIN.EXE build/ow/dos/CONIN.EXE build/ow/dos/CLOCKCHK.EXE build/ow/dos/SBTEST.EXE \
+             build/ow/dos/SHOTTEST.EXE build/ow/dos/TYPEIN.EXE build/ow/dos/CONIN.EXE build/ow/dos/SHAREDOS.EXE build/ow/dos/CLOCKCHK.EXE build/ow/dos/SBTEST.EXE \
              build/ow/dos/I2FTSR.EXE build/ow/dos/STUBTSR.EXE build/ow/dos/UMBRD.EXE build/ow/dos/FMTEST.EXE \
              build/ow/dos/JOYTEST.EXE build/ow/dos/SCRTEXT.EXE build/ow/dos/NDOSTEST.EXE build/ow/dos/DOSDIFF.EXE build/ow/dos/CONTEST.EXE
 dos-tests: $(DOS_TESTS)

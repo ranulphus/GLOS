@@ -46,6 +46,7 @@
    (the network card); kernel_masked holds those a driver has masked. */
 static u16 kernel_lines = (1u << 1) | (1u << 2) | (1u << 8) | (1u << 12);
 static u16 kernel_masked;
+static u16 dos_lines, storm_lines;             /* (step D2: lines a DOS device shares; lines a storm masked: below) */
 
 struct vm vm;
 static struct trapframe start_frame;
@@ -302,7 +303,8 @@ u32 vm_timer_state(char *buf, u32 max)
 
 void vm_sync_mask(void)
 {
-    u16 m = (u16)(((vpic_imr(&vm.pic) | vm.pic.inflight) & ~kernel_lines) | (kernel_masked & kernel_lines));
+    u16 m = (u16)(((vpic_imr(&vm.pic) | vm.pic.inflight) & ~kernel_lines) | (kernel_masked & kernel_lines)
+                  | (dos_lines & kernel_lines & vm.pic.inflight) | (storm_lines & kernel_lines));
     if (m != vm.phys_mask) {
         vm.phys_mask = m;
         pic_set_mask(m);
@@ -320,11 +322,77 @@ int dev_line_heard(int irq) { return !(vpic_imr(&vm.pic) >> irq & 1); }
 #define CHAIN 4
 static void (*chain[16][CHAIN])(struct trapframe *);
 
+/* Step D2's second half (2026-11-25): a line of GLOS's that a device DOS's drivers have shares too (a sound card's
+   DOS TSR beside GLOS's network card, say). Every interrupt of it goes to GLOS's handlers and to the VM alike, as
+   PCI drivers on a shared line must take it: each looks at its own device. The line stays masked until both have
+   done: GLOS's handlers have returned (a driver that masks its line while its thread works keeps it so), and the
+   VM's program has ended it on the virtual PIC (in flight until then). A VM that masks the line on its PIC (no
+   handler of DOS's for it) is not given it. Two guards:
+   - a storm (STORM interrupts in about a second: no device of the time makes that many) masks the line for good,
+     and GLOS's handlers on it are called from the tick instead;
+   - while the VM holds it in flight for STALL ticks (interrupts off, a program stopped), GLOS's handlers are
+     called from the tick too, so that GLOS's own devices on it go on. */
+#define STORM 20000
+#define STALL 64
+static u32 line_n[16], line_since, flight_since[16];
+
 static void chained(struct trapframe *tf)
 {
     u32 irq = (tf->vec - IRQ_BASE_MASTER) & 15, k;
     for (k = 0; k < CHAIN && chain[irq][k]; k++)
         chain[irq][k](tf);
+    if (!(dos_lines & (1u << irq)) || (storm_lines & (1u << irq)))
+        return;
+    if (++line_n[irq] >= STORM) {
+        storm_lines |= (u16)(1u << irq);
+        kprintf("GLOS-WARN irq-storm irq=%u in=%u ticks: masked, its GLOS drivers polled\n", irq,
+                timer_ticks() - line_since);
+        vm_sync_mask();
+        return;
+    }
+    if (!(vpic_imr(&vm.pic) >> irq & 1)) {      /* (DOS has it: its handler's turn) */
+        if (!(vm.pic.inflight >> irq & 1))
+            flight_since[irq] = timer_ticks();
+        vpic_raise_hw(&vm.pic, irq);
+        vm_sync_mask();
+        vm_kick();
+    }
+}
+
+/* A line of GLOS's is a DOS device's too (dev.c: at the line rule, or a quiet device given back to DOS). */
+void vm_line_dos(int irq)
+{
+    if (irq < 1 || irq > 15 || (dos_lines & (1u << irq)))
+        return;
+    dos_lines |= (u16)(1u << irq);
+    if (chain[irq][0])
+        set_irq_handler(irq, chained);
+    kprintf("GLOS-DEV line irq=%d dos=1\n", irq);
+}
+
+/* The tick (vdev.c): the storm count's second; GLOS's handlers on a line masked by a storm, or held by the VM. */
+void vm_lines_tick(void)
+{
+    u32 now = timer_ticks(), irq, k;
+    struct trapframe f;
+    if (!dos_lines)
+        return;
+    memset(&f, 0, sizeof f);
+    if (now - line_since >= 1024) {
+        line_since = now;
+        for (irq = 0; irq < 16; irq++)
+            line_n[irq] = 0;
+    }
+    for (irq = 1; irq < 16; irq++) {
+        if (!(dos_lines & kernel_lines & (1u << irq)))
+            continue;
+        if (!(storm_lines & (1u << irq))
+            && !((vm.pic.inflight >> irq & 1) && now - flight_since[irq] >= STALL))
+            continue;
+        f.vec = IRQ_BASE_MASTER + irq;
+        for (k = 0; k < CHAIN && chain[irq][k]; k++)
+            chain[irq][k](&f);
+    }
 }
 
 void vm_claim_irq(int irq, void (*fn)(struct trapframe *))
@@ -339,7 +407,7 @@ void vm_claim_irq(int irq, void (*fn)(struct trapframe *))
     }
     chain[irq][k] = fn;
     kernel_lines |= (u16)(1u << irq);
-    set_irq_handler(irq, k ? chained : fn);
+    set_irq_handler(irq, k || (dos_lines & (1u << irq)) ? chained : fn);
     if (k)
         kprintf("GLOS-DEV line irq=%d drivers=%u\n", irq, k + 1);
     vm_sync_mask();

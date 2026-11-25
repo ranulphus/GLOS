@@ -103,6 +103,17 @@ static struct pci_dev *add(u8 dev, u8 f, u16 vendor, u16 device, u8 cls, u8 sub,
     return d;
 }
 
+/* (step D2's second half: a line with a DOS device on it is taken, shared, and every interrupt of it passed to the
+   VM too: the kernel's vm_line_dos is told which) */
+static int dos_line;
+void vm_line_dos(int irq) { dos_line = irq; }
+
+static int shared_dos(struct pci_dev *n, char *w, u32 room)
+{
+    dos_line = 0;
+    return dev_take_line(n, w, room) == 0 && dos_line == n->irq;
+}
+
 static void reset(void)
 {
     nfn = 0;
@@ -139,7 +150,7 @@ int main(void)
     nic = add(3, 0, 0x8086, 0x1229, 0x02, 0x00, 0x00, 1, 11, 0);
     legsup[0] = 0x2000;
     fake_ports[0xE000] = 1;
-    CHECK(dev_take_line(nic, with, sizeof with) == -1 && !strcmp(with, "00:02.2"));
+    CHECK(shared_dos(nic, with, sizeof with) && !strcmp(with, "00:02.2"));
     CHECK(usb->keeper == DEV_DOS && legsup[0] == 0x2000);
     CHECK(strstr(logbuf, "GLOS-DEV keep 00:02.2 id=8086:7112 class=uhci irq=11 why=driven\n") != NULL);
 
@@ -157,7 +168,7 @@ int main(void)
     nic = add(9, 0, 0x10EC, 0x8139, 0x02, 0x00, 0x00, 1, 10, 0);
     fake_ports[0xD000] = 1;
     fake_ports[0xD004] = 0x000F;
-    CHECK(dev_take_line(nic, with, sizeof with) == -1 && usb->keeper == DEV_DOS && fake_ports[0xD004] == 0x000F);
+    CHECK(shared_dos(nic, with, sizeof with) && usb->keeper == DEV_DOS && fake_ports[0xD004] == 0x000F);
     CHECK(strstr(logbuf, "why=running") != NULL);
     CHECK(strstr(logbuf, "GLOS-DEV shares 00:07.2 id=1106:3038 class=0c0300 irq=10 keeper=dos\n") != NULL);
 
@@ -178,7 +189,7 @@ int main(void)
     legsup[0] = 0x2000;
     fake_ports[0xE400] = 1;
     fake_ports[0xE404] = 0x000F;
-    CHECK(dev_take_line(nic, with, sizeof with) == -1 && usb->keeper == DEV_DOS && legsup[0] == 0x2000);
+    CHECK(shared_dos(nic, with, sizeof with) && usb->keeper == DEV_DOS && legsup[0] == 0x2000);
     CHECK(strstr(logbuf, "why=driven") != NULL);
     /* ... nobody's if the line is masked there (the BIOS polls it): PIRQ off */
     reset();
@@ -212,7 +223,7 @@ int main(void)
     other->bar[1] = 0xDFE00000u;
     nic = add(18, 0, 0x1106, 0x3065, 0x02, 0x00, 0x00, 1, 11, 0);
     ohci[0x1E1C / 4] = 0x20;
-    CHECK(dev_take_line(nic, with, sizeof with) == -1 && other->keeper == DEV_DOS && ohci[0x1E1C / 4] == 0x20);
+    CHECK(shared_dos(nic, with, sizeof with) && other->keeper == DEV_DOS && ohci[0x1E1C / 4] == 0x20);
     CHECK(strstr(logbuf, "class=mga irq=11 why=driven") != NULL);
     /* ... no such register (it reads 0), but the controller's own interrupt enables all off: quiet as it is */
     reset();
@@ -250,7 +261,7 @@ int main(void)
     nic = add(16, 0, 0x1106, 0x3043, 0x02, 0x00, 0x00, 1, 9, 0);
     ohci[0x04 / 4] = 0x00000080u;
     ohci[0x10 / 4] = 0x80000002u;
-    CHECK(dev_take_line(nic, with, sizeof with) == -1 && !strcmp(with, "00:02.0") && usb->keeper == DEV_DOS);
+    CHECK(shared_dos(nic, with, sizeof with) && !strcmp(with, "00:02.0") && usb->keeper == DEV_DOS);
     CHECK(ohci[0x14 / 4] == 0 && strstr(logbuf, "why=driven") != NULL);
 
     /* ... its memory not decoded (switched off in the BIOS's setup): it can't interrupt, and isn't looked at;
@@ -265,14 +276,14 @@ int main(void)
     reset();
     usb = add(2, 0, 0x10B9, 0x5237, 0x0C, 0x03, 0x10, 1, 9, 0);
     nic = add(16, 0, 0x1106, 0x3043, 0x02, 0x00, 0x00, 1, 9, 0);
-    CHECK(dev_take_line(nic, with, sizeof with) == -1 && usb->keeper == DEV_DOS && mapped == 0);
+    CHECK(shared_dos(nic, with, sizeof with) && usb->keeper == DEV_DOS && mapped == 0);
     CHECK(strstr(logbuf, "why=no-memory") != NULL);
 
     /* No quiet driver for it (a PCI sound card GLOS has no driver for): in the way, untouched, and named in the log */
     reset();
     other = add(10, 0, 0x1013, 0x6003, 0x04, 0x01, 0x00, 1, 5, 0);
     nic = add(11, 0, 0x10EC, 0x8139, 0x02, 0x00, 0x00, 1, 5, 0);
-    CHECK(dev_take_line(nic, with, sizeof with) == -1 && !strcmp(with, "00:0a.0") && other->keeper == DEV_DOS);
+    CHECK(shared_dos(nic, with, sizeof with) && !strcmp(with, "00:0a.0") && other->keeper == DEV_DOS);
     CHECK(!strcmp(logbuf, "GLOS-DEV shares 00:0a.0 id=1013:6003 class=040100 irq=5 keeper=dos\n"));
 
     /* One of GLOS's own on the line (step D2): not in the way, its handler and the newcomer's are chained */
@@ -304,7 +315,7 @@ int main(void)
     other->bar[0] = 0xF0001000;
     nic = add(12, 0, 0x13F6, 0x0111, 0x04, 0x01, 0x00, 1, 10, 0);
     ohci[0] = 0x20, ohci[0x20 / 4] = 1, ohci[0x28 / 4] = 0x3F;
-    CHECK(dev_take_line(nic, with, sizeof with) == -1 && other->keeper == DEV_DOS && ohci[0x28 / 4] == 0x3F);
+    CHECK(shared_dos(nic, with, sizeof with) && other->keeper == DEV_DOS && ohci[0x28 / 4] == 0x3F);
     CHECK(strstr(logbuf, "class=ehci irq=10 why=driven") != NULL);
 
     /* Intel's SMBus controller on a sound chip's line (bench F: the ICH6's and its CT5880 on IRQ 5). Its I/O at
@@ -338,7 +349,7 @@ int main(void)
     cfg40[0] = 1;
     fake_ports[0x500] = 0x01, fake_ports[0x502] = 0x01;
     nic = add(2, 1, 0x1274, 0x5880, 0x04, 0x01, 0x00, 1, 5, 0);
-    CHECK(dev_take_line(nic, with, sizeof with) == -1 && other->keeper == DEV_DOS && fake_ports[0x502] == 0x01);
+    CHECK(shared_dos(nic, with, sizeof with) && other->keeper == DEV_DOS && fake_ports[0x502] == 0x01);
     CHECK(strstr(logbuf, "class=smbus irq=5 why=driven") != NULL);
 
     /* The sound chips GLOS has drivers for (step D2), on the network card's line.
@@ -364,7 +375,7 @@ int main(void)
     other->bar[0] = 0xD000 | 1;
     nic = add(11, 0, 0x10EC, 0x8139, 0x02, 0x00, 0x00, 1, 5, 0);
     fake_ports[0xD000] = 0x0020, fake_ports[0xD020] = 0x020C;
-    CHECK(dev_take_line(nic, with, sizeof with) == -1 && other->keeper == DEV_DOS && fake_ports[0xD020] == 0x020C);
+    CHECK(shared_dos(nic, with, sizeof with) && other->keeper == DEV_DOS && fake_ports[0xD020] == 0x020C);
     CHECK(strstr(logbuf, "GLOS-DEV keep 00:0a.0 id=1274:1371 class=es1371 irq=5 why=driven\n") != NULL);
     /* A CMI8738: channel 0 enabled with its interrupt (driven); then only the interrupt (cleared) */
     reset();
@@ -372,7 +383,7 @@ int main(void)
     other->bar[0] = 0xD400 | 1;
     nic = add(13, 0, 0x10EC, 0x8139, 0x02, 0x00, 0x00, 1, 10, 0);
     fake_ports[0xD402] = 0x0001, fake_ports[0xD40E] = 0x0801;
-    CHECK(dev_take_line(nic, with, sizeof with) == -1 && strstr(logbuf, "class=cmi8738 irq=10 why=driven") != NULL);
+    CHECK(shared_dos(nic, with, sizeof with) && strstr(logbuf, "class=cmi8738 irq=10 why=driven") != NULL);
     logbuf[0] = 0;
     fake_ports[0xD402] = 0x0000;
     CHECK(dev_take_line(nic, with, sizeof with) == 0 && other->keeper == DEV_QUIET && fake_ports[0xD40E] == 0x0800);
@@ -383,7 +394,7 @@ int main(void)
     other->bar[1] = 0xD800 | 1;
     nic = add(13, 0, 0x8086, 0x1229, 0x02, 0x00, 0x00, 1, 11, 0);
     fake_ports[0xD80B] = 0x00, fake_ports[0xD81B] = 0x1D, fake_ports[0xD82B] = 0x00;
-    CHECK(dev_take_line(nic, with, sizeof with) == -1 && strstr(logbuf, "class=ich97 irq=11 why=driven") != NULL);
+    CHECK(shared_dos(nic, with, sizeof with) && strstr(logbuf, "class=ich97 irq=11 why=driven") != NULL);
     logbuf[0] = 0;
     fake_ports[0xD81B] = 0x1C;
     CHECK(dev_take_line(nic, with, sizeof with) == 0 && other->keeper == DEV_QUIET && fake_ports[0xD81B] == 0x00);
@@ -395,7 +406,7 @@ int main(void)
     other->bar[0] = 0xE000 | 1;
     nic = add(18, 0, 0x1106, 0x3065, 0x02, 0x00, 0x00, 1, 12, 0);
     fake_ports[0xE010] = 0x80, fake_ports[0xE011] = 0x23;
-    CHECK(dev_take_line(nic, with, sizeof with) == -1 && strstr(logbuf, "class=via-ac97 irq=12 why=driven") != NULL);
+    CHECK(shared_dos(nic, with, sizeof with) && strstr(logbuf, "class=via-ac97 irq=12 why=driven") != NULL);
     logbuf[0] = 0;
     fake_ports[0xE010] = 0x00;
     CHECK(dev_take_line(nic, with, sizeof with) == 0 && other->keeper == DEV_QUIET && fake_ports[0xE011] == 0x20);
@@ -404,7 +415,7 @@ int main(void)
     other->bar[0] = 0xE400 | 1;
     nic = add(18, 0, 0x1106, 0x3043, 0x02, 0x00, 0x00, 1, 5, 0);
     fake_ports[0xE400] = 0x80, fake_ports[0xE402] = 0xB3;
-    CHECK(dev_take_line(nic, with, sizeof with) == -1 && strstr(logbuf, "why=driven") != NULL);
+    CHECK(shared_dos(nic, with, sizeof with) && strstr(logbuf, "why=driven") != NULL);
     logbuf[0] = 0;
     fake_ports[0xE400] = 0x00, fake_ports[0xE402] = 0x00;
     CHECK(dev_take_line(nic, with, sizeof with) == 0 && strstr(logbuf, "how=no-intr") != NULL);

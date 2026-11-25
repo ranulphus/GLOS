@@ -5761,6 +5761,44 @@ def joy_case(profile, vcard, card):
                              "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+def share_dos_case(profile, vcard, card):
+    """docs/devices.md, step D2's second half: a line GLOS shares with a device a DOS program drives. The CMI8738 is
+    DOS's ([devices] off: made quiet at the start), GLOS.EXE /SHAREIRQ leads its line to the network card's, and
+    SHAREDOS (tests/dos/sharedos.c) plays silence on it by bus master with its interrupt at each half, counting
+    them in its own handler, five seconds over SSH: its configuration write gives the card back to DOS, and the
+    line is then passed to the VM as well as to GLOS's network card. Its interrupts all come (22050 / 256 a second),
+    the network on the same line goes on (the SSH session the program runs in), and no storm is said."""
+    tag = "sharedos-%s-%s" % (profile, vcard)
+    cfg = batfile(tag + "/GLOS.CFG", ["; jobs.py audio: the CMI8738 DOS's", "[time]", "sntp = off", "[devices]",
+                                      "off = 00:08.0"])
+    agent = Agent(tag, profile, card, ["--card", vcard, "--sound", "cmi8738", "--file", cfg + "=/TEST/GLOS.CFG",
+        "--file", "build/ow/dos/SHAREDOS.EXE=/TEST/SHAREDOS.EXE",
+        "--cmd", "SERSAY HX-START sharedos", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE /SHAREIRQ",
+        "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"], timeout=600)
+    checks = {"listen": agent.listening()}
+    try:
+        rc, out, _ = agent.ssh("C:\\TEST\\SHAREDOS.EXE 5", timeout=90)
+        m = re.search(r"HX-SHAREDOS irq=(\d+) io=\w+ seconds=5 irqs=(\d+) others=(\d+)", out)
+        checks["dos-irqs"] = rc == 0 and m is not None and 380 <= int(m.group(2)) <= 480
+        lg = agent.log()
+        line = m.group(1) if m else "?"
+        checks["shared"] = (re.search(r"GLOS-PCI shareirq irq=%s was=\d+" % line, lg) is not None
+                            and re.search(r"GLOS-DEV given-back \S+ id=13f6:0111 to=dos irq=%s" % line, lg) is not None
+                            and "GLOS-DEV line irq=%s dos=1" % line in lg
+                            and re.search(r"GLOS-NET card=\w+ base=\w+ irq=%s " % line, lg) is not None)
+        checks["net"] = agent.ssh("glos ver")[0] == 0     # (the network card, on the same line, still answering)
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+        if not (checks["dos-irqs"] and checks["shared"]):
+            print("    %s: %r %r" % (tag, out.strip()[:200], re.findall(r"GLOS-(?:PCI shareirq|DEV|NET card)[^\n]*", lg)[:8]))
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["no-storm"] = "irq-storm" not in text and "GLOS-PANIC" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text) and hx_vecchk(text)
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % (tag, "PASS" if not bad else "FAIL", " failed: " + " ".join(bad) if bad else ""), not bad
+
+
 def crystal_off_case(profile, vcard, card):
     """[sound] crystal = off (docs/crystal-audio.md): with 86Box's CS4236B there, GLOS leaves the chip alone and has
     no sound card; `glos config set` takes the key's other values (the schema has it: before 2026-11-05 it didn't,
@@ -13212,6 +13250,9 @@ def main():
             res += matrix(audio_case, [c for c in [("bf6", "g200", "ne2kpci", "sb16", False),      # to a session
                                                    ("bf6", "g200", "ne2kpci", "cs4236b", False)]
                                        if not a.profile or c[0] in a.profile], a.jobs)
+        if not os.environ.get("LOOPA_AUDIO_SOUND") or "sharedos" in os.environ["LOOPA_AUDIO_SOUND"].split(","):
+            res += matrix(share_dos_case, [c for c in [("bf6", "g200", "ne2kpci")] if not a.profile or c[0] in a.profile],
+                          a.jobs)
         if not os.environ.get("LOOPA_AUDIO_SOUND") or "off" in os.environ["LOOPA_AUDIO_SOUND"].split(","):
             res += matrix(crystal_off_case, [c[:3] for c in AUDIO_CASES if len(c) > 3
                                              and (not a.profile or c[0] in a.profile)][:1], a.jobs)

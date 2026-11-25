@@ -142,8 +142,7 @@ share a line with one. So the first half of D2 was built the same morning:
   interrupt enabled (`how=no-intr`, or `how=intr` when an enable had been left on and was cleared); a chip
   that plays by interrupt is a DOS driver's and stays in the way (`why=driven`). The mixer's driver then
   joins the network's on the line.
-- **Not built:** the second half, passing what none of GLOS's drivers claims on to a DOS driver's handler,
-  with its storm guard. A line shared with a device a DOS driver uses is still refused.
+- The second half followed on 2026-11-25 (below).
 - **Tests:**
   - host: `dev_test` (the rule; each sound chip's quiet driver idle, with an enable left on, driven, and with
     its I/O not decoded);
@@ -154,4 +153,31 @@ share a line with one. So the first half of D2 was built the same morning:
     check as without sharing, no watchdog kick.
   - A real PC with a network card and a sound chip on one line has not been tried: none of the benches has
     that.
+
+## Step D2, its second half: a line shared with a DOS driver's device (2026-11-25)
+
+The owner's choice after phase H's tier 2: OPTi first, then this.
+
+- **The rule:** a function on the line that is DOS's and can't be made quiet no longer stands in the way.
+  `dev_take_line` says it shares the line (`GLOS-DEV shares ... keeper=dos`), and the line is marked a DOS
+  device's (`vm_line_dos`, `GLOS-DEV line irq=N dos=1`). A quiet device that DOS takes back (its configuration
+  written: `GLOS-DEV given-back`) marks its line so too.
+- **Every interrupt to both** (`kernel/vm/v86.c`, `chained`): GLOS's handlers on the line, then the VM, through
+  the virtual PIC, as PCI drivers on a shared line take them (each looks at its own device). The "was it mine?"
+  of the first plan was not built: GLOS's network drivers do their card's work on their thread, not in the
+  handler, and DOS's drivers for PCI devices look at their own status anyway. The line stays masked until both
+  have done: GLOS's handlers have returned (a driver that masks its line while its thread works keeps it so), and
+  the VM's program has ended it on the virtual PIC (in flight until then). A VM that has the line masked on its
+  PIC (no handler of DOS's) is not given it.
+- **Two guards** (`vm_lines_tick`, on the tick): a storm (20,000 interrupts in about a second) masks the line for
+  good (`GLOS-WARN irq-storm`), and GLOS's handlers on it are called from the tick instead; while the VM holds the
+  line in flight for 64 ticks (its interrupts off, a program stopped), GLOS's handlers are called from the tick
+  too.
+- **Tests:** host, `dev_test` (every case that was "in the way" now shares the line, `vm_line_dos` told). Loop A,
+  the audio suite's `sharedos` case: 86Box's CMI8738 left to DOS (`[devices] off`), `GLOS.EXE /SHAREIRQ` leading
+  its line to the network card's, and `SHAREDOS` (`tests/dos/sharedos.c`) playing silence on it by bus master with
+  its interrupt at each half for five seconds, over SSH: its PCI BIOS write gives the card back, its handler gets
+  all its interrupts (429 of 431) and is passed two of the network card's, which it ends, and the SSH session on
+  the same line goes on. The storm guard has no test of its own yet: no emulated device can be made to hold a
+  line up.
 

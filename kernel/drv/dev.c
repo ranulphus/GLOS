@@ -13,6 +13,8 @@
 #include "kprintf.h"
 #include "mm.h"
 
+void vm_line_dos(int irq);                      /* (kernel/vm/v86.c: a line of GLOS's a DOS device shares) */
+
 /* ---- quiet drivers: switch a device's interrupts off, or say why not */
 
 struct quiet {
@@ -424,14 +426,15 @@ int dev_take_line(struct pci_dev *d, char *with, u32 room)
                     }
                     break;
                 }
-        if (o->keeper != DEV_QUIET) {           /* (DOS's, and not to be made quiet: in the way) */
+        if (o->keeper != DEV_QUIET) {           /* (DOS's, and not to be made quiet: the line shared with it, step
+                                                   D2's second half: every interrupt passed to the VM too, v86.c) */
             if (room && !r)
                 ksnprintf(with, room, "%s", addr(o, a, sizeof a));
-            /* (every one of them said, the first named: a PC's log then tells all that stands in the way) */
+            /* (every one of them said, the first named: a PC's log then tells what shares the line) */
             kprintf("GLOS-DEV shares %s id=%04x:%04x class=%02x%02x%02x irq=%u keeper=%s\n", addr(o, a, sizeof a),
                     o->vendor, o->device, o->class, o->subclass, o->progif, o->irq,
                     o->keeper == DEV_GLOS ? "glos" : "dos");
-            r = -1;
+            vm_line_dos(o->irq);
         }
     }
     return r;
@@ -445,4 +448,6 @@ void dev_dos_wrote(u32 cf8)
         return;
     d->keeper = DEV_DOS;
     kprintf("GLOS-DEV given-back %s id=%04x:%04x to=dos irq=%u\n", addr(d, a, sizeof a), d->vendor, d->device, d->irq);
+    if (pci_uses_line(d))
+        vm_line_dos(d->irq);                    /* (a line of GLOS's it shares: DOS's driver is given its interrupts too) */
 }

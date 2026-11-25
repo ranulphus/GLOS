@@ -130,6 +130,8 @@ void vm_sync_mask(void);                        /* the physical IMR from the vir
 void vm_direct(int on);                         /* a direct-mode session begins (1) or ends (0) */
 void vm_claim_irq(int irq, void (*fn)(struct trapframe *));    /* the line becomes the kernel's */
 void vm_unclaim_irq(int irq);                   /* ... and the system VM's again (the SB16's, for a session) */
+void vm_line_dos(int irq);                      /* (step D2) a line of GLOS's a DOS device shares: passed to the VM too */
+void vm_lines_tick(void);                       /* ... its storm and stall guards, on the tick */
 void vm_kmask(int irq, int masked);             /* a kernel line masked while its driver works */
 void vm_reset_req(const char *source);
 int vm_idle_headless(void);                     /* the stub waits, nothing runs and no desktop: the idle screen */
