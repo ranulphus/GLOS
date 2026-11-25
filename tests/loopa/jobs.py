@@ -12913,14 +12913,15 @@ def native_case(profile, vcard, card, bits):
 CONTROL_CASES = [("bf6", "g200", "ne2kpci")]
 CONTROL_NUMBERS = {"gpu_watchdog": "1000", "repeat_rate": "20", "double_click": "400", "envsize": "2048",
                    "memory": "8192", "interval": "12", "size": "16", "range": "2000", "wait": "240", "power": "240",
-                   "volume": "70"}
+                   "volume": "70", "timeout": "12"}
 CONTROL_TEXTS = {"hostname": "cptest", "start": "NOTEPAD.EXE", "console": "C:\\KIOSK.BAT", "options": "/NOVME",
                  "title": "CP Test", "args": "-a -b", "comspec": "C:\\COMMAND.COM",
                  "autoexec": "C:\\AUTOEXEC.BAT", "dir": "C:\\CP", "blaster": "A220 I7 D1 H5",
                  "env": "CPA=1\nPATH=C:\\A;C:\\B", "server": "time.example.org:1230",
                  "zone": "CET-1CEST,M3.5.0,M10.5.0/3", "stub_page": "D800", "wallpaper": "C:\\CP\\WALL.PNG",
                  "run": "NOSVC.EXE /Q",     # (a service that isn't there: tried, and tried again later)
-                 "map": "rx ry lx -ly 2 1 4 none"}
+                 "map": "rx ry lx -ly 2 1 4 none",
+                 "default": "dos", "glos_name": "CP GLOS", "dos_name": "CP DOS"}     # ([boot], 2026-11-25)
 
 
 def cfg_pages():
