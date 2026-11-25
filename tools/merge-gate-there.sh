@@ -21,8 +21,8 @@ line() {
 
 # Built first, one thing at a time: RetroGPU's DOS tools, GLOS, and what each suite wants built (its make
 # target with the test driver told to leave at once), so that the lanes build nothing between them. The host
-# tests run here for real. (RetroGPU's MOUSETST is the input suite's.)
-{ "$dev" make -s -C "$HOME/RetroGPU" dostests build/djgpp/MOUSETST.EXE && "$dev" make -s all; } > $log/build.log 2>&1 \
+# tests run here for real. (RetroGPU's MOUSETST is the input suite's, its DJGPP HELLO the DPMI suite's.)
+{ "$dev" make -s -C "$HOME/RetroGPU" dostests build/djgpp/MOUSETST.EXE build/djgpp/HELLO.EXE && "$dev" make -s all; } > $log/build.log 2>&1 \
     || { echo "build failed (build.log)" > $log/summary.txt; echo 1 > $log/done; exit 1; }
 for s in $HOST_SUITES; do
     s0=$(date +%s) rc=0
