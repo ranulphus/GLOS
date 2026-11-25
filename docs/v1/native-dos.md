@@ -1079,7 +1079,13 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   and xorriso's images; GLOS's DOS answers its read-only calls on a CD's drive and refuses the rest (05h) (C4's
   list in dos21_test). `jobs.py cdrom` natively (bf6 and the 486, with LOOPA_RUNPY's run.py until RetroGPU's has
   --cdrom; SKIP without): the drive D:, DIR, a folder of 91 files, TYPE, VOL's label, 70,000 bytes copied to C:
-  the same, MD refused: PASS. Still owed of C4: 71xxh, FCBs and 6Ch on a CD's drive. Planned: C2 kernel/drv/cdrom.c, the drives: found from ide.c's probe, sectors of 2048 bytes with
+  the same, MD refused: PASS. Still owed of C4: 71xxh, FCBs and 6Ch on a CD's drive. **C5 built (the same night):** kernel/vm/mscdex.c, MSCDEX 2.23's INT 2Fh 1500h-150Eh and 1510h's
+  device requests (IOCTL input 0, 1, 4, 6-12, 15; output 0, 1, 2, 5; open, close; READ LONG cooked and its
+  prefetch; SEEK; PLAY, STOP, RESUME by the drive's own audio), the driver's header in a block of DOS memory with
+  its strategy and interrupt routines as ARPLs (a program that calls the driver itself is answered the same).
+  tests/dos/cdtest.c (CDTEST) in `jobs.py cdrom`: 1500h, 150Bh, 150Ch, 150Dh, 1505h, 1508h, IOCTL input 6-9, READ
+  LONG, 1501h's header, the driver called directly, a file through DOS: bf6 and 486 PASS. The audio requests are
+  built but not yet tested (C6: a disc with audio tracks, CUE/BIN). Planned: C2 kernel/drv/cdrom.c, the drives: found from ide.c's probe, sectors of 2048 bytes with
   a small cache, the disc's change (UNIT ATTENTION) and its absence (NOT READY), the TOC. C3 kernel/fs/iso.c, ISO
   9660 read-only over a sector reader (level 1 names as DOS sees them, path tables not needed: folders walked),
   host-tested on mkiso's images and, where it is, xorriso's. C4 GLOS's DOS: a CD drive as DOS has one under

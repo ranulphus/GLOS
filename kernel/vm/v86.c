@@ -1158,6 +1158,8 @@ static void vm_int2f(struct trapframe *tf)
                                                 /* BIOS tick, forever if called with interrupts off */
     } else if (ax == 0x1600) {                  /* never Windows (§13); 160Ah: AX as it was */
         SETLO(tf->eax, 0);
+    } else if ((ax >> 8) == 0x15 && vdos_mscdex(tf)) {
+        ;                                       /* (MSCDEX's, natively with CD drives: mscdex.c) */
     } else if (ax != 0x160A) {
         tf->cs = vm.int2f_prev >> 16;           /* on down the chain, the INT's frame as it is */
         tf->eip = vm.int2f_prev & 0xFFFF;

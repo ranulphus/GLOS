@@ -179,7 +179,15 @@ u8 vkbc_cmd(void);
 void vkbc_restore(u8 cmd);
 void vkbc_vmouse(int on);
 int  vkbc_peek(u8 *b);                          /* the output buffer's byte (0: the mouse's) */
-int  vkeyb_int09(void);                         /* vkeyb.c: INT 09h's ARPL, 1 if GLOS answered the key */                       /* GLOS's INT 33h takes the mouse (native boots) */
+int  vkeyb_int09(void);                         /* vkeyb.c: INT 09h's ARPL, 1 if GLOS answered the key */
+struct dos_regs86;
+struct trapframe;
+void mscdex_setup(unsigned seg, int n, const signed char *letters);     /* mscdex.c: GLOS's MSCDEX (N4) */
+int  mscdex_int2f(struct dos_regs86 *r);
+void mscdex_request(u32 r, int unit);
+void mscdex_strategy(unsigned es, unsigned bx);
+void mscdex_interrupt(void);
+int  vdos_mscdex(struct trapframe *tf);         /* vdos.c: INT 2Fh 15xxh, 1 if answered */                       /* GLOS's INT 33h takes the mouse (native boots) */
 
 /* vmouse.c: INT 33h of GLOS's own for DOS programs (native boots, vdos.c's vector) */
 struct dos_regs86;

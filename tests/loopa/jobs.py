@@ -8248,7 +8248,8 @@ def cdrom_case(profile, card):
     checks, info = {"image": mk.returncode == 0}, ""
     if not checks["image"]:
         return "  %-22s FAIL image=%r" % (tag, mk.stderr.decode("latin-1")[-300:]), False
-    agent = Agent(tag + "-" + card, profile, card, ["--cdrom", iso, "--cmd", "C:\\TEST\\GLOS.EXE"], timeout=900)
+    agent = Agent(tag + "-" + card, profile, card, ["--cdrom", iso, "--file", "build/ow/dos/CDTEST.EXE=/TEST/CDTEST.EXE",
+                                                    "--cmd", "C:\\TEST\\GLOS.EXE"], timeout=900)
     try:
         checks["listen"] = agent.listening()
         if checks["listen"]:
@@ -8270,6 +8271,11 @@ def cdrom_case(profile, card):
             checks["copy"] = rc == 0 and os.path.exists(got) and open(got, "rb").read() == data
             rc, o = out("md D:\\NEW")
             checks["md-refused"] = rc != 0
+            # MSCDEX's INT 2Fh 15xxh as programs ask it (C5): tests/dos/cdtest.c's checks, each a line
+            rc, o = out("C:\\TEST\\CDTEST.EXE")
+            checks["mscdex"] = rc == 0 and "CDTEST done failures=0" in o
+            if not checks["mscdex"]:
+                info += " cdtest=%r" % [l for l in o.split("\n") if "FAIL" in l or "done" in l][:8]
             agent.ssh("glos exit")
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
@@ -8277,6 +8283,7 @@ def cdrom_case(profile, card):
     checks["found"] = re.search(r'GLOS-CD drive=0 dev=\d+ model="', log) is not None \
         and "GLOS-NATIVE step=drive D: cdrom 0" in log and 'GLOS-CD drive=0 mount=0 label="GLOSTEST"' in log
     checks["clean"] = "GLOS-PANIC" not in log and "GLOS-WARN" not in log
+    checks["mscdex-log"] = "GLOS-MSCDEX units=1 first=D header=" in log
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s" % (tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad) + info), \
         not bad

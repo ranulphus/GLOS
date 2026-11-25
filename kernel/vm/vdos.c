@@ -230,6 +230,8 @@ static unsigned long c_now(void *ctx)
 
 static int fat_first(const unsigned char *s);
 
+static void cd_entry_points(unsigned seg);     /* (below the ARPLs' table) */
+
 /* GLOS's own DOS asks which disc is in CD drive `drive` (dos21.h: cdmedia; N4's CD-ROM): cdrom.c's volume. */
 static signed char cd_letter[4] = { -1, -1, -1, -1 };
 
@@ -467,8 +469,14 @@ static void mount_c(void)
             vd.cds.valid |= 1u << (top + 1 + k);
             kprintf("GLOS-NATIVE step=drive %c: cdrom %d\n", 'A' + top + 1 + k, k);
         }
-        if (nc)
+        if (nc) {
+            unsigned seg, largest;
             vd.cdmedia = vd_cdmedia;
+            if (dos_mem_alloc(&vd.mcb, 2, 8, &seg, &largest) == 0) {    /* (MSCDEX's driver header: mscdex.c) */
+                mscdex_setup(seg, nc, cd_letter);
+                cd_entry_points(seg);
+            }
+        }
     }
     if (!cbios && !needs_bios && xseg) {        /* (GLOS's own driver for all: the BIOS's calls' block back to DOS) */
         dos_mem_free(&vd.mcb, xseg);
@@ -545,11 +553,21 @@ static int vd_wait(void *ctx)
 
 /* DOS's bytes for the vectors (the layout's misc + 4 on): ARPLs for INT 21h, 20h, 29h and 23h (DOS's own Ctrl-C
    handler), one a program's INT 23h returns to, and an IRET that ends INT 2Fh's chain. */
-enum { V21, V20, V29, V23, VC23, V33, V74, V74R, V09, NV };    /* (V33: GLOS's INT 33h, the mouse: vmouse.c; V74
-                                                           its IRQ 12, V74R where the program's mouse routine
-                                                           returns to; V09 the keyboard's layout, vkeyb.c) */
+enum { V21, V20, V29, V23, VC23, V33, V74, V74R, V09, VCDS, VCDI, NV };  /* (V33: GLOS's INT 33h, the mouse:
+                                                           vmouse.c; V74 its IRQ 12, V74R where the program's mouse
+                                                           routine returns to; V09 the keyboard's layout, vkeyb.c;
+                                                           VCDS, VCDI the CD driver's strategy and interrupt
+                                                           routines, called far, in its header's block: mscdex.c) */
 static u32 old09;                               /* the BIOS's INT 09h, which V09 chains to */
 static u32 arpl[NV];                            /* (seg << 16 | off) */
+
+/* The CD driver's strategy and interrupt routines (MSCDEX's header, mscdex.c): ARPLs in the header's own block,
+   where a program that calls the driver itself finds them (its header's offsets). mount_c's, after vdos_init. */
+static void cd_entry_points(unsigned seg)
+{
+    arpl[VCDS] = (u32)seg << 16 | 0x16;
+    arpl[VCDI] = (u32)seg << 16 | 0x18;
+}
 
 /* ---- interrupts during a call
 
@@ -850,6 +868,20 @@ void vdos_mouse_irq(void)
     vpic_write(&vm.pic, 0x21, (u8)(vpic_read(&vm.pic, 0x21) & ~0x04));
 }
 
+/* MSCDEX's INT 2Fh 15xxh (v86.c's INT 2Fh, at the chain's bottom): 1 if answered. */
+int vdos_mscdex(struct trapframe *tf)
+{
+    struct dos_regs86 r;
+
+    if (!ready)
+        return 0;
+    to_regs(tf, &r, tf->eip);
+    if (!mscdex_int2f(&r))
+        return 0;
+    from_regs(tf, &r);
+    return 1;
+}
+
 /* A #UD at one of DOS's ARPLs (its INT frame on the stack, but VC23's and V74R's: a RETF or an IRET to it, a
    RETF). 1 if it was. */
 int vdos_arpl(struct trapframe *tf)
@@ -866,6 +898,15 @@ int vdos_arpl(struct trapframe *tf)
     if (i == NV)
         return 0;
     lin = (tf->ss & 0xFFFF) * 16 + (tf->esp & 0xFFFF);
+    if (i == VCDS || i == VCDI) {               /* the CD driver called itself: its RETF */
+        tf->eip = vm_rd16(lin), tf->cs = vm_rd16(lin + 2);
+        LO16(tf->esp, (tf->esp + 4) & 0xFFFF);
+        if (i == VCDS)
+            mscdex_strategy(tf->v86_es & 0xFFFF, tf->ebx & 0xFFFF);
+        else
+            mscdex_interrupt();
+        return 1;
+    }
     if (i == V09 && !vkeyb_int09()) {           /* a key the BIOS's handler is to have: there, its frame as it is */
         tf->cs = old09 >> 16;
         tf->eip = old09 & 0xFFFF;

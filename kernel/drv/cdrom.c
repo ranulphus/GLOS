@@ -17,6 +17,7 @@ static struct cd {
     struct ata_dev *d;
     int mounted;
     u32 checked_at;
+    int changed;                        /* mounted afresh since MSCDEX's "media changed" was last asked */
     struct iso_vol v;
 } cds[CD_MAX];
 static int ncd;
@@ -109,5 +110,97 @@ struct iso_vol *cdrom_media(int i, unsigned *err)
     if (r != ISO_OK)
         return 0;
     c->mounted = 1;
+    c->changed = 1;
     return &c->v;
 }
+
+int cdrom_read(int i, unsigned long lba, unsigned count, void *buf)
+{
+    unsigned err;
+    if (i < 0 || i >= ncd)
+        return -1;
+    if (!cds[i].mounted && !cdrom_media(i, &err))
+        return -1;
+    return read10(&cds[i], lba, count, buf);
+}
+
+int cdrom_changed(int i)
+{
+    int r;
+    if (i < 0 || i >= ncd)
+        return 0;
+    r = cds[i].changed;
+    cds[i].changed = 0;
+    return r;
+}
+
+int cdrom_capacity(int i, unsigned long *sectors)
+{
+    static const unsigned char cap[12] = { 0x25 };
+    unsigned char b[8];
+    unsigned long got;
+    if (i < 0 || i >= ncd || packet(&cds[i], cap, b, 8, &got) != 0 || got != 8)
+        return -1;
+    *sectors = ((unsigned long)b[0] << 24 | (unsigned long)b[1] << 16 | (unsigned long)b[2] << 8 | b[3]) + 1;
+    return 0;
+}
+
+/* ---- audio and the disc's layout (MSCDEX's device requests: N4's C5, C6) */
+
+int cdrom_toc(int i, unsigned char *buf, unsigned len, int msf)
+{
+    unsigned char cdb[12] = { 0x43 };
+    unsigned long got;
+    if (i < 0 || i >= ncd)
+        return -1;
+    cdb[1] = msf ? 0x02 : 0;
+    cdb[7] = (unsigned char)(len >> 8), cdb[8] = (unsigned char)len;
+    return packet(&cds[i], cdb, buf, len, &got) == 0 ? (int)got : -1;
+}
+
+int cdrom_play(int i, unsigned long lba, unsigned long count)
+{
+    unsigned char cdb[12] = { 0xA5 };           /* PLAY AUDIO(12) */
+    if (i < 0 || i >= ncd)
+        return -1;
+    cdb[2] = (unsigned char)(lba >> 24), cdb[3] = (unsigned char)(lba >> 16);
+    cdb[4] = (unsigned char)(lba >> 8), cdb[5] = (unsigned char)lba;
+    cdb[6] = (unsigned char)(count >> 24), cdb[7] = (unsigned char)(count >> 16);
+    cdb[8] = (unsigned char)(count >> 8), cdb[9] = (unsigned char)count;
+    return packet(&cds[i], cdb, 0, 0, 0);
+}
+
+int cdrom_stop(int i)
+{
+    static const unsigned char cdb[12] = { 0x4E };     /* STOP PLAY/SCAN */
+    return i >= 0 && i < ncd ? packet(&cds[i], cdb, 0, 0, 0) : -1;
+}
+
+int cdrom_pause(int i, int resume)
+{
+    unsigned char cdb[12] = { 0x4B };           /* PAUSE/RESUME */
+    if (i < 0 || i >= ncd)
+        return -1;
+    cdb[8] = resume ? 1 : 0;
+    return packet(&cds[i], cdb, 0, 0, 0);
+}
+
+int cdrom_subq(int i, unsigned char *buf16)
+{
+    unsigned char cdb[12] = { 0x42, 0x02, 0x40, 0x01, 0, 0, 0, 0, 16 };   /* READ SUB-CHANNEL: MSF, Q, position */
+    unsigned long got;
+    if (i < 0 || i >= ncd)
+        return -1;
+    return packet(&cds[i], cdb, buf16, 16, &got) == 0 && got >= 16 ? 0 : -1;
+}
+
+int cdrom_tray(int i, int open)
+{
+    unsigned char cdb[12] = { 0x1B };           /* START STOP UNIT: 2 eject, 3 load */
+    if (i < 0 || i >= ncd)
+        return -1;
+    cdb[4] = open ? 2 : 3;
+    cds[i].mounted = 0;
+    return packet(&cds[i], cdb, 0, 0, 0);
+}
+
