@@ -15,7 +15,7 @@ computer, and on the PC's own screen when there is no desktop. It reads DOS's co
 
 | For | Commands |
 |---|---|
-| Files and folders | CD, DIR, COPY, MOVE, REN, DEL, ATTRIB, MD, RD, TYPE, VOL, DF, DU, WHERE, TRUENAME |
+| Files and folders | CD, DIR, COPY, XCOPY, MOVE, REN, DEL, DELTREE, ATTRIB, MD, RD, TYPE, MORE, VOL, DF, DU, WHERE, TRUENAME |
 | The prompt | ECHO, SET, PATH, PROMPT, CLS, VER, HELP, HISTORY, DATE, TIME, CHCP, EXIT |
 | Batch files | IF, GOTO, CALL, FOR, SHIFT, PAUSE, REM |
 | GLOS itself | PS, KILL, LOG, STAT, CONFIG, DISPLAY, AUDIO, NETWORK, USB, JOY, CLIP, SHOT, SERVICES |
@@ -27,6 +27,10 @@ computer, and on the PC's own screen when there is no desktop. It reads DOS's co
 - **LOG** shows GLOS's own log (`LOG --follow` keeps showing it).
 - **CONFIG** reads and changes [settings](SETTINGS.MD): `CONFIG set desktop theme dark`.
 - **DISPLAY** changes the screen mode: `DISPLAY on 800x600x16`.
+- **XCOPY** copies files, and with `/S` the folders in them too (`/E`: empty ones as well, `/H`: hidden files
+  too): `XCOPY C:\GAMES\DOOM D:\DOOM /E`. It doesn't ask before writing over a file.
+- **DELTREE** deletes a folder and everything in it, after asking (`/Y`: without asking).
+- **MORE** shows a file a screen at a time (`MORE file`, or `command | MORE`): any key for the next, Q to stop.
 
 ## Batch files
 

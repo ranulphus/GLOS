@@ -139,6 +139,18 @@ struct sh {
     unsigned id;                        /* ... with this in them, which the host may set after sh_start() to tell
                                            this shell's files from another's in the same folder */
     int discard;                        /* a built-in's output goes nowhere (> NUL) */
+    struct {                            /* (2026-11-25) a built-in that waits for keys between its steps (key_for 3):
+                                           MORE's pages, DELTREE's questions; its output's file stays open meanwhile */
+        int (*step)(struct sh *s, int key);     /* its next step with the key: its exit code, or SH_UNDER_WAY */
+        char path[SH_PATH];             /* MORE: its file; DELTREE: the one asked about */
+        char shown[SH_PATH];            /* DELTREE: that one as it is named in the question */
+        char last[64];                  /* DELTREE: the name a pattern matched last (the next is after it) ... */
+        int last_dir;                   /* ... and whether it is a folder's (the host lists folders first) */
+        char args[SH_LINE];             /* DELTREE: the paths still to do, each ended by a NUL, the last by two */
+        const char *at;                 /* ... the one being done */
+        unsigned long pos;              /* MORE: where its next page begins */
+        int yes, code;                  /* DELTREE: /Y; the exit code so far */
+    } tool;
 };
 
 void sh_start(struct sh *s, const struct sh_host *h, const char *const *env);  /* env: NAME=VALUE ..., 0 at the end */

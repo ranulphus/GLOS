@@ -1,8 +1,8 @@
 /* GLOS's shell (shell.h; docs/v1/shell.md; PRD D50): DOS's commands and syntax, modernised.
  *
- * Built in: CD (CHDIR), a drive's letter, DIR [/W] [/B], COPY, MOVE, REN (RENAME), DEL (ERASE), MD (MKDIR),
- * RD (RMDIR), TYPE, ECHO, SET, PATH, PROMPT, CLS, VER, EXIT, HISTORY, HELP, WHERE, START, and what the host
- * adds. A built-in's output goes to a file with > or >>.
+ * Built in: CD (CHDIR), a drive's letter, DIR [/W] [/B], COPY, MOVE, XCOPY, REN (RENAME), DEL (ERASE), DELTREE,
+ * MD (MKDIR), RD (RMDIR), TYPE, MORE, ECHO, SET, PATH, PROMPT, CLS, VER, EXIT, HISTORY, HELP, WHERE, START, and
+ * what the host adds. A built-in's output goes to a file with > or >>.
  *
  * Anything else is a program: found here and along PATH (.COM, .EXE, .BAT) and run by the host, in this
  * shell's folder, with the variables this shell has set. A .BAT file is run here, a line at a time (S4a: IF,
@@ -307,10 +307,13 @@ static void full_path(const struct sh *s, const char *p, char *outb, size_t room
     upper_all(outb);
 }
 
-/* name matches a DOS pattern (* and ?) */
+/* name matches a DOS pattern (* and ?); as in DOS, ".*" at the pattern's end takes a name with no dot too ("*.*"
+   is every name, "A*.*" every one beginning with A) */
 static int match(const char *pat, const char *name)
 {
     for (; *pat; pat++, name++) {
+        if (pat[0] == '.' && pat[1] == '*' && !pat[2] && !*name)
+            return 1;
         if (*pat == '*') {
             const char *t;
             for (t = name;; t++) {
@@ -827,6 +830,581 @@ static int cmd_type(struct sh *s, int argc, char **argv)
     return 0;
 }
 
+/* ---- XCOPY, MORE and DELTREE (2026-11-25: phase G, a native GLOS has no FreeDOS to bring them) */
+
+/* Each folder of path made that is not there yet: 0, or -1. */
+static int make_dirs(struct sh *s, const char *path)
+{
+    char p[SH_PATH];
+    size_t i, n = strlen(path);
+    if (n >= sizeof p)
+        return -1;
+    for (i = 3; i <= n; i++) {                  /* (after "C:\") */
+        if (i < n && path[i] != '\\')
+            continue;
+        memcpy(p, path, i);
+        p[i] = 0;
+        if (!s->h->is_dir(s->h->ctx, p) && s->h->mkdir(s->h->ctx, p) != 0)
+            return -1;
+    }
+    return 0;
+}
+
+/* A date as DOS's word ((year - 1980) << 9 | month << 5 | day) from "m-d-y" (or / or . between): 0 if it isn't one. */
+static unsigned dos_date(const char *t)
+{
+    unsigned v[3] = { 0, 0, 0 }, k = 0;
+    for (; *t && k < 3; t++) {
+        if (*t >= '0' && *t <= '9')
+            v[k] = v[k] * 10 + (unsigned)(*t - '0');
+        else if (*t == '-' || *t == '/' || *t == '.')
+            k++;
+        else
+            return 0;
+    }
+    if (k != 2 || v[0] < 1 || v[0] > 12 || v[1] < 1 || v[1] > 31)
+        return 0;
+    if (v[2] < 100)
+        v[2] += v[2] < 80 ? 2000 : 1900;
+    if (v[2] < 1980 || v[2] > 2107)
+        return 0;
+    return (v[2] - 1980) << 9 | v[0] << 5 | v[1];
+}
+
+/* XCOPY's switches: MS-DOS 7.1's (/A /M /D:date /S /E /V; /P and /W, which ask, are not taken) and some of later
+   Windows' (/I /H /Q /F /L /T /C /R /K, /D alone, /Y and /-Y). */
+#define XC_S 0x0001                     /* folders in it too (/E: empty ones as well) */
+#define XC_E 0x0002
+#define XC_A 0x0004                     /* only files to be archived (/M: and then no longer) */
+#define XC_M 0x0008
+#define XC_H 0x0010                     /* hidden and system files (and folders) too */
+#define XC_Q 0x0020                     /* no names shown */
+#define XC_F 0x0040                     /* the names in full, from and to */
+#define XC_L 0x0080                     /* listed, not copied */
+#define XC_T 0x0100                     /* the folders alone */
+#define XC_C 0x0200                     /* on after a file that could not be copied */
+#define XC_R 0x0400                     /* read-only files written over */
+#define XC_K 0x0800                     /* the attributes kept */
+#define XC_I 0x1000                     /* a destination not there is a folder */
+#define XC_NEWER 0x2000                 /* /D alone: only files newer than the destination's */
+
+struct xc {
+    unsigned flags, since;              /* since: /D:date's (DOS's word), or 0 */
+    const char *pat, *typed;            /* the files' pattern; the source's folder as typed (for the names shown) */
+    char rel[SH_PATH];                  /* the folder under the source's being copied ("SUB\DEEP\") */
+    int files, found, failed, itself, said;
+};
+
+/* One folder's files (and, with /S, its folders'), from src to dst (both changed and put back as they were). A
+   file to a file (not a folder): dst is its name and to_file 1. -1: stopped (a file that could not be copied). */
+static int xc_walk(struct sh *s, struct xc *x, char *src, char *dst, int to_file, int depth)
+{
+    struct sh_dirent *e, d;
+    char from[SH_PATH], to[SH_PATH], line[2 * SH_PATH + 16];
+    size_t sl = strlen(src), dl = strlen(dst), rl = strlen(x->rel);
+    int n, i, made = to_file || s->h->is_dir(s->h->ctx, dst), r = 0;
+    if ((n = s->h->dir_read(s->h->ctx, src, &e)) < 0) {
+        sh_fmt(line, sizeof line, "Invalid path - %s\r\n", src);
+        err(s, line);
+        x->failed++;
+        return x->flags & XC_C ? 0 : -1;
+    }
+    if (!made && (x->flags & (XC_E | XC_L)) == XC_E && make_dirs(s, dst) == 0)
+        made = 1;                               /* (/E: every folder, files in it or not) */
+    for (i = 0; i < n && r == 0; i++) {
+        if (e[i].dir || !match(x->pat, e[i].name) || ((e[i].attr & 0x06) && !(x->flags & XC_H))
+            || ((x->flags & (XC_A | XC_M)) && !(e[i].attr & 0x20)) || (x->since && e[i].date < x->since))
+            continue;
+        x->found++;
+        path_join(from, sizeof from, src, e[i].name);
+        if (to_file)
+            sh_fmt(to, sizeof to, "%s", dst);
+        else
+            path_join(to, sizeof to, dst, e[i].name);
+        if ((x->flags & XC_NEWER) && s->h->stat(s->h->ctx, to, &d) == 0
+            && ((unsigned long)d.date << 16 | d.time) >= ((unsigned long)e[i].date << 16 | e[i].time))
+            continue;
+        if (!made && !(x->flags & XC_L)) {
+            if (make_dirs(s, dst) != 0) {
+                sh_fmt(line, sizeof line, "Unable to create directory - %s\r\n", dst);
+                err(s, line);
+                x->failed++;
+                r = x->flags & XC_C ? 0 : -1;
+                break;
+            }
+            made = 1;
+        }
+        if (x->flags & XC_T)                    /* (the folder, made: no file) */
+            continue;
+        if (same(from, to)) {
+            err(s, "File cannot be copied onto itself\r\n");
+            x->itself++;
+            continue;
+        }
+        if (!x->said && !(x->flags & (XC_Q | XC_L))) {
+            say(s, "Reading source file(s)...\r\n");
+            x->said = 1;
+        }
+        if (!(x->flags & XC_L)) {
+            if ((x->flags & XC_R) && s->h->setattr && s->h->stat(s->h->ctx, to, &d) == 0 && (d.attr & 0x01))
+                s->h->setattr(s->h->ctx, to, d.attr & 0x26u);
+            if (copy_file(s, from, to) != 0) {
+                sh_fmt(line, sizeof line, "File creation error - %s%s%s\r\n", x->typed, x->rel, e[i].name);
+                err(s, line);
+                x->failed++;
+                r = x->flags & XC_C ? 0 : -1;
+                continue;
+            }
+            if ((x->flags & XC_K) && s->h->setattr)
+                s->h->setattr(s->h->ctx, to, (e[i].attr & 0x27u) | 0x20u);
+            if ((x->flags & XC_M) && s->h->setattr)
+                s->h->setattr(s->h->ctx, from, e[i].attr & 0x07u);
+        }
+        x->files++;
+        if (x->flags & XC_F)
+            sh_fmt(line, sizeof line, "%s -> %s\r\n", from, to);
+        else
+            sh_fmt(line, sizeof line, "%s%s%s\r\n", x->typed, x->rel, e[i].name);
+        if (!(x->flags & XC_Q))
+            say(s, line);
+    }
+    for (i = 0; i < n && r == 0 && (x->flags & XC_S) && depth < 32; i++) {
+        if (!e[i].dir || ((e[i].attr & 0x06) && !(x->flags & XC_H)) || sl + strlen(e[i].name) + 2 >= SH_PATH
+            || dl + strlen(e[i].name) + 2 >= SH_PATH || rl + strlen(e[i].name) + 2 >= SH_PATH)
+            continue;
+        du_join(src, sl, e[i].name);
+        du_join(dst, dl, e[i].name);
+        sh_fmt(x->rel + rl, (unsigned)(sizeof x->rel - rl), "%s\\", e[i].name);
+        r = xc_walk(s, x, src, dst, 0, depth + 1);
+        src[sl] = 0, dst[dl] = 0, x->rel[rl] = 0;
+    }
+    s->h->dir_free(s->h->ctx, e);
+    return r;
+}
+
+/* XCOPY source [destination] [switches]: files, and with /S the folders under them, copied. As MS-DOS 7.1's
+   (asked of the real one on the reference disk): "Reading source file(s)...", each file named as the source was
+   typed, "N File(s) copied"; exit codes 0, 1 (no file found), 4 (a mistake in what was asked: a switch, the
+   number of names, a drive, a path, a copy into itself), 5 (a file not written). It never asks: a destination
+   that is there is written over (as COPY does here), and one that is not is a folder unless a single file is
+   copied to a name (where MS-DOS asks "file or directory?"). */
+static int cmd_xcopy(struct sh *s, int argc, char **argv)
+{
+    static const char letters[] = "SEAMHQFLTCRKI";
+    static const unsigned bits[] = { XC_S, XC_E, XC_A, XC_M, XC_H, XC_Q, XC_F, XC_L, XC_T, XC_C, XC_R, XC_K, XC_I };
+    char src[SH_PATH], dst[SH_PATH], typed[SH_PATH], pat[64], root[4], line[SH_PATH + 40];
+    const char *names[2] = { 0, 0 };
+    struct xc x;
+    int i, n = 0, folder, wild, to_file, r;
+    memset(&x, 0, sizeof x);
+    for (i = 1; i < argc; i++) {
+        const char *a = argv[i], *k;
+        if (a[0] != '/') {
+            if (n == 2) {
+                err(s, "Invalid number of parameters\r\n");
+                return 4;
+            }
+            names[n++] = a;
+            continue;
+        }
+        if (upper((unsigned char)a[1]) == 'D' && (!a[2] || a[2] == ':')) {
+            if (!a[2]) {
+                x.flags |= XC_NEWER;
+            } else if (!(x.since = dos_date(a + 3))) {
+                err(s, "Invalid date\r\n");
+                return 4;
+            }
+        } else if (a[1] && !a[2] && (k = strchr(letters, upper((unsigned char)a[1]))) != 0) {
+            x.flags |= bits[k - letters];
+        } else if (!same(a, "/V") && !same(a, "/Y") && !same(a, "/-Y")) {      /* (verified, asked: never) */
+            sh_fmt(line, sizeof line, "Invalid switch - %s\r\n", a);
+            err(s, line);
+            return 4;
+        }
+    }
+    if (!n) {
+        err(s, "Invalid number of parameters\r\n");
+        return 4;
+    }
+    if (x.flags & XC_E)
+        x.flags |= XC_S;
+    full_path(s, names[0], src, sizeof src);
+    full_path(s, names[1] ? names[1] : ".", dst, sizeof dst);
+    for (i = 0; i < 2; i++) {
+        const char *p = i ? dst : src;
+        sh_fmt(root, sizeof root, "%c:\\", p[0]);
+        if (!s->h->is_dir(s->h->ctx, root)) {
+            err(s, "Invalid drive specification\r\n");
+            return 4;
+        }
+    }
+    wild = strpbrk(names[0], "*?") != 0;
+    folder = !wild && s->h->is_dir(s->h->ctx, src);
+    sh_fmt(typed, sizeof typed, "%s", names[0]);
+    upper_all(typed);
+    if (folder) {
+        size_t k = strlen(typed);
+        sh_fmt(pat, sizeof pat, "*.*");
+        if (k && typed[k - 1] != '\\' && typed[k - 1] != ':')
+            sh_fmt(typed + k, (unsigned)(sizeof typed - k), "\\");
+    } else {
+        char *cut = strrchr(typed, '\\');
+        sh_fmt(pat, sizeof pat, "%s", path_name(src));
+        path_up(src);
+        if (!cut)
+            cut = typed[0] && typed[1] == ':' ? typed + 1 : 0;
+        if (cut)
+            cut[1] = 0;
+        else
+            typed[0] = 0;
+        if (!s->h->is_dir(s->h->ctx, src)) {
+            err(s, "Invalid path\r\n");
+            return 4;
+        }
+    }
+    {
+        size_t k = strlen(names[1] ? names[1] : "");
+        int dir_named = k && (names[1][k - 1] == '\\' || names[1][k - 1] == ':');
+        to_file = names[1] && !folder && !wild && !(x.flags & XC_S) && !dir_named && !s->h->is_dir(s->h->ctx, dst);
+    }
+    if (!to_file && (x.flags & XC_S)) {         /* (into itself: it would never end) */
+        size_t k = strlen(src);
+        if (!strncmp(dst, src, k) && (!dst[k] || dst[k] == '\\' || src[k - 1] == '\\')) {
+            err(s, "Cannot perform a cyclic copy\r\n");
+            return 4;
+        }
+    }
+    x.pat = pat, x.typed = typed;
+    r = xc_walk(s, &x, src, dst, to_file, 0);
+    if (!x.found && !x.failed && !(x.flags & XC_T) && !folder) {
+        sh_fmt(line, sizeof line, "File not found - %s\r\n", pat);
+        err(s, line);
+    }
+    if (!(x.flags & XC_T)) {
+        sh_fmt(line, sizeof line, x.flags & XC_L ? "%9d File(s)\r\n" : "%9d File(s) copied\r\n", x.files);
+        say(s, line);
+    }
+    return r < 0 || x.failed ? 5 : x.itself && !x.files ? 4 : x.files || (x.flags & XC_T) ? 0 : 1;
+}
+
+/* MORE [file], MORE < file, command | MORE: a screen's rows at a time (24, the 25th for "-- More --"), any key the
+   next (Ctrl+C, Esc or Q: no more). Tabs to every eighth column; long lines counted as the rows they take on an
+   80-column screen; Ctrl+Z ends the text. With its output in a file, or nobody at a keyboard, all at once. */
+#define MORE_ROWS 24
+#define MORE_COLS 80
+
+/* From tool.pos: a page (all: the rest) written. 1 if more is left, 0 at the end, -1 if the file is gone. */
+static int more_page(struct sh *s, int all)
+{
+    char in[512], o[600];
+    void *f = s->h->open(s->h->ctx, s->tool.path, 'r');
+    unsigned long at = 0;
+    int got, i, rows = 0, col = 0, k = 0, end = 0, left = 0;
+    if (!f)
+        return -1;
+    if (s->tool.pos && (!s->h->seek || s->h->seek(s->h->ctx, f, s->tool.pos) != 0)) {
+        while (at < s->tool.pos && (got = s->h->read(s->h->ctx, f, in,
+                                                      s->tool.pos - at < sizeof in ? (int)(s->tool.pos - at) : (int)sizeof in)) > 0)
+            at += (unsigned long)got;
+    }
+    while (!end && (got = s->h->read(s->h->ctx, f, in, sizeof in)) > 0) {
+        for (i = 0; i < got; i++) {
+            unsigned char c = (unsigned char)in[i];
+            if (!all && rows == MORE_ROWS) {    /* (a page: the rest is the next's) */
+                left = c != 0x1A;
+                end = 1;
+                break;
+            }
+            s->tool.pos++;
+            if (c == 0x1A) {
+                end = 2;
+                break;
+            }
+            if (c == '\n') {
+                rows++, col = 0;
+                o[k++] = (char)c;
+            } else if (c == '\r') {
+                col = 0;
+                o[k++] = (char)c;
+            } else if (c == '\t') {
+                do {
+                    if (col == MORE_COLS)
+                        rows++, col = 0;
+                    o[k++] = ' ', col++;
+                } while (col % 8);
+            } else {
+                if (col == MORE_COLS)           /* (the screen goes on to the next row before it) */
+                    rows++, col = 0;
+                o[k++] = (char)c, col++;
+            }
+            if (k > (int)sizeof o - 16) {
+                if (s->redirect)
+                    s->h->put(s->h->ctx, s->redirect, o, k);
+                else if (!s->discard)
+                    s->h->write(s->h->ctx, SH_TEXT, o, k);
+                k = 0;
+            }
+        }
+    }
+    if (k) {
+        if (s->redirect)
+            s->h->put(s->h->ctx, s->redirect, o, k);
+        else if (!s->discard)
+            s->h->write(s->h->ctx, SH_TEXT, o, k);
+    }
+    s->h->close(s->h->ctx, f);
+    return left;
+}
+
+static int more_step(struct sh *s, int key)
+{
+    if (key == 3 || key == 27 || upper(key) == 'Q') {
+        out(s, "\r\n");
+        return 0;
+    }
+    out(s, "\r\n");
+    for (;;) {
+        int r = more_page(s, 0);
+        if (r <= 0)
+            return r < 0;
+        out(s, "-- More --");
+        if (s->h->key && s->h->key(s->h->ctx) == SH_UNDER_WAY)
+            return SH_UNDER_WAY;
+        out(s, "\r\n");                         /* (nobody to press a key: on) */
+    }
+}
+
+static int cmd_more(struct sh *s, int argc, char **argv, const char *source)
+{
+    char line[SH_PATH + 40];
+    void *f;
+    if ((argc = switches(s, argc, argv, "")) < 0)
+        return 1;
+    if (argc > 1)
+        full_path(s, argv[1], s->tool.path, sizeof s->tool.path);
+    else if (source && source[0] && !same(source, "NUL"))
+        sh_fmt(s->tool.path, sizeof s->tool.path, "%s", source);
+    else if (source && same(source, "NUL"))
+        return 0;
+    else {
+        err(s, "MORE file, MORE < file, or command | MORE\r\n");
+        return 1;
+    }
+    if (!(f = s->h->open(s->h->ctx, s->tool.path, 'r'))) {
+        sh_fmt(line, sizeof line, "File not found - %s\r\n", argc > 1 ? argv[1] : s->tool.path);
+        err(s, line);
+        return 1;
+    }
+    s->h->close(s->h->ctx, f);
+    s->tool.pos = 0;
+    if (s->redirect || s->discard || !s->h->key)
+        return more_page(s, 1) < 0;
+    for (;;) {
+        int r = more_page(s, 0);
+        if (r <= 0)
+            return r < 0;
+        out(s, "-- More --");
+        if (s->h->key(s->h->ctx) == SH_UNDER_WAY) {
+            s->tool.step = more_step;
+            s->key_for = 3;
+            return SH_UNDER_WAY;
+        }
+        out(s, "\r\n");
+    }
+}
+
+/* A file, or a folder with everything in it, deleted (read-only, hidden and system files too): 0, or -1. A folder's
+   files go, then it goes into its first folder, until one has none; that one is removed, and so up again. */
+static int tree_delete(struct sh *s, const char *top)
+{
+    char p[SH_PATH], f[SH_PATH];
+    struct sh_dirent one, *e;
+    int n, i, sub;
+    unsigned long turns = 0;
+    if (s->h->stat(s->h->ctx, top, &one) != 0)
+        return -1;
+    if (!one.dir) {
+        if ((one.attr & 0x07) && s->h->setattr)
+            s->h->setattr(s->h->ctx, top, one.attr & 0x20u);
+        return s->h->unlink(s->h->ctx, top);
+    }
+    sh_fmt(p, sizeof p, "%s", top);
+    while (++turns < 1000000ul) {
+        if ((n = s->h->dir_read(s->h->ctx, p, &e)) < 0)
+            return -1;
+        for (i = 0, sub = -1; i < n; i++) {
+            if (e[i].dir) {
+                if (sub < 0)
+                    sub = i;
+                continue;
+            }
+            path_join(f, sizeof f, p, e[i].name);
+            if ((e[i].attr & 0x07) && s->h->setattr)
+                s->h->setattr(s->h->ctx, f, e[i].attr & 0x20u);
+            if (s->h->unlink(s->h->ctx, f) != 0) {
+                s->h->dir_free(s->h->ctx, e);
+                return -1;
+            }
+        }
+        if (sub >= 0) {
+            if (strlen(p) + strlen(e[sub].name) + 2 >= sizeof p) {
+                s->h->dir_free(s->h->ctx, e);
+                return -1;
+            }
+            path_join(f, sizeof f, p, e[sub].name);
+            s->h->dir_free(s->h->ctx, e);
+            sh_fmt(p, sizeof p, "%s", f);
+            continue;
+        }
+        s->h->dir_free(s->h->ctx, e);
+        if (s->h->stat(s->h->ctx, p, &one) == 0 && (one.attr & 0x07) && s->h->setattr)
+            s->h->setattr(s->h->ctx, p, 0);
+        if (s->h->rmdir(s->h->ctx, p) != 0)
+            return -1;
+        if (same(p, top))
+            return 0;
+        path_up(p);
+    }
+    return -1;
+}
+
+/* The next one DELTREE is to ask about of a (a path: itself, once; a pattern: its matches in the host's order,
+   folders first and then by name, after tool.last): 1 with tool.path, tool.shown and tool.last set, or 0. */
+static int deltree_find(struct sh *s, const char *a, int *isdir)
+{
+    char full[SH_PATH], dir[SH_PATH];
+    struct sh_dirent one, *e;
+    const char *cut;
+    int n, i, found = 0;
+    full_path(s, a, full, sizeof full);
+    if (!strpbrk(a, "*?")) {
+        if (s->tool.last[0] || s->h->stat(s->h->ctx, full, &one) != 0)
+            return 0;                           /* (done, or not there: nothing said, as MS-DOS says nothing) */
+        sh_fmt(s->tool.path, sizeof s->tool.path, "%s", full);
+        sh_fmt(s->tool.shown, sizeof s->tool.shown, "%s", a);
+        upper_all(s->tool.shown);
+        sh_fmt(s->tool.last, sizeof s->tool.last, "%s", "?");
+        *isdir = one.dir;
+        return 1;
+    }
+    sh_fmt(dir, sizeof dir, "%s", full);
+    path_up(dir);
+    if ((n = s->h->dir_read(s->h->ctx, dir, &e)) < 0)
+        return 0;
+    if (!(cut = strrchr(a, '\\')))
+        cut = a[0] && a[1] == ':' ? a + 1 : 0;
+    for (i = 0; i < n && !found; i++) {
+        if (!match(path_name(full), e[i].name))
+            continue;
+        if (s->tool.last[0] && (e[i].dir > s->tool.last_dir
+                                || (e[i].dir == s->tool.last_dir && strcmp(e[i].name, s->tool.last) <= 0)))
+            continue;                           /* (before the last, or it: asked already) */
+        path_join(s->tool.path, sizeof s->tool.path, dir, e[i].name);
+        sh_fmt(s->tool.shown, sizeof s->tool.shown, "%.*s%s", cut ? (int)(cut - a + 1) : 0, a, e[i].name);
+        upper_all(s->tool.shown);
+        sh_fmt(s->tool.last, sizeof s->tool.last, "%s", e[i].name);
+        s->tool.last_dir = e[i].dir;
+        *isdir = e[i].dir;
+        found = 1;
+    }
+    s->h->dir_free(s->h->ctx, e);
+    return found;
+}
+
+static int deltree_step(struct sh *s, int key);
+
+static void deltree_one(struct sh *s)
+{
+    char line[SH_PATH + 40];
+    sh_fmt(line, sizeof line, "Deleting %s...\r\n", s->tool.shown);
+    say(s, line);
+    if (tree_delete(s, s->tool.path) != 0) {
+        sh_fmt(line, sizeof line, "Unable to delete - %s\r\n", s->tool.shown);
+        err(s, line);
+        s->tool.code = 1;
+    }
+}
+
+/* DELTREE's paths from tool.at on: each found is asked about (SH_UNDER_WAY: the key comes to deltree_step) or with
+   /Y deleted; at the end, the exit code. */
+static int deltree_on(struct sh *s)
+{
+    char line[SH_PATH + 80];
+    int isdir;
+    for (; *s->tool.at; s->tool.at += strlen(s->tool.at) + 1, s->tool.last[0] = 0) {
+        while (deltree_find(s, s->tool.at, &isdir)) {
+            if (strlen(s->tool.path) <= 3) {    /* (a drive's root: never) */
+                sh_fmt(line, sizeof line, "DELTREE won't delete a drive's root - %s\r\n", s->tool.path);
+                err(s, line);
+                s->tool.code = 1;
+                continue;
+            }
+            if (s->tool.yes) {
+                deltree_one(s);
+                continue;
+            }
+            if (isdir)
+                sh_fmt(line, sizeof line, "Delete directory \"%s\" and all its subdirectories? [yn] ", s->tool.shown);
+            else
+                sh_fmt(line, sizeof line, "Delete file \"%s\"? [yn] ", s->tool.shown);
+            out(s, line);
+            if (s->h->key && s->h->key(s->h->ctx) == SH_UNDER_WAY) {
+                s->tool.step = deltree_step;
+                s->key_for = 3;
+                return SH_UNDER_WAY;
+            }
+            err(s, "\r\nDELTREE asks before it deletes, and nobody is at a keyboard here: DELTREE /Y\r\n");
+            return 1;
+        }
+    }
+    return s->tool.code;
+}
+
+static int deltree_step(struct sh *s, int key)
+{
+    if (key == 3) {
+        out(s, "^C\r\n");
+        return 1;
+    }
+    if (upper(key) != 'Y' && upper(key) != 'N')         /* (asked again) */
+        return s->h->key && s->h->key(s->h->ctx) == SH_UNDER_WAY ? SH_UNDER_WAY : 1;
+    out(s, upper(key) == 'Y' ? "y\r\n" : "n\r\n");
+    if (upper(key) == 'Y')
+        deltree_one(s);
+    return deltree_on(s);
+}
+
+/* DELTREE [/Y] path ...: folders with everything in them (and files) deleted, each asked about first unless /Y,
+   as MS-DOS 7.1 asks ("Delete directory "X" and all its subdirectories? [yn]"; here y or n alone, no Enter).
+   A path that isn't there: nothing said. A pattern: each of its matches. A drive's root: never. */
+static int cmd_deltree(struct sh *s, int argc, char **argv)
+{
+    unsigned k = 0;
+    int i;
+    s->tool.yes = 0;
+    for (i = 1; i < argc; i++)
+        if (same(argv[i], "/Y"))
+            s->tool.yes = 1;
+    if ((argc = switches(s, argc, argv, "Y")) < 0)
+        return 1;
+    if (argc < 2) {
+        err(s, "Required parameter missing\r\n");
+        return 1;
+    }
+    for (i = 1; i < argc; i++) {
+        size_t n = strlen(argv[i]) + 1;
+        if (k + n + 1 >= sizeof s->tool.args)
+            break;
+        memcpy(s->tool.args + k, argv[i], n);
+        k += (unsigned)n;
+    }
+    s->tool.args[k] = 0;
+    s->tool.at = s->tool.args;
+    s->tool.last[0] = 0;
+    s->tool.code = 0;
+    return deltree_on(s);
+}
+
 static int cmd_cd(struct sh *s, int argc, char **argv)
 {
     char p[SH_PATH], line[300];
@@ -888,7 +1466,7 @@ static int cmd_set(struct sh *s, int argc, char **argv, const char *raw)
 static const char *const builtins[] = { "CD", "CHDIR", "DIR", "COPY", "MOVE", "REN", "RENAME", "DEL", "ERASE", "MD",
     "MKDIR", "RD", "RMDIR", "TYPE", "ECHO", "SET", "PATH", "PROMPT", "CLS", "VER", "EXIT", "HISTORY", "HELP", "WHERE",
     "START", "DF", "DU", "CALL", "FOR", "GOTO", "IF", "PAUSE", "REM", "SHIFT", "VOL", "TRUENAME", "BREAK", "VERIFY",
-    "LH", "LOADHIGH", "CTTY", "ATTRIB", 0 };
+    "LH", "LOADHIGH", "CTTY", "ATTRIB", "XCOPY", "MORE", "DELTREE", 0 };
 
 static const char *const helps[] = {
     "CD [path]           the folder (of a drive: CD X:); X: changes drive",
@@ -897,6 +1475,9 @@ static const char *const helps[] = {
     "MOVE from [to]      ... moved",
     "REN from to         a file's new name",
     "DEL files           files deleted (* and ?)",
+    "XCOPY from [to] [/S] [/E] [/H] ...  files copied, with /S the folders in them",
+    "DELTREE [/Y] path ...  a folder and all in it deleted (asked first)",
+    "MORE [file]         a page at a time (also: command | MORE)",
     "ATTRIB [+R|-R] [+A|-A] [+S|-S] [+H|-H] [path]  attributes changed, or listed",
     "MD path, RD path    a folder made, removed",
     "DF [drive: ...]     the drives: their size, what is used and free",
@@ -1560,6 +2141,7 @@ static int run_line(struct sh *s, char *line)
     char copy[SH_LINE], *argv[32], target[SH_PATH], source[SH_PATH];
     const char *u;
     int argc, r = 0, append = 0;
+    source[0] = target[0] = 0;
     while (*line == ' ' || *line == '\t' || *line == '@')
         line++;
     {
@@ -1623,7 +2205,7 @@ static int run_line(struct sh *s, char *line)
             s->h->io(s->h->ctx, 0, 0, 0);
         return st == BATCH_BEGUN ? s->errorlevel : st > 0 ? SH_UNDER_WAY : st < 0 ? 1 : 0;
     }
-    if (bare(line, "<>")) {                     /* a built-in: its output to the file (it reads none) */
+    if (bare(line, "<>")) {                     /* a built-in: its output to the file (MORE alone reads its input) */
         if (take_redirs(s, line, source, target, sizeof target, &append) != 0) {
             err(s, "Syntax error\r\n");
             return 1;
@@ -1677,6 +2259,12 @@ static int run_line(struct sh *s, char *line)
         }
     } else if (same(argv[0], "DEL") || same(argv[0], "ERASE")) {
         r = cmd_del(s, argc, argv);
+    } else if (same(argv[0], "XCOPY")) {
+        r = cmd_xcopy(s, argc, argv);
+    } else if (same(argv[0], "MORE")) {
+        r = cmd_more(s, argc, argv, source);
+    } else if (same(argv[0], "DELTREE")) {
+        r = cmd_deltree(s, argc, argv);
     } else if (same(argv[0], "MD") || same(argv[0], "MKDIR") || same(argv[0], "RD") || same(argv[0], "RMDIR")) {
         char p[SH_PATH];
         int make = upper((unsigned char)argv[0][0]) == 'M';
@@ -1820,6 +2408,8 @@ static int run_line(struct sh *s, char *line)
         else if (r != SH_UNDER_WAY)
             s->level = r;                       /* (a command of the host's is as a program to IF ERRORLEVEL) */
     }
+    if (r == SH_UNDER_WAY && s->key_for == 3)
+        return r;                               /* (a built-in waiting for a key: its output's file kept: sh_key) */
     if (s->redirect) {
         s->h->close(s->h->ctx, s->redirect);
         s->redirect = 0;
@@ -1987,6 +2577,21 @@ void sh_key(struct sh *s, int ch)
     int what = s->key_for;
     if (!what)
         return;
+    if (what == 3) {                            /* a built-in's (MORE, DELTREE): on, or ended */
+        int r = s->tool.step(s, ch);
+        if (r == SH_UNDER_WAY)
+            return;
+        if (s->redirect) {
+            s->h->close(s->h->ctx, s->redirect);
+            s->redirect = 0;
+        }
+        s->discard = 0;
+        s->key_for = 0;
+        s->under_way = 0;
+        s->errorlevel = r;
+        next_command(s);
+        return;
+    }
     if (what == 2) {                            /* Terminate batch job (Y/N)? */
         if (upper(ch) != 'Y' && upper(ch) != 'N') {
             if (!s->h->key || s->h->key(s->h->ctx) != SH_UNDER_WAY) {   /* (asked again; nobody there: ended) */

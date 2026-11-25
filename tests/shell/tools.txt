@@ -1,0 +1,165 @@
+# XCOPY, MORE and DELTREE (sdk/shell, 2026-11-25): as MS-DOS 7.1's (asked of the reference disk) where they
+# agree; GLOS's never asks where MS-DOS asks "file or directory?" or before writing over a file.
+mkdir C:\SRC
+mkdir C:\SRC\SUB
+mkdir C:\SRC\EMPTY
+mkdir C:\SRC\SUB\DEEP
+file C:\SRC\A.TXT one
+file C:\SRC\B.DAT two
+file C:\SRC\SUB\C.TXT three
+file C:\SRC\SUB\DEEP\D.TXT four
+> attrib +h src\b.dat
+# a folder: its files (not the hidden one), into a folder made for them
+> xcopy src dst1
+tree C:\DST1
+> xcopy src dst2 /s
+tree C:\DST2
+> xcopy src dst3 /e
+tree C:\DST3
+> xcopy src\a.txt dst4\
+tree C:\DST4
+> xcopy src\a.txt dsta.txt
+cat C:\DSTA.TXT
+> xcopy src\*.txt dst1 /y
+> xcopy src\a.txt
+> xcopy src dst6 /s /h /f
+tree C:\DST6
+> xcopy src dst7 /s /l
+tree C:\DST7
+> xcopy src dst8 /t /e
+tree C:\DST8
+> xcopy src\sub dst9 /s /q
+tree C:\DST9
+> xcopy c:\src\sub\*.txt dst10\ > xc.txt
+cat C:\XC.TXT
+> xcopy src\a.txt dst11\ /m
+> attrib src\a.txt
+> xcopy src\*.* dst12\ /a
+> xcopy src dst13 /d:11-13-2026
+> xcopy src dst14 /d:11-14-26
+> xcopy src\a.txt dst1 /d
+> echo %errorlevel%
+# what it refuses
+> xcopy nosuch dst5
+> echo %errorlevel%
+> xcopy src\*.xyz dst5
+> xcopy src src\sub /s
+> echo %errorlevel%
+> xcopy src dst5 /z
+> xcopy src dst5 /d:13-01-2026
+> xcopy
+> xcopy a b c
+> xcopy src\a.txt q:\x
+> xcopy nowhere\a.txt dst5
+> xcopy src\a.txt src
+> echo %errorlevel%
+# DELTREE: asked, or with /Y not; a pattern's matches each; nothing said of what isn't there
+> deltree
+> deltree /x dst1
+> deltree /y nosuch
+> deltree /y dst2 dst3
+tree C:\DST2
+> deltree dst1
+key y
+tree C:\DST1
+> deltree dst4 dsta.txt
+key x
+key n
+key y
+tree C:\DST4
+cat C:\DSTA.TXT
+> attrib +r +h dst6\sub\c.txt
+> deltree /y dst6\*.*
+tree C:\DST6
+> deltree dst9 && echo gone
+key y
+> deltree /y c:\
+> deltree dst8 > nul
+key y
+tree C:\DST8
+nokeys
+> deltree dst10
+keys
+> deltree /y dst*.* xc.txt
+# MORE: a file, < a file, a pipe; a page at a time, any key the next, Q no more
+> more src\a.txt
+> more < src\sub\c.txt
+> type src\a.txt | more
+> more nosuch.txt
+> more /x
+> more
+file C:\TABS.TXT a	b	c
+> more tabs.txt
+line C:\LONG.TXT line 1
+line C:\LONG.TXT line 2
+line C:\LONG.TXT line 3
+line C:\LONG.TXT line 4
+line C:\LONG.TXT line 5
+line C:\LONG.TXT line 6
+line C:\LONG.TXT line 7
+line C:\LONG.TXT line 8
+line C:\LONG.TXT line 9
+line C:\LONG.TXT line 10
+line C:\LONG.TXT line 11
+line C:\LONG.TXT line 12
+line C:\LONG.TXT line 13
+line C:\LONG.TXT line 14
+line C:\LONG.TXT line 15
+line C:\LONG.TXT line 16
+line C:\LONG.TXT line 17
+line C:\LONG.TXT line 18
+line C:\LONG.TXT line 19
+line C:\LONG.TXT line 20
+line C:\LONG.TXT line 21
+line C:\LONG.TXT line 22
+line C:\LONG.TXT line 23
+line C:\LONG.TXT line 24
+line C:\LONG.TXT line 25
+line C:\LONG.TXT line 26
+line C:\LONG.TXT line 27
+line C:\LONG.TXT line 28
+line C:\LONG.TXT line 29
+line C:\LONG.TXT line 30
+line C:\LONG.TXT xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+line C:\LONG.TXT line 31
+line C:\LONG.TXT line 32
+line C:\LONG.TXT line 33
+line C:\LONG.TXT line 34
+line C:\LONG.TXT line 35
+line C:\LONG.TXT line 36
+line C:\LONG.TXT line 37
+line C:\LONG.TXT line 38
+line C:\LONG.TXT line 39
+line C:\LONG.TXT line 40
+line C:\LONG.TXT line 41
+line C:\LONG.TXT line 42
+line C:\LONG.TXT line 43
+line C:\LONG.TXT line 44
+line C:\LONG.TXT line 45
+line C:\LONG.TXT line 46
+line C:\LONG.TXT line 47
+line C:\LONG.TXT line 48
+line C:\LONG.TXT line 49
+line C:\LONG.TXT line 50
+line C:\LONG.TXT line 51
+line C:\LONG.TXT line 52
+line C:\LONG.TXT line 53
+line C:\LONG.TXT line 54
+line C:\LONG.TXT line 55
+line C:\LONG.TXT line 56
+line C:\LONG.TXT line 57
+line C:\LONG.TXT line 58
+line C:\LONG.TXT line 59
+line C:\LONG.TXT line 60
+> more long.txt
+key x
+key x
+> more long.txt
+key q
+> more long.txt > more.txt
+> type more.txt | more && echo after
+key x
+key x
+nokeys
+> more long.txt
+> exit

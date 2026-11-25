@@ -567,3 +567,36 @@ PATH`, `Invalid switch - /X`, `Invalid parameter - X`. The hosts give it `setatt
 so a native GLOS's own DOS answers it). /S is not done. DEL now says `Access denied` for a file it found but
 could not delete (read-only), as MS-DOS does, where it said `File not found`.
 
+
+## XCOPY, MORE and DELTREE (2026-11-25)
+
+Built-ins for phase G (a native GLOS ships no FreeDOS to bring them: [native-dos.md](native-dos.md), N5). Their
+output was asked of MS-DOS 7.1's own (XCOPY.EXE with XCOPY32.MOD, MORE.COM, DELTREE.EXE on the reference disk) and
+follows it where GLOS doesn't choose otherwise.
+
+- **XCOPY source [destination]** copies the source's files, with `/S` the folders under it (made as files go into
+  them; `/E`: every folder, empty ones too). It prints `Reading source file(s)...`, each file as the source was
+  named (`SRC\SUB\C.TXT`), then `N File(s) copied`; exit codes 0, 1 (no file found), 4 (a switch, the number of
+  names, a drive, a path, a copy into its own folder: `Cannot perform a cyclic copy`, or onto itself), 5 (a file
+  not written). Hidden and system files are left unless `/H`, as MS-DOS leaves them. MS-DOS 7.1's switches
+  `/A`, `/M`, `/D:date` (month-day-year), `/S`, `/E`, `/V`; later Windows' `/I`, `/H`, `/Q`, `/F` (full names, from
+  `->` to), `/L` (listed only), `/T` (the folders alone), `/C` (on after a failure), `/R` (read-only files written
+  over), `/K` (attributes kept), `/D` alone (only files newer than the destination's), `/Y` and `/-Y`. It never
+  asks: where MS-DOS asks whether a destination that isn't there is a file or a folder, it is a folder unless a
+  single file is copied to a name; a file that is there is written over (as COPY does here; MS-DOS asks unless
+  `/Y`). `/P` and `/W`, which ask, are refused as invalid switches.
+- **DELTREE [/Y] path ...** deletes each folder with everything in it (read-only, hidden and system files too),
+  or a file. Without `/Y` it asks first as MS-DOS does, `Delete directory "DST1" and all its subdirectories? [yn]`
+  (`Delete file "X"? [yn]` for a file), but y or n alone answers (MS-DOS wants Enter too). It then says `Deleting
+  DST1...`. A pattern deletes (or asks about) each match, folders and files; a path that isn't there gets nothing
+  said, as under MS-DOS. A drive's root is refused. With nobody at a keyboard (an SSH command, say) and no `/Y` it
+  deletes nothing and says to use `/Y`.
+- **MORE [file]**, `MORE < file`, `command | MORE`: 24 rows at a time and `-- More --`; any key shows the next
+  page, Ctrl+C, Esc or Q stops. Tabs go to every eighth column; a line longer than 80 columns counts as the rows it
+  takes; Ctrl+Z ends the text. Its output in a file (`>`), or nobody at a keyboard: all of it at once. MS-DOS 7.1's
+  MORE starts with an empty line; GLOS's doesn't.
+
+The two that wait for keys run as PAUSE does, in steps: the host's `key()` is asked, and `sh_key()` gives the key
+to the command's next step (`struct sh`'s `tool`), with its output's file (`>`) kept open until it ends. `*.*` now
+matches names without a dot too, as DOS's patterns do (`DST6\*.*` takes the folder SUB; `DIR`, `DEL`, `COPY` and
+`ATTRIB` the same). Tests: `tests/shell/tools.txt`.

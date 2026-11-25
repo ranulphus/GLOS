@@ -1,0 +1,476 @@
+GLOS shell 1.0. HELP lists its commands.
+
+[[C:\>]]
+attrib +h src\b.dat
+(SETATTR C:\SRC\B.DAT 22)
+[[C:\>]]
+xcopy src dst1
+Reading source file(s)...
+SRC\A.TXT
+        1 File(s) copied
+[[C:\>]]
+(TREE C:\DST1: A.TXT)
+xcopy src dst2 /s
+Reading source file(s)...
+SRC\A.TXT
+SRC\SUB\C.TXT
+SRC\SUB\DEEP\D.TXT
+        3 File(s) copied
+[[C:\>]]
+(TREE C:\DST2: A.TXT SUB\ SUB\C.TXT SUB\DEEP\ SUB\DEEP\D.TXT)
+xcopy src dst3 /e
+Reading source file(s)...
+SRC\A.TXT
+SRC\SUB\C.TXT
+SRC\SUB\DEEP\D.TXT
+        3 File(s) copied
+[[C:\>]]
+(TREE C:\DST3: A.TXT EMPTY\ SUB\ SUB\C.TXT SUB\DEEP\ SUB\DEEP\D.TXT)
+xcopy src\a.txt dst4\
+Reading source file(s)...
+SRC\A.TXT
+        1 File(s) copied
+[[C:\>]]
+(TREE C:\DST4: A.TXT)
+xcopy src\a.txt dsta.txt
+Reading source file(s)...
+SRC\A.TXT
+        1 File(s) copied
+[[C:\>]]
+(CAT C:\DSTA.TXT: one\r\n)
+xcopy src\*.txt dst1 /y
+Reading source file(s)...
+SRC\A.TXT
+        1 File(s) copied
+[[C:\>]]
+xcopy src\a.txt
+Reading source file(s)...
+SRC\A.TXT
+        1 File(s) copied
+[[C:\>]]
+xcopy src dst6 /s /h /f
+Reading source file(s)...
+C:\SRC\A.TXT -> C:\DST6\A.TXT
+C:\SRC\B.DAT -> C:\DST6\B.DAT
+C:\SRC\SUB\C.TXT -> C:\DST6\SUB\C.TXT
+C:\SRC\SUB\DEEP\D.TXT -> C:\DST6\SUB\DEEP\D.TXT
+        4 File(s) copied
+[[C:\>]]
+(TREE C:\DST6: A.TXT B.DAT SUB\ SUB\C.TXT SUB\DEEP\ SUB\DEEP\D.TXT)
+xcopy src dst7 /s /l
+SRC\A.TXT
+SRC\SUB\C.TXT
+SRC\SUB\DEEP\D.TXT
+        3 File(s)
+[[C:\>]]
+(TREE C:\DST7:)
+xcopy src dst8 /t /e
+[[C:\>]]
+(TREE C:\DST8: EMPTY\ SUB\ SUB\DEEP\)
+xcopy src\sub dst9 /s /q
+        2 File(s) copied
+[[C:\>]]
+(TREE C:\DST9: C.TXT DEEP\ DEEP\D.TXT)
+xcopy c:\src\sub\*.txt dst10\ > xc.txt
+[[C:\>]]
+(CAT C:\XC.TXT: Reading source file(s)...\r\nC:\SRC\SUB\C.TXT\r\n        1 File(s) copied\r\n)
+xcopy src\a.txt dst11\ /m
+Reading source file(s)...
+(SETATTR C:\SRC\A.TXT 00)
+SRC\A.TXT
+        1 File(s) copied
+[[C:\>]]
+attrib src\a.txt
+             A.TXT         C:\SRC\A.TXT
+[[C:\>]]
+xcopy src\*.* dst12\ /a
+<<File not found - *.*
+>>        0 File(s) copied
+[[C:\>]]
+xcopy src dst13 /d:11-13-2026
+Reading source file(s)...
+SRC\A.TXT
+        1 File(s) copied
+[[C:\>]]
+xcopy src dst14 /d:11-14-26
+        0 File(s) copied
+[[C:\>]]
+xcopy src\a.txt dst1 /d
+        0 File(s) copied
+[[C:\>]]
+echo %errorlevel%
+1
+[[C:\>]]
+xcopy nosuch dst5
+<<File not found - NOSUCH
+>>        0 File(s) copied
+[[C:\>]]
+echo %errorlevel%
+1
+[[C:\>]]
+xcopy src\*.xyz dst5
+<<File not found - *.XYZ
+>>        0 File(s) copied
+[[C:\>]]
+xcopy src src\sub /s
+<<Cannot perform a cyclic copy
+>>[[C:\>]]
+echo %errorlevel%
+4
+[[C:\>]]
+xcopy src dst5 /z
+<<Invalid switch - /z
+>>[[C:\>]]
+xcopy src dst5 /d:13-01-2026
+<<Invalid date
+>>[[C:\>]]
+xcopy
+<<Invalid number of parameters
+>>[[C:\>]]
+xcopy a b c
+<<Invalid number of parameters
+>>[[C:\>]]
+xcopy src\a.txt q:\x
+<<Invalid drive specification
+>>[[C:\>]]
+xcopy nowhere\a.txt dst5
+<<Invalid path
+>>[[C:\>]]
+xcopy src\a.txt src
+<<File cannot be copied onto itself
+>>        0 File(s) copied
+[[C:\>]]
+echo %errorlevel%
+4
+[[C:\>]]
+deltree
+<<Required parameter missing
+>>[[C:\>]]
+deltree /x dst1
+<<Invalid switch - /x
+>>[[C:\>]]
+deltree /y nosuch
+[[C:\>]]
+deltree /y dst2 dst3
+Deleting DST2...
+Deleting DST3...
+[[C:\>]]
+(TREE C:\DST2:)
+deltree dst1
+Delete directory "DST1" and all its subdirectories? [yn] (KEY?)
+(KEY y)
+y
+Deleting DST1...
+[[C:\>]]
+(TREE C:\DST1:)
+deltree dst4 dsta.txt
+Delete directory "DST4" and all its subdirectories? [yn] (KEY?)
+(KEY x)
+(KEY?)
+(KEY n)
+n
+Delete file "DSTA.TXT"? [yn] (KEY?)
+(KEY y)
+y
+Deleting DSTA.TXT...
+[[C:\>]]
+(TREE C:\DST4: A.TXT)
+(CAT C:\DSTA.TXT: no such file)
+attrib +r +h dst6\sub\c.txt
+(SETATTR C:\DST6\SUB\C.TXT 23)
+[[C:\>]]
+deltree /y dst6\*.*
+Deleting DST6\SUB...
+(SETATTR C:\DST6\SUB\C.TXT 20)
+Deleting DST6\A.TXT...
+Deleting DST6\B.DAT...
+[[C:\>]]
+(TREE C:\DST6:)
+deltree dst9 && echo gone
+Delete directory "DST9" and all its subdirectories? [yn] (KEY?)
+(KEY y)
+y
+Deleting DST9...
+gone
+[[C:\>]]
+deltree /y c:\
+<<DELTREE won't delete a drive's root - C:\
+>>[[C:\>]]
+deltree dst8 > nul
+Delete directory "DST8" and all its subdirectories? [yn] (KEY?)
+(KEY y)
+y
+[[C:\>]]
+(TREE C:\DST8:)
+deltree dst10
+Delete directory "DST10" and all its subdirectories? [yn] <<
+DELTREE asks before it deletes, and nobody is at a keyboard here: DELTREE /Y
+>>[[C:\>]]
+deltree /y dst*.* xc.txt
+Deleting DST10...
+Deleting DST11...
+Deleting DST13...
+Deleting DST4...
+Deleting DST6...
+Deleting XC.TXT...
+[[C:\>]]
+more src\a.txt
+{{one
+}}[[C:\>]]
+more < src\sub\c.txt
+{{three
+}}[[C:\>]]
+type src\a.txt | more
+{{one
+}}[[C:\>]]
+more nosuch.txt
+<<File not found - nosuch.txt
+>>[[C:\>]]
+more /x
+<<Invalid switch - /x
+>>[[C:\>]]
+more
+<<MORE file, MORE < file, or command | MORE
+>>[[C:\>]]
+more tabs.txt
+{{a       b       c
+}}[[C:\>]]
+more long.txt
+{{line 1
+line 2
+line 3
+line 4
+line 5
+line 6
+line 7
+line 8
+line 9
+line 10
+line 11
+line 12
+line 13
+line 14
+line 15
+line 16
+line 17
+line 18
+line 19
+line 20
+line 21
+line 22
+line 23
+line 24
+}}-- More --(KEY?)
+(KEY x)
+
+{{line 25
+line 26
+line 27
+line 28
+line 29
+line 30
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+line 31
+line 32
+line 33
+line 34
+line 35
+line 36
+line 37
+line 38
+line 39
+line 40
+line 41
+line 42
+line 43
+line 44
+line 45
+line 46
+}}-- More --(KEY?)
+(KEY x)
+
+{{line 47
+line 48
+line 49
+line 50
+line 51
+line 52
+line 53
+line 54
+line 55
+line 56
+line 57
+line 58
+line 59
+line 60
+}}[[C:\>]]
+more long.txt
+{{line 1
+line 2
+line 3
+line 4
+line 5
+line 6
+line 7
+line 8
+line 9
+line 10
+line 11
+line 12
+line 13
+line 14
+line 15
+line 16
+line 17
+line 18
+line 19
+line 20
+line 21
+line 22
+line 23
+line 24
+}}-- More --(KEY?)
+(KEY q)
+
+[[C:\>]]
+more long.txt > more.txt
+[[C:\>]]
+type more.txt | more && echo after
+{{line 1
+line 2
+line 3
+line 4
+line 5
+line 6
+line 7
+line 8
+line 9
+line 10
+line 11
+line 12
+line 13
+line 14
+line 15
+line 16
+line 17
+line 18
+line 19
+line 20
+line 21
+line 22
+line 23
+line 24
+}}-- More --(KEY?)
+(KEY x)
+
+{{line 25
+line 26
+line 27
+line 28
+line 29
+line 30
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+line 31
+line 32
+line 33
+line 34
+line 35
+line 36
+line 37
+line 38
+line 39
+line 40
+line 41
+line 42
+line 43
+line 44
+line 45
+line 46
+}}-- More --(KEY?)
+(KEY x)
+
+{{line 47
+line 48
+line 49
+line 50
+line 51
+line 52
+line 53
+line 54
+line 55
+line 56
+line 57
+line 58
+line 59
+line 60
+}}after
+[[C:\>]]
+more long.txt
+{{line 1
+line 2
+line 3
+line 4
+line 5
+line 6
+line 7
+line 8
+line 9
+line 10
+line 11
+line 12
+line 13
+line 14
+line 15
+line 16
+line 17
+line 18
+line 19
+line 20
+line 21
+line 22
+line 23
+line 24
+}}-- More --
+{{line 25
+line 26
+line 27
+line 28
+line 29
+line 30
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+line 31
+line 32
+line 33
+line 34
+line 35
+line 36
+line 37
+line 38
+line 39
+line 40
+line 41
+line 42
+line 43
+line 44
+line 45
+line 46
+}}-- More --
+{{line 47
+line 48
+line 49
+line 50
+line 51
+line 52
+line 53
+line 54
+line 55
+line 56
+line 57
+line 58
+line 59
+line 60
+}}[[C:\>]]
+exit
+(QUIT 0)
+[[C:\>]]
+

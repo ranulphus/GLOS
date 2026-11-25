@@ -218,6 +218,9 @@ COPY from [to]      files (* and ?), into a folder or a file
 MOVE from [to]      ... moved
 REN from to         a file's new name
 DEL files           files deleted (* and ?)
+XCOPY from [to] [/S] [/E] [/H] ...  files copied, with /S the folders in them
+DELTREE [/Y] path ...  a folder and all in it deleted (asked first)
+MORE [file]         a page at a time (also: command | MORE)
 ATTRIB [+R|-R] [+A|-A] [+S|-S] [+H|-H] [path]  attributes changed, or listed
 MD path, RD path    a folder made, removed
 DF [drive: ...]     the drives: their size, what is used and free

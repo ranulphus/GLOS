@@ -13,6 +13,8 @@
  *   key C           the key the shell waits for (PAUSE, "Terminate batch job (Y/N)?")
  *   stop            Ctrl+C: the shell is told when it next asks
  *   nokeys          from here nobody is at a keyboard
+ *   keys            from here somebody is again
+ *   tree PATH       a folder's files and folders, all the way down, by name
  *   cat PATH        a file's bytes shown (CR and LF as \r and \n)
  *   # ...           a comment
  * In the transcript: errors are in <<...>>, the prompt in [[...]], a file's own text (TYPE) in {{...}};
@@ -225,6 +227,37 @@ static int h_space(void *ctx, int drive, unsigned long *total, unsigned long *le
 
 static int keys = 1, stopped;
 
+static int by_name(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
+
+/* tree's lines: each name under dir (native), with its path from top, folders ending with a backslash */
+static void tree(const char *dir, const char *rel)
+{
+    char *names[256], path[900], r[900];
+    struct dirent *de;
+    struct stat st;
+    DIR *d = opendir(dir);
+    int n = 0, i;
+    if (!d)
+        return;
+    while ((de = readdir(d)) != NULL && n < 256)
+        if (strcmp(de->d_name, ".") && strcmp(de->d_name, ".."))
+            names[n++] = strdup(de->d_name);
+    closedir(d);
+    qsort(names, (size_t)n, sizeof *names, by_name);
+    for (i = 0; i < n; i++) {
+        snprintf(path, sizeof path, "%s/%s", dir, names[i]);
+        snprintf(r, sizeof r, "%s%s", rel, names[i]);
+        if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
+            printf(" %s\\", r);
+            strcat(r, "\\");
+            tree(path, r);
+        } else {
+            printf(" %s", r);
+        }
+        free(names[i]);
+    }
+}
+
 static int h_seek(void *ctx, void *f, unsigned long pos) { (void)ctx; return fseek(f, (long)pos, SEEK_SET) ? -1 : 0; }
 
 static int h_key(void *ctx)
@@ -340,6 +373,13 @@ int main(int argc, char **argv)
             stopped = 1;
         } else if (!strcmp(line, "nokeys")) {
             keys = 0;
+        } else if (!strcmp(line, "keys")) {
+            keys = 1;
+        } else if (!strncmp(line, "tree ", 5)) {
+            native(arg, p, sizeof p);
+            printf("(TREE %s:", arg);
+            tree(p, "");
+            printf(")\n");
         } else if (!strncmp(line, "cat ", 4)) {
             int c;
             native(arg, p, sizeof p);
