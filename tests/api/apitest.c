@@ -1022,11 +1022,15 @@ static void files(unsigned many)
     check("fs-sectors", ok && x == GLOS_E_REFUSED && q.error, "r=%d total=%u sig=%02x%02x none=%u error=%x", r, q.total_lo, sec[510],
           sec[511], x, q.error);
     /* A call's most, 32 sectors, in one run: the same bytes as sector by sector. Of the hard disk; and of the
-       floppy drive if a disk is in it (its tracks are 18 sectors: the run is three of the BIOS's calls). */
+       floppy drive if a disk is in it (its tracks are 18 sectors: the run is three of the BIOS's calls). The hard
+       disk's are sectors 0-31, the MBR and the gap before the first partition, which nothing writes while the
+       suite runs: sectors 50-81 were the first FAT's on Loop A's native disk, and native GLOS's DOS writes a FAT
+       up to 2 s after a change, so the run and the singles could straddle a write (the native-dos session's
+       finding, 1 run in 4 on the native 486 beside another emulator). */
     for (c = 0; c < 2; c++) {
         memset(&q, 0, sizeof q);
         q.disk = c ? 0 : 0x80;
-        q.lba_lo = c ? 10 : 50;
+        q.lba_lo = c ? 10 : 0;
         q.count = 32;
         q.buffer = (unsigned)run;
         memset(run, 0xEE, sizeof run), memset(one, 0xDD, sizeof one);
@@ -1036,7 +1040,7 @@ static void files(unsigned many)
             break;
         }
         for (i = 0, x = 0; i < 32; i++) {
-            q.lba_lo = (c ? 10 : 50) + i;
+            q.lba_lo = (c ? 10 : 0) + i;
             q.count = 1;
             q.buffer = (unsigned)(one + i * 512);
             x += glos_fs_sectors(&q) != 0;
