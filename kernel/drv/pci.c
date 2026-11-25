@@ -277,8 +277,11 @@ u32 pci_lfb_range(u32 *base, const struct pci_dev **card)
                Radeon 7500 LE (1002:5157), whose frame buffers and BARs are 64 MB and whose registers are in a BAR
                of their own: DOS-GL, bench B, 2026-11-24.) */
             u32 b = d->bar[k], size, cap = d->vendor == 0x5333 ? 16u << 20
-                                           : d->vendor == 0x1002 && (d->device == 0x5159 || d->device == 0x5157)
-                                             ? 64u << 20 : 32u << 20;
+                                           : d->vendor == 0x1002 && (d->device == 0x5159 || d->device == 0x5157
+                                                                     || d->device == 0x5B63)
+                                             ? 64u << 20 : 32u << 20;      /* (the X550's 128 MB BAR is two 64 MB
+                                                   apertures of the same memory, the second byte-swapped: the
+                                                   first alone, as the native-dos session measured, 2026-11-25) */
             int matrox_fb = d->vendor == 0x102B && k == 0;      /* (Matrox's G-series: BAR 0 is the framebuffer,
                                                    whatever its flags say: 86Box's G100 has it not prefetchable) */
             if (!b || (b & 1) || (!(b & 8) && !matrox_fb) || (b & 6))   /* (I/O; not prefetchable; 64-bit or below 1 MB) */
