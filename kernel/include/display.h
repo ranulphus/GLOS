@@ -9,7 +9,8 @@ struct bootinfo;
 enum { DISPLAY_OFF, DISPLAY_ON, DISPLAY_CARD };
 
 void display_init(const struct bootinfo *bi);   /* GLOS.CFG's [display] mode: asked for at the start */
-void display_card_settle(void);          /* a stuck Radeon engine reset before a BIOS mode set (gfx/radeon.c) */
+int display_card_settle(void);           /* a stuck Radeon engine reset before a BIOS mode set (gfx/radeon.c): 0, or
+                                           -1 (stuck past two resets: no mode set may be made) */
 int display_ask(int what, u32 w, u32 h, u32 bpp);       /* from any thread: DISPLAY_ (w 0: the mode as it is, or
                                                    the configured one); done by the VM thread when the stub
                                                    next asks. -1: one is waiting already */

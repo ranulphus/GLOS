@@ -262,13 +262,14 @@ static void power_set(int state)
     }
 }
 
-static void radeon_settle(int surfaces);
+static int radeon_settle(int surfaces);
 
 static void text_mode(void)
 {
     struct rmregs r;
     d.power = DISPLAY_POWER_ON;                 /* (a mode set turns the screen on) */
-    radeon_settle(0);
+    if (radeon_settle(0) == RADEON_DEAD)
+        return;                                 /* (the BIOS's writes would hold the bus: the screen as it is) */
     memset(&r, 0, sizeof r);
     r.eax = 0x0003;
     vbe(&r);
@@ -293,7 +294,15 @@ static void palette(void)
 /* An ATI Radeon of the R100 family (the HAL's: hal/src/radeon/chip.c), settled before every mode set the BIOS
    makes for GLOS (gfx/radeon.c: a stuck engine reset, so that the BIOS's writes to it can't hold the bus), and its
    surfaces cleared before the desktop's. Its register BAR (BAR 2, memory) mapped once. Nothing done without one. */
-static void radeon_settle(int surfaces)
+static struct pci_dev *radeon_pd;
+
+static void radeon_bm(int on)                  /* its bus mastering, at the PCI command register */
+{
+    u32 c = pci_read32(radeon_pd->bus, radeon_pd->dev, radeon_pd->fn, 0x04);
+    pci_write32(radeon_pd->bus, radeon_pd->dev, radeon_pd->fn, 0x04, on ? (c & 0xFFFFu) | 4u : (c & 0xFFFFu) & ~4u);
+}
+
+static int radeon_settle(int surfaces)
 {
     static const u16 ids[] = { 0x5144, 0x5145, 0x5146, 0x5147, 0x5157, 0x5158, 0x5159, 0x515A };
     static volatile u32 *regs;
@@ -305,16 +314,16 @@ static void radeon_settle(int surfaces)
         for (k = 0; k < sizeof ids / sizeof ids[0]; k++)
             if ((pd = pci_find(0x1002, ids[k], 0)) != 0 && pd->class == 0x03)
                 break;
-        if (k < sizeof ids / sizeof ids[0] && !(pd->bar[2] & 1) && (pd->bar[2] & ~15u))
-            regs = mm_dev_map(pd->bar[2] & ~15u, 0x4000);
+        if (k < sizeof ids / sizeof ids[0] && !(pd->bar[2] & 1) && (pd->bar[2] & ~15u)
+            && (regs = mm_dev_map(pd->bar[2] & ~15u, 0x4000)) != 0)
+            radeon_pd = pd;
     }
-    if (regs)
-        radeon_settle_regs(regs, pit2_wait, surfaces);
+    return regs ? radeon_settle_regs(regs, pit2_wait, radeon_bm, surfaces) : RADEON_IDLE;
 }
 
 /* Before a mode set the BIOS makes for GLOS outside this file (a session's end puts its first mode back:
    vm/session.c), which on a PC with no desktop is the only one: the P3's freeze at a kill was there. */
-void display_card_settle(void) { radeon_settle(0); }
+int display_card_settle(void) { return radeon_settle(0) == RADEON_DEAD ? -1 : 0; }
 
 /* The desktop's mode set: 0, or -1 with why in the log. */
 static int mode_set(void)
@@ -332,7 +341,10 @@ static int mode_set(void)
     }
     if (!describe(d.mode, m))
         return -1;
-    radeon_settle(1);
+    if (radeon_settle(1) == RADEON_DEAD) {
+        kprintf("GLOS-DISPLAY error=card-stuck mode=%x\n", d.mode);
+        return -1;
+    }
     memset(&r, 0, sizeof r);
     r.eax = 0x4F02;
     r.ebx = d.mode | 0x4000u;                   /* with its linear framebuffer */
@@ -462,6 +474,7 @@ int display_app_busy(void) { return d.on && (d.app_w || d.app_ask); }
 static void app_turn(void)                      /* (the VM thread) */
 {
     u32 w = d.want_w, h = d.want_h, mode = d.mode, pitch = d.fb.pitch;
+    int dead;
     struct rmregs r;
     u8 m[64];
     d.app_ask = 0;
@@ -477,14 +490,17 @@ static void app_turn(void)                      /* (the VM thread) */
             kprintf("GLOS-DISPLAY app error=no-mode want=%ux%ux%u\n", w, h, d.bpp);
         } else {
             mga_mode_begin();
-            radeon_settle(0);
+            dead = radeon_settle(0) == RADEON_DEAD;
             memset(&r, 0, sizeof r);
             r.eax = 0x4F02;
             r.ebx = mode | 0x4000u | 0x8000u;   /* its linear framebuffer; the card's memory kept */
-            if (!vbe(&r)) {
-                kprintf("GLOS-DISPLAY app error=mode-set mode=%x ax=%04x\n", mode, r.eax & 0xFFFF);
+            if (dead || !vbe(&r)) {
+                if (dead)
+                    kprintf("GLOS-DISPLAY app error=card-stuck mode=%x\n", mode);
+                else
+                    kprintf("GLOS-DISPLAY app error=mode-set mode=%x ax=%04x\n", mode, r.eax & 0xFFFF);
                 d.bad_w = (u16)w, d.bad_h = (u16)h;
-                if (w) {                        /* (the desktop's again, whatever it left) */
+                if (w && !dead) {               /* (the desktop's again, whatever it left) */
                     memset(&r, 0, sizeof r);
                     r.eax = 0x4F02;
                     r.ebx = d.mode | 0x4000u | 0x8000u;
