@@ -8,7 +8,11 @@
  * 1505h (the primary descriptor: "CD001"), 1508h (sector 16 read, as 1505h's), 1510h's IOCTL input 6 (a disc in),
  * 7 (2048), 8 (the volume's size), 9 (media changed: an answer), READ LONG (sector 16 again), 1501h (the driver's
  * header: "GLOSCD01"), and the driver's own strategy and interrupt routines called with IOCTL input 8 (the same
- * size). Then README.TXT read through DOS from the drive: its first bytes "hello". */
+ * size). Then README.TXT read through DOS from the drive: its first bytes "hello".
+ *
+ *   CDTEST audio       a mixed-mode disc (mkiso.py --cue --tone): IOCTL input 10 (tracks 1 to 3) and 11 (track 2
+ *                      an audio one); PLAY AUDIO of track 2 (busy); the Q channel's time moved on a second and a half
+ *                      later; STOP (paused, the time held), RESUME (busy again), STOP twice (the play forgotten). */
 #include <dos.h>
 #include <i86.h>
 #include <stdio.h>
@@ -53,7 +57,86 @@ static unsigned short ioctl_in(unsigned drive, unsigned char __far *cb, unsigned
     return q.status;
 }
 
-int main(void)
+static unsigned short request(unsigned drive, unsigned char cmd, unsigned char mode, unsigned long a, unsigned long b)
+{
+    static unsigned char q[32];
+    union REGS r;
+    struct SREGS s;
+    memset(q, 0, sizeof q);
+    q[0] = 22, q[2] = cmd, q[13] = mode;
+    *(unsigned long *)(q + 14) = a, *(unsigned long *)(q + 18) = b;
+    segread(&s);
+    r.x.ax = 0x1510, r.x.cx = drive, r.x.bx = FP_OFF((void __far *)q);
+    s.es = FP_SEG((void __far *)q);
+    int86x(0x2F, &r, &r, &s);
+    return *(unsigned short *)(q + 3);
+}
+
+static unsigned long q_time(unsigned drive, unsigned *track)
+{
+    unsigned char cb[12];
+    memset(cb, 0, sizeof cb), cb[0] = 12;
+    ioctl_in(drive, cb, 11);
+    *track = cb[2];
+    return cb[4] * 4500UL + cb[5] * 75UL + cb[6];       /* (the track's running time, in frames) */
+}
+
+static void wait_ticks(unsigned n)
+{
+    volatile unsigned long __far *t = (volatile unsigned long __far *)MK_FP(0x40, 0x6C);
+    unsigned long t0 = *t;
+    while (*t - t0 < n)
+        ;
+}
+
+static int audio_test(unsigned drive)
+{
+    unsigned char cb[12];
+    unsigned long start2, t1, t2, t3;
+    unsigned st, tr, k;
+    char what[96];
+
+    memset(cb, 0, sizeof cb), cb[0] = 10;
+    st = ioctl_in(drive, cb, 7);
+    sprintf(what, "tracks %u to %u", cb[1], cb[2]);
+    check("ioctl-10", (st & 0x8000) == 0 && cb[1] == 1 && cb[2] == 3, what);
+    memset(cb, 0, sizeof cb), cb[0] = 11, cb[1] = 2;
+    st = ioctl_in(drive, cb, 7);
+    start2 = *(unsigned long *)(cb + 2);
+    sprintf(what, "track 2 at %02u:%02u:%02u, control %02x", (unsigned)(start2 >> 16 & 0xFF), (unsigned)(start2 >> 8 & 0xFF),
+            (unsigned)(start2 & 0xFF), cb[6]);
+    check("ioctl-11", (st & 0x8000) == 0 && !(cb[6] & 0x40) && start2 != 0, what);
+    st = request(drive, 132, 1, start2, 75UL * 5);
+    sprintf(what, "status %04x", st);
+    check("play", !(st & 0x8000) && (st & 0x0200), what);
+    wait_ticks(9);
+    t1 = q_time(drive, &tr);
+    wait_ticks(27);
+    t2 = q_time(drive, &k);
+    sprintf(what, "track %u, %lu then %lu frames", tr, t1, t2);
+    check("q-moves", tr == 2 && t2 > t1 + 40, what);
+    st = request(drive, 133, 0, 0, 0);
+    memset(cb, 0, sizeof cb), cb[0] = 15;
+    k = ioctl_in(drive, cb, 11);
+    t1 = q_time(drive, &tr);
+    wait_ticks(18);
+    t3 = q_time(drive, &tr);
+    sprintf(what, "status %04x, paused %u, %lu then %lu", k, cb[1] & 1, t1, t3);
+    check("stop-pauses", !(st & 0x8000) && (cb[1] & 1) && !(k & 0x0200) && t3 == t1, what);
+    st = request(drive, 136, 0, 0, 0);
+    sprintf(what, "status %04x", st);
+    check("resume", !(st & 0x8000) && (st & 0x0200), what);
+    request(drive, 133, 0, 0, 0);
+    request(drive, 133, 0, 0, 0);
+    memset(cb, 0, sizeof cb), cb[0] = 15;
+    k = ioctl_in(drive, cb, 11);
+    sprintf(what, "status %04x, paused %u", k, cb[1] & 1);
+    check("stop-twice", !(k & 0x0200) && !(cb[1] & 1), what);
+    printf("CDTEST done failures=%d\n", fails);
+    return fails;
+}
+
+int main(int argc, char **argv)
 {
     union REGS r;
     struct SREGS s;
@@ -71,6 +154,8 @@ int main(void)
         printf("CDTEST done failures=%d\n", fails);
         return fails;
     }
+    if (argc > 1 && (argv[1][0] == 'a' || argv[1][0] == 'A'))
+        return audio_test(drive);
     r.x.ax = 0x150B, r.x.cx = drive;
     int86(0x2F, &r, &r);
     k = r.x.ax;

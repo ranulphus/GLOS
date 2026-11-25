@@ -8301,6 +8301,45 @@ def cdrom_case(profile, card):
         not bad
 
 
+def cdrom_audio_case(profile, card):
+    """N4's CD audio by the drive's own output (C6's first part): a mixed-mode disc (mkiso.py --cue: the data
+    track and two tone tracks) in 86Box's drive, an SB16 beside it (86Box plays a disc's audio through the sound
+    card); CDTEST audio: the TOC's tracks through IOCTL input 10 and 11, PLAY AUDIO busy, the Q channel's time
+    moving, STOP pausing (the time held), RESUME, STOP twice. Skipped as cdrom_case is."""
+    tag = "cdaudio-" + profile
+    if not cdrom_runpy():
+        return "  %-22s SKIP RetroGPU's run.py has no --cdrom (LOOPA_RUNPY)" % tag, True
+    d = os.path.join(ROOT, "out", tag + "-img")
+    src = os.path.join(d, "src")
+    subprocess.run(["rm", "-rf", d])
+    os.makedirs(src)
+    open(os.path.join(src, "README.TXT"), "wb").write(b"hello, a mixed-mode disc\r\n")
+    iso, cue = os.path.join(d, "disc.iso"), os.path.join(d, "disc.cue")
+    mk = subprocess.run([sys.executable, os.path.join(ROOT, "tools/ndos/mkiso.py"), iso, src, "--label", "AUDIOCD",
+                         "--cue", cue, "--tone", "8", "--tone", "4"], capture_output=True)
+    checks, info = {"image": mk.returncode == 0}, ""
+    if not checks["image"]:
+        return "  %-22s FAIL image=%r" % (tag, mk.stderr.decode("latin-1")[-300:]), False
+    agent = Agent(tag + "-" + card, profile, card, ["--cdrom", cue, "--sound", "sb16",
+                                                    "--file", "build/ow/dos/CDTEST.EXE=/TEST/CDTEST.EXE",
+                                                    "--cmd", "C:\\TEST\\GLOS.EXE"], timeout=900)
+    try:
+        checks["listen"] = agent.listening()
+        if checks["listen"]:
+            rc, o, e = agent.ssh("C:\\TEST\\CDTEST.EXE audio")
+            o = (o + e).replace("\r", "")
+            checks["audio"] = rc == 0 and "CDTEST done failures=0" in o
+            info += " " + " ".join(l.split(" ", 1)[1] for l in o.split("\n") if l.startswith("CDTEST ") and "PASS" not in l)
+            agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    log = agent.wait()
+    checks["clean"] = "GLOS-PANIC" not in log and "GLOS-WARN" not in log
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % (tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad) + info), \
+        not bad
+
+
 def nboot_upgrade_case(profile, card, fat=16, msdos=False):
     """Phase G's upgrade (docs/v1/native-dos.md): a GLOS that DOS starts made to start by itself on the same volume.
     A hard disk of one partition (FAT16, or a FAT32 one just under 2 GiB, sparse) that starts FreeDOS (GLOS's formatter
@@ -13825,7 +13864,9 @@ def main():
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "cdrom":                      # (N4's CD-ROM natively: the bf6, the 486)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
-        return 0 if all(r[1] for r in matrix(cdrom_case, cases, a.jobs)) else 1
+        res = matrix(cdrom_case, cases, a.jobs)
+        res += matrix(cdrom_audio_case, [c for c in cases if c[0] == "bf6"], a.jobs)    # (the 486's board: no sound)
+        return 0 if all(r[1] for r in res) else 1
     if a.suite == "ndos":                       # (native machines: the bf6 with VME, the 486 without)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(ndos_case, cases, a.jobs)) else 1

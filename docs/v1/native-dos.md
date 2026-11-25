@@ -1087,8 +1087,11 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   prefetch; SEEK; PLAY, STOP, RESUME by the drive's own audio), the driver's header in a block of DOS memory with
   its strategy and interrupt routines as ARPLs (a program that calls the driver itself is answered the same).
   tests/dos/cdtest.c (CDTEST) in `jobs.py cdrom`: 1500h, 150Bh, 150Ch, 150Dh, 1505h, 1508h, IOCTL input 6-9, READ
-  LONG, 1501h's header, the driver called directly, a file through DOS: bf6 and 486 PASS. The audio requests are
-  built but not yet tested (C6: a disc with audio tracks, CUE/BIN). Planned: C2 kernel/drv/cdrom.c, the drives: found from ide.c's probe, sectors of 2048 bytes with
+  LONG, 1501h's header, the driver called directly, a file through DOS: bf6 and 486 PASS. **C6's first part (the
+  drive's own output):** mkiso.py --cue --tone makes a mixed-mode disc (the image, then tone tracks as CUE/BIN);
+  `jobs.py cdrom`'s cdaudio case (bf6, an SB16 beside the drive) with CDTEST audio: the TOC's tracks (IOCTL input
+  10, 11), PLAY AUDIO busy, the Q channel's time moving, STOP pausing with the time held, RESUME, STOP twice:
+  PASS. Owed: the digital way (READ CD's audio frames into GLOS's mixer), the default where a drive gives them. Planned: C2 kernel/drv/cdrom.c, the drives: found from ide.c's probe, sectors of 2048 bytes with
   a small cache, the disc's change (UNIT ATTENTION) and its absence (NOT READY), the TOC. C3 kernel/fs/iso.c, ISO
   9660 read-only over a sector reader (level 1 names as DOS sees them, path tables not needed: folders walked),
   host-tested on mkiso's images and, where it is, xorriso's. C4 GLOS's DOS: a CD drive as DOS has one under

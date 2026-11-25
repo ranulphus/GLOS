@@ -2,11 +2,16 @@
 """mkiso: an ISO 9660 CD image of a folder, as GLOS makes its own (docs/v1/native-dos.md, N4's CD-ROM; phase G's
 boot CD). Python alone, no mkisofs: for loopa's CD-ROM cases and `make cd-image`, on any PC that runs the gate.
 
-    mkiso.py OUT.iso FOLDER [--label LABEL] [--boot-floppy IMG]
+    mkiso.py OUT.iso FOLDER [--label LABEL] [--boot-floppy IMG] [--cue OUT.cue --tone SECONDS ...]
 
 Level 1 names (8.3, upper case, ";1"; a name that doesn't fit is refused, not cut), folders to eight deep, both
 path tables, the dates the files have. --boot-floppy: El Torito's boot record and catalogue, the image (1.2,
-1.44 or 2.88 MB) as BOOT.IMG in the root started by floppy emulation, as a PC's BIOS starts a setup floppy."""
+1.44 or 2.88 MB) as BOOT.IMG in the root started by floppy emulation, as a PC's BIOS starts a setup floppy.
+--cue: a CUE sheet of a mixed-mode disc, the image its first track (MODE1/2048), then an audio track for each
+--tone (a sine of 220 Hz times the track's number, SECONDS long, 44.1 kHz 16-bit stereo, in OUT-NN.bin beside the
+sheet, after the two seconds' pregap the Red Book wants): for N4's CD audio (MSCDEX's PLAY AUDIO, the drive's
+Q channel), as 86Box plays a CUE sheet's audio."""
+import math
 import argparse
 import os
 import struct
@@ -230,6 +235,8 @@ def main():
     ap.add_argument("folder")
     ap.add_argument("--label", default="GLOS")
     ap.add_argument("--boot-floppy", metavar="IMG")
+    ap.add_argument("--cue", metavar="OUT.cue")
+    ap.add_argument("--tone", type=float, action="append", default=[], metavar="SECONDS")
     a = ap.parse_args()
     if not os.path.isdir(a.folder):
         sys.exit("mkiso: %s: no such folder" % a.folder)
@@ -239,6 +246,25 @@ def main():
     open(a.out, "wb").write(img)
     print("mkiso: %s: %d files, %d folders, %d KB%s" % (a.out, nf, nd, len(img) // 1024,
                                                         ", El Torito floppy" if a.boot_floppy else ""))
+    if a.cue:
+        d = os.path.dirname(os.path.abspath(a.cue))
+        base = os.path.splitext(os.path.basename(a.cue))[0]
+        lines = ['FILE "%s" BINARY' % os.path.relpath(os.path.abspath(a.out), d), "  TRACK 01 MODE1/2048",
+                 "    INDEX 01 00:00:00"]
+        for i, secs in enumerate(a.tone):
+            frames = int(secs * 75)             # (2352-byte frames: 588 stereo samples each)
+            n = frames * 588
+            f = 220.0 * (i + 2)
+            pcm = bytearray(n * 4)
+            for k in range(n):
+                v = int(12000 * math.sin(2 * math.pi * f * k / 44100.0))
+                struct.pack_into("<hh", pcm, k * 4, v, v)
+            name = "%s-%02d.bin" % (base, i + 2)
+            open(os.path.join(d, name), "wb").write(pcm)
+            lines += ['FILE "%s" BINARY' % name, "  TRACK %02d AUDIO" % (i + 2), "    PREGAP 00:02:00",
+                      "    INDEX 01 00:00:00"]
+        open(a.cue, "w").write("\r\n".join(lines) + "\r\n")
+        print("mkiso: %s: the data track and %d audio track(s)" % (a.cue, len(a.tone)))
 
 
 if __name__ == "__main__":
