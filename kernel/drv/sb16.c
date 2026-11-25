@@ -22,6 +22,7 @@
 #include "midi.h"
 #include "mixer.h"
 #include "mm.h"
+#include "nic.h"
 #include "pnpbus.h"
 #include "timer.h"
 #include "vm.h"
@@ -133,6 +134,59 @@ int sb16_init_pnp(void)
             sb.dma8 = (u8)(d->dma[0] <= 3 ? d->dma[0] : 0xFF);
             if (found_at() == 0)
                 return 0;
+        }
+    }
+    return -1;
+}
+
+/* With no BLASTER on a native boot (no DOS, no AUTOEXEC.BAT to say one: the native-dos session's finding,
+   2026-11-24): a jumpered Sound Blaster 16, which most are, looked for where one can be, 220h, 240h, 260h, 280h.
+   Carefully: a port range a found network card or a Plug and Play device that is on holds is passed over (an
+   NE2000 at 240h or 280h would take a DSP reset as a write to its own registers). A DSP that answers 4.xx is an
+   SB16: its interrupt and DMA channels from its mixer (80h: bit 0 IRQ 2/9, 1 IRQ 5, 2 IRQ 7, 3 IRQ 10; 81h: bits
+   0, 1, 3 the 8-bit channel 0, 1, 3, bits 5-7 the 16-bit 5, 6, 7), as Creative's hardware guide has them. An
+   older DSP, or an ESS's (it answers E7h, not an SB16's mixer), is said and passed over. Hosted, BLASTER says. */
+static int legacy;
+int sb16_legacy(void) { return legacy; }
+
+static int found_at(void);
+
+int sb16_init_legacy(void)
+{
+    static const u16 ports[] = { 0x220, 0x240, 0x260, 0x280 };
+    u32 i;
+    if (dev_turned_off("sb16"))
+        return -1;
+    for (i = 0; i < sizeof ports / sizeof ports[0]; i++) {
+        u16 p = ports[i];
+        int hi = -1, lo = -1;
+        u8 irqs, dmas, irq, dma8, dma16;
+        if ((nic0 && nic0->base && nic0->base <= p + 0x0F && nic0->base + 0x1F >= p) || pnpbus_io_busy(p, p + 0x0F)) {
+            kprintf("GLOS-SB legacy skip port=%x why=taken\n", p);
+            continue;
+        }
+        sb.base = p;
+        if (dsp_reset() != 0)
+            continue;
+        if (dsp_write(0xE1) != 0 || (hi = dsp_read()) < 0 || (lo = dsp_read()) < 0 || hi != 4) {
+            kprintf("GLOS-SB legacy port=%x dsp=%d.%d not-sb16\n", p, hi, lo);
+            continue;
+        }
+        outb((u16)(p + 4), 0x80);
+        irqs = inb((u16)(p + 5));
+        outb((u16)(p + 4), 0x81);
+        dmas = inb((u16)(p + 5));
+        irq = irqs & 2 ? 5 : irqs & 8 ? 10 : irqs & 4 ? 7 : irqs & 1 ? 9 : 0;
+        dma8 = dmas & 2 ? 1 : dmas & 1 ? 0 : dmas & 8 ? 3 : 0xFF;
+        dma16 = dmas & 0x20 ? 5 : dmas & 0x40 ? 6 : dmas & 0x80 ? 7 : 0;
+        kprintf("GLOS-SB legacy port=%x irq=%u dma=%u dma16=%u mixer=%02x,%02x\n", p, irq, dma8 == 0xFF ? 0 : dma8,
+                dma16, irqs, dmas);
+        if (!irq || !dma16)
+            continue;
+        sb.irq = irq, sb.dma = dma16, sb.dma8 = dma8;
+        if (found_at() == 0) {
+            legacy = 1;
+            return 0;
         }
     }
     return -1;

@@ -51,6 +51,22 @@ struct pnp_dev *pnpbus_find(unsigned long vendor, unsigned io, unsigned irq, uns
     return 0;
 }
 
+/* Whether a device of the bus that is on (as set up) holds any port of lo..hi: a legacy card's probe keeps off it
+   (sb16.c). Only a bus scanned already is asked: a probe never scans it by itself. */
+int pnpbus_io_busy(u16 lo, u16 hi)
+{
+    unsigned i, k;
+    if (!scanned)
+        return 0;
+    for (i = 0; i < bus.ndevs; i++)
+        for (k = 0; bus.dev[i].active && k < 4; k++) {
+            u16 b = bus.dev[i].io[k], n = k < bus.dev[i].n_io && bus.dev[i].io_opt[k].len ? bus.dev[i].io_opt[k].len : 8;
+            if (b && b <= hi && b + n - 1 >= lo)
+                return 1;
+        }
+    return 0;
+}
+
 /* The interrupt lines an ISA card must not be given: the PC's own (timer, keyboard, cascade, floppy, clock,
    mouse, coprocessor, both IDE channels), each PCI device's, and the serial ports' that the BIOS found. */
 static u16 lines_taken(void)

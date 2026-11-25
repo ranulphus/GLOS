@@ -27,6 +27,8 @@
 #include "fm.h"
 #include "io.h"
 #include "kprintf.h"
+#include "mixer.h"
+#include "nic.h"
 #include "midi.h"
 #include "timer.h"
 
@@ -247,6 +249,12 @@ void midi_late(void)
         fm_find(cmi8738_fm());
         if (!md.fm)
             fm_find(cmi8738_fm_legacy());
+    }
+    if (!md.mpu && sb16_legacy()) {             /* (a native boot's jumpered SB16, BLASTER's P unsaid: its MPU-401
+                                                   where Creative's are, 330h, then 300h unless a network card is) */
+        mpu_find(0x330, 1);
+        if (!md.mpu && !(nic0 && nic0->base && nic0->base <= 0x301 && nic0->base + 0x1F >= 0x300))
+            mpu_find(0x300, 1);
     }
     if (!md.mpu && cmi8738_mpu()) {
         mpu_find(cmi8738_mpu(), 0);

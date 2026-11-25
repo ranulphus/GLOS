@@ -163,6 +163,9 @@ static void late(void)
         mx.card = &ess_card;
     else if (!mx.bi->sb_port && sb16_init_pnp() == 0)
         mx.card = &sb16_card;
+    /* ... and last of all, natively (no DOS to set BLASTER), a jumpered Sound Blaster 16 where one can be */
+    else if (!mx.bi->sb_port && (mx.bi->flags & BI_F_NATIVE) && sb16_init_legacy() == 0)
+        mx.card = &sb16_card;
     else
         return;
     if (mx.bi->sound_flags & BI_SOUND_OFF)

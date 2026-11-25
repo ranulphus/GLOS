@@ -303,3 +303,16 @@ on IRQ 11) and showed what was left:
 - The watchdog's kick of an ES1371 now says the chip's registers every 64th time (`GLOS-ES kick n=...`).
 - Not yet: listening to it; recording on it; MIDI.
 
+## A native boot's Sound Blaster 16, with no BLASTER (2026-11-25)
+
+A PC started with no DOS has no AUTOEXEC.BAT to set BLASTER, and the native-dos session found that a jumpered
+SB16 (86Box's, and most real ones) was never found. Now, natively and with no `[sound] blaster` in GLOS.CFG, after
+the PCI cards and the Plug and Play ones, `sb16.c` looks where an SB16 can be, 220h, 240h, 260h, 280h: a port
+range a found network card or a PnP device that is on holds is passed over (`pnpbus_io_busy`); a DSP that answers
+4.xx gives its interrupt and DMA channels from its mixer's 80h and 81h (Creative's hardware guide); an older DSP or
+an ESS is said and passed over. `midi.c` then looks for its MPU-401 at 330h, then 300h unless a network card is
+there. Loop A, natively on the bf6: `GLOS-SB legacy port=220 irq=5 dma=1 dma16=5 mixer=02,22`, `GLOS-MIDI mpu
+port=330`, played; the hosted case unchanged (BLASTER says, the probe never runs). A card at another place, or an
+ESS, still wants `[sound] blaster` (the native installer carrying the old DOS's BLASTER over is the native-dos
+session's script).
+
