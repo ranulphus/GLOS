@@ -3277,6 +3277,12 @@ def ssh_case(profile, card):
             and (NATIVE or golden("shot-" + profile, px[2]))   # (the golden picture has the hosted prompt, A:\\>)
         rc, out, _ = ssh("glos log")
         checks["log"] = rc == 0 and "GLOS-SSH exec=\"glos shot\"" in out and vm_line() in out
+        # glos log sync (2026-11-25, for runs that may freeze the PC): on, a line or two written at once, off again
+        on, off = ssh("glos log sync on"), None
+        ssh("glos ver")
+        off = ssh("glos log sync off")
+        checks["log-sync"] = on[0] == 0 and on[1].strip() == "log sync on" and off[0] == 0 \
+            and off[1].strip() == "log sync off" and "GLOS-SSH exec=\"glos ver\"" in ssh("glos log")[1]
         rc, out, _ = ssh("glos ps")
         checks["ps"] = rc == 0 and "thread vm normal" in out and "dos psp=" in out
         slow = subprocess.Popen(opts + ["glos@127.0.0.1", "WAITSEC 120"], stdout=subprocess.DEVNULL,
