@@ -8346,6 +8346,31 @@ def nboot_dual_case(profile, card, msdos=False):
     if not checks["other"]:
         info += " other=%r" % serial[-300:]
     checks["table-kept"] = open(disk, "rb").read(512)[446:510] == sector[446:510]     # (it was the active one: no write)
+    if not msdos:
+        # 4 and 5: GLOS.CFG's [boot] (the schema's, sdk/config/cfg.c; read by the loader before its menu), written
+        # into GLOS's own volume. 4: default = dos at once, both entries' names given: the other system starts with
+        # no key. 5: default = partition 1, timeout off: the menu waits; 2 pressed: the other system.
+        def boot_cfg(lines):
+            c = batfile(tag + "/BOOTCFG.CFG", ["; jobs.py nboot: [boot]", "[boot]"] + lines)
+            r = subprocess.run(["mcopy", "-o", "-i", "%s@@%d" % (disk, start2 * 512), c, "::GLOS/GLOS.CFG"],
+                               env=dict(os.environ, MTOOLS_SKIP_CHECK="1"), capture_output=True)
+            return r.returncode == 0
+        checks["cfg-written"] = boot_cfg(["default = dos", "timeout = 0", "glos_name = My GLOS", "dos_name = Old DOS"])
+        st, serial = run(tag + "d", ["--hdd", disk, "--machine", profile, "--timeout", "120", "--idle", "100"])
+        checks["cfg-dos"] = "GLOS-BOOT cfg default=d0 timeout=0 glos_name=My GLOS dos_name=Old DOS" in serial \
+            and "  1  My GLOS" in serial and "  2  Old DOS (partition 1" in serial \
+            and "GLOS-BOOT menu chosen=2 partition=1 Old DOS" in serial and "HX-FREEDOS started" in serial \
+            and "GLOS-BOOT step=enter" not in serial
+        if not checks["cfg-dos"]:
+            info += " cfg-dos=%r" % [l for l in serial.split("\n") if "GLOS-BOOT" in l or "  1  " in l or "  2  " in l][:8]
+        boot_cfg(["default = partition 1", "timeout = off"])
+        st, serial = run(tag + "e", ["--hdd", disk, "--machine", profile, "--timeout", "120", "--idle", "100",
+                                     "--keys", "@Press 1 to,1:0x03"])
+        checks["cfg-off"] = "GLOS-BOOT cfg default=p1 timeout=-1" in serial and "default=2 timeout=-1" in serial \
+            and "Press 1 to 2 (Enter: FreeDOS)" in serial and "GLOS-BOOT menu chosen=2 partition=1 FreeDOS" in serial \
+            and "HX-FREEDOS started" in serial
+        if not checks["cfg-off"]:
+            info += " cfg-off=%r" % [l for l in serial.split("\n") if "GLOS-BOOT" in l or "Press" in l][:8]
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % (tag, "PASS" if not bad else "FAIL", info, "" if not bad else " failed: " + " ".join(bad)), \
         not bad

@@ -1003,6 +1003,13 @@ thread), so nothing here makes two machines' calls run at once; that is N6's.
   partition, as it always must.
 - **The menu:** `[boot] default = glos | dos | partition N`, `timeout = 5`, the names shown; a key held (Shift
   or F8) shows it when the timeout is 0. Text mode, through the BIOS.
+  **Built 2026-11-25:** the keys are in the schema (sdk/config/cfg.c, the GLOS session's: `default` glos | dos |
+  partition N, `timeout` 0-60 or off, `glos_name`, `dos_name`, each checked by cfg_check); the loader reads
+  `[boot]` from GLOS.CFG beside GLOS's files before its menu (`read_boot`: the command line's folder is read
+  first now), `dos` is the first other system the menu lists, a partition that isn't there leaves GLOS the
+  default (said), `dos_name` names that entry, off waits for a key (Enter: the default). `loopa-nboot`'s dual
+  case: `default = dos` with no wait starts FreeDOS under its new name; `partition 1` with `timeout = off` waits,
+  2 starts it.
 - **Windows 9x and MS-DOS's SYS rewrite the boot sector** (a reinstall, `SYS C:`, some disk tools): GLOS's start
   is then lost and DOS starts as before. `DISK n BOOT` puts GLOS's back and keeps the new DOS sector as the saved
   one. From the setup floppy too.

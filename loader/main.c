@@ -1523,6 +1523,60 @@ static char native_letters(void)
     return (char)('A' + (own > 25 ? 25 : own));
 }
 
+/* GLOS.CFG's [boot] (the schema's: sdk/config/cfg.c, checked by cfg_check): the start-up menu's default (glos,
+   dos: the first other system the menu lists, partition N: the one on that primary partition), how long it waits
+   (seconds, or off: until a key) and the names it shows. Read before the menu, from GLOS.CFG beside GLOS's files
+   (the command line's folder): the rest of GLOS.CFG is read after it, by read_cfg. */
+static int boot_kind = 'g', boot_part, boot_timeout = 5;
+static char boot_glos_name[32], boot_dos_name[32];
+
+static void read_boot(const char *self)
+{
+    char line[160], path[128], why[64], *k, *v, *e;
+    const char *slash = strrchr(self, '\\');
+    const struct cfg_key *ck;
+    int in_boot = 0;
+    FILE *f;
+
+    if (!slash || (size_t)(slash - self) + 10 > sizeof path)
+        return;
+    memcpy(path, self, (size_t)(slash - self + 1));
+    strcpy(path + (slash - self + 1), "GLOS.CFG");
+    if (!(f = fopen(path, "r")))
+        return;
+    while (fgets(line, sizeof line, f)) {
+        for (k = line; *k == ' ' || *k == '\t'; k++) ;
+        if (*k == '[') {
+            in_boot = !strnicmp(k, "[boot]", 6);
+            continue;
+        }
+        if (!in_boot || *k == ';' || *k == '#' || !(v = strchr(k, '=')))
+            continue;
+        for (e = v; e > k && (e[-1] == ' ' || e[-1] == '\t'); e--) ;
+        *e = 0;
+        for (v++; *v == ' ' || *v == '\t'; v++) ;
+        for (e = v + strlen(v); e > v && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' '); e--) ;
+        *e = 0;
+        if (!(ck = cfg_find("boot", k)) || cfg_check(ck, v, why, sizeof why) != 0) {
+            say("GLOS-WARN cfg-key section=boot key=%s%s%s", k, ck ? " why=" : "", ck ? why : "");
+            continue;
+        }
+        if (!stricmp(k, "default")) {
+            boot_kind = (v[0] | 32) == 'p' ? 'p' : (v[0] | 32) == 'd' ? 'd' : 'g';
+            boot_part = boot_kind == 'p' ? atoi(v + 9) : 0;
+        } else if (!stricmp(k, "timeout")) {
+            boot_timeout = !stricmp(v, "off") ? -1 : atoi(v);
+        } else if (!stricmp(k, "glos_name")) {
+            strncpy(boot_glos_name, v, sizeof boot_glos_name - 1);
+        } else if (!stricmp(k, "dos_name")) {
+            strncpy(boot_dos_name, v, sizeof boot_dos_name - 1);
+        }
+    }
+    fclose(f);
+    say("GLOS-BOOT cfg default=%c%d timeout=%d glos_name=%s dos_name=%s", boot_kind, boot_part, boot_timeout,
+        boot_glos_name, boot_dos_name);
+}
+
 static void native_menu(void)
 {
     static unsigned char mbr[512], bs[4][512];
@@ -1530,7 +1584,8 @@ static void native_menu(void)
     unsigned entry[4], n = 0, i, k;
     unsigned long mb[4], __far *ticks = (unsigned long __far *)MK_FP(0x40, 0x6C), t0, left = 99;
     union REGS r;
-    int choice = 0;
+    int choice = 0, def = 0;
+    const char *gname = boot_glos_name[0] ? boot_glos_name : "GLOS";
 
     if (native_disk < 0x80 || native_sector(0, mbr) != 0 || mbr[510] != 0x55 || mbr[511] != 0xAA)
         return;
@@ -1549,28 +1604,48 @@ static void native_menu(void)
     }
     if (!n)
         return;
+    /* [boot] default: dos is the first other system listed, partition N the one on that partition; one that
+       isn't there leaves GLOS the default, said so. dos_name names the dos default's entry (the first other). */
+    if (boot_kind == 'd')
+        def = 1;
+    for (k = 0; boot_kind == 'p' && k < n; k++)
+        if (entry[k] + 1 == (unsigned)boot_part)
+            def = (int)k + 1;
+    if (boot_kind == 'p' && !def)
+        say("GLOS-BOOT menu default=partition %d none-there: GLOS", boot_part);
+    if (boot_dos_name[0])
+        strcpy(names[def > 0 ? def - 1 : 0], boot_dos_name);
     say("");
     say("This disk can start:");
-    say("  1  GLOS");
+    say("  1  %s", gname);
     for (k = 0; k < n; k++)
         say("  %u  %s (partition %u, %lu MB)", k + 2, names[k], entry[k] + 1, mb[k]);
-    say("GLOS-BOOT menu choices=%u", n + 1);
+    say("GLOS-BOOT menu choices=%u default=%d timeout=%d", n + 1, def + 1, boot_timeout);
+    choice = def;
     t0 = *ticks;
     for (;;) {
         unsigned long passed = (*ticks - t0) / 18;      /* (18.2 ticks a second) */
 
-        if (passed >= 5)
+        /* (timeout off: no count, the menu waits for a key; 0: the default at once) */
+        if (boot_timeout >= 0 && passed >= (unsigned long)boot_timeout)
             break;
-        if (5 - passed != left) {
-            left = 5 - passed;
-            say("GLOS starts in %lu... (press 1 to %u, or Enter for GLOS)", left, n + 1);
+        if (boot_timeout >= 0 && (unsigned long)boot_timeout - passed != left) {
+            left = (unsigned long)boot_timeout - passed;
+            say("%s starts in %lu... (press 1 to %u, or Enter for it)", def ? names[def - 1] : gname, left, n + 1);
+        } else if (boot_timeout < 0 && left) {
+            left = 0;
+            say("Press 1 to %u (Enter: %s)", n + 1, def ? names[def - 1] : gname);
         }
         if (*(unsigned __far *)MK_FP(0x40, 0x1A) == *(unsigned __far *)MK_FP(0x40, 0x1C))
             continue;                           /* (the BIOS's keyboard buffer: empty) */
         r.h.ah = 0x00;
         int86(0x16, &r, &r);
-        if (r.h.al == '\r' || r.h.al == '1')
+        if (r.h.al == '\r')
             break;
+        if (r.h.al == '1') {
+            choice = 0;
+            break;
+        }
         if (r.h.al >= '2' && r.h.al < '2' + n) {
             choice = r.h.al - '1';
             break;
@@ -1703,6 +1778,13 @@ void __cdecl native_main(void)
         refuse("no-volume");
         return;
     }
+    /* Its command line (the prelude's CMDLINE): the folder GLOS's files are in (a word that begins with a
+       backslash: \GLOS if none), where GLOS.EXE would be under DOS, and GLOS.EXE's flags. Read before the menu,
+       which takes GLOS.CFG's [boot] from that folder. */
+    for (w = strtok(tail, " \t"); w; w = strtok(NULL, " \t"))
+        if (w[0] == '\\' && strlen(w) < sizeof self - 12)
+            sprintf(self, "C:%s\\GLOS.EXE", strupr(w));
+    read_boot(self);
     native_menu();                              /* (another system chosen there never comes back) */
     bi.cache_mode = BI_CACHE_ON;
     bi.boot_dl = native_disk;
@@ -1712,12 +1794,7 @@ void __cdecl native_main(void)
     say("GLOS-BOOT step=disk dl=%02x if=%lu chs=%lu/%lu/%lu sectors=%lu flags=%lx volume=%lu", native_disk, bi.boot_if,
         bi.boot_disk.cyls, bi.boot_disk.heads, bi.boot_disk.spt, bi.boot_disk.sectors_lo, bi.boot_disk.flags,
         bi.boot_lba);
-    /* Its command line (the prelude's CMDLINE): the folder GLOS's files are in (a word that begins with a
-       backslash: \GLOS if none), where GLOS.EXE would be under DOS, and GLOS.EXE's flags. GLOS.CFG's [shell]
-       section is read as when GLOS is DOS's shell: natively it is the shell. */
-    for (w = strtok(tail, " \t"); w; w = strtok(NULL, " \t"))
-        if (w[0] == '\\' && strlen(w) < sizeof self - 12)
-            sprintf(self, "C:%s\\GLOS.EXE", strupr(w));
+    /* (GLOS.CFG's [shell] section is read as when GLOS is DOS's shell: natively it is the shell) */
     /* The drives' letters, and this volume's in GLOS's own paths: it is C: only where MS-DOS would call it so. */
     letter = native_letters();
     self[0] = letter;
