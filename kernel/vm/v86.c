@@ -1447,6 +1447,12 @@ static void vm_gp(struct trapframe *tf)
         tf->eip = next;
         vm.idle_agent = (tf->cs & 0xFFFF) == vm.loader_cs;     /* the stub, waiting for a command */
         vm.idle_cmd = (u8)cmdcom_waits((u16)tf->cs);            /* ... or a COMMAND.COM of GLOS's, for its session */
+        /* DOS at its idle: GLOS's shell may start (AUTOEXEC.BAT first, where GLOS is DOS's shell), the desktop up
+           or not. Said only with the screen's notice below, a desktop there from the start ([display] mode) held
+           AUTOEXEC.BAT back until the desktop went: a native GLOS's PATH and BLASTER, minutes late (loopa-display
+           natively, 2026-11-25). */
+        if (vm.idle_agent && !agent_busy())
+            lcon_ready();
         if (vm_idle_headless()) {
             vm.notice_due = 0;
             vcon_notice();
