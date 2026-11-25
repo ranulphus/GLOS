@@ -519,7 +519,8 @@ static int vd_wait(void *ctx)
 
 /* DOS's bytes for the vectors (the layout's misc + 4 on): ARPLs for INT 21h, 20h, 29h and 23h (DOS's own Ctrl-C
    handler), one a program's INT 23h returns to, and an IRET that ends INT 2Fh's chain. */
-enum { V21, V20, V29, V23, VC23, V33, NV };      /* (V33: GLOS's INT 33h, the mouse: vmouse.c) */
+enum { V21, V20, V29, V23, VC23, V33, V74, V74R, NV };  /* (V33: GLOS's INT 33h, the mouse: vmouse.c; V74 its IRQ 12,
+                                                           V74R where the program's mouse routine returns to) */
 static u32 arpl[NV];                            /* (seg << 16 | off) */
 
 /* ---- interrupts during a call
@@ -633,7 +634,9 @@ int vdos_init(struct bootinfo *bi)
         arpl[i] = (u32)(a >> 4) << 16 | (u32)((a & 0xF) + 2 * i);
     }
     mem[a + 2 * NV] = 0xCF;                     /* (IRET) */
-    a = vd.lay.misc + 0x10;                     /* the window: STI, NOP, RETF */
+    /* the window: STI, NOP, RETF, after the IRET (it was at misc + 10h, a fixed place the ARPLs grew into: with
+       INT 33h's the IRET that ends INT 2Fh's chain became its STI, with INT 74h's that ARPL did; 2026-11-25) */
+    a = vd.lay.misc + 4 + 2 * NV + 1;
     mem[a] = 0xFB, mem[a + 1] = 0x90, mem[a + 2] = 0xCB;
     win = (u32)(a >> 4) << 16 | (u32)(a & 0xF);
     ide_wait_hook(vd_window, vd_nap);
@@ -803,7 +806,22 @@ void vdos_int(struct trapframe *tf, u8 n, u32 ret, u32 at, int via_arpl)
     from_regs(tf, &r);
 }
 
-/* A #UD at one of DOS's ARPLs (its INT frame on the stack, but VC23's: a RETF or an IRET to it). 1 if it was. */
+/* The mouse's (vmouse.c): INT 74h to GLOS's ARPL and IRQ 12 unmasked in the VM's PIC, the slave's line on the
+   master too, as a mouse driver sets them; done at the driver's first reset. */
+static struct dos_regs86 m74;                   /* the code a mouse routine's call interrupted */
+static u32 m74_vif;
+
+void vdos_mouse_irq(void)
+{
+    if (!ready)
+        return;
+    set_vec(0x74, arpl[V74]);
+    vpic_write(&vm.pic, 0xA1, (u8)(vpic_read(&vm.pic, 0xA1) & ~0x10));
+    vpic_write(&vm.pic, 0x21, (u8)(vpic_read(&vm.pic, 0x21) & ~0x04));
+}
+
+/* A #UD at one of DOS's ARPLs (its INT frame on the stack, but VC23's and V74R's: a RETF or an IRET to it, a
+   RETF). 1 if it was. */
 int vdos_arpl(struct trapframe *tf)
 {
     u32 at = (tf->cs & 0xFFFF) << 16 | (tf->eip & 0xFFFF), lin, ip, cs, f;
@@ -818,6 +836,12 @@ int vdos_arpl(struct trapframe *tf)
     if (i == NV)
         return 0;
     lin = (tf->ss & 0xFFFF) * 16 + (tf->esp & 0xFFFF);
+    if (i == V74R) {                            /* back from the program's mouse routine (its RETF) */
+        from_regs(tf, &m74);
+        vm.thread->vif = m74_vif;
+        vmouse_event_done();
+        return 1;
+    }
     if (i == VC23) {                            /* back from the program's INT 23h */
         if ((tf->esp & 0xFFFF) == ((c23_sp - 2) & 0xFFFF) && (vm_rd16(lin) & 1)) {
             LO16(tf->esp, (tf->esp + 2) & 0xFFFF);      /* (RETF with CF set: the program ends) */
@@ -846,6 +870,26 @@ int vdos_arpl(struct trapframe *tf)
         c = (char)(tf->eax & 0xFF);
         vcon_tty(&c, 1);
         break;
+    case V74: {                                 /* IRQ 12: the program's mouse routine called, if events wait */
+        struct dos_regs86 h;
+        u32 handler;
+
+        vpic_write(&vm.pic, 0xA0, 0x20);        /* (the EOIs INT 74h's handler sends: the slave's, the master's) */
+        vpic_write(&vm.pic, 0x20, 0x20);
+        to_regs(tf, &m74, tf->eip);
+        m74_vif = vm.thread->vif;
+        if (!vmouse_event(&h, &handler))
+            break;
+        push16(tf, arpl[V74R] >> 16);
+        push16(tf, arpl[V74R] & 0xFFFF);
+        LO16(tf->eax, h.ax), LO16(tf->ebx, h.bx), LO16(tf->ecx, h.cx), LO16(tf->edx, h.dx);
+        LO16(tf->esi, h.si), LO16(tf->edi, h.di);
+        tf->cs = handler >> 16;
+        tf->eip = handler & 0xFFFF;
+        tf->eflags &= ~0x0300u;                 /* (interrupts off in the routine, as in a driver's IRQ) */
+        vm.thread->vif = 0;
+        break;
+    }
     case V33:                                   /* the mouse (vmouse.c) */
         to_regs(tf, &r, ip);
         vmouse_int33(&r);

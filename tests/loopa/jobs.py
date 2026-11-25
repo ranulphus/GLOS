@@ -4008,6 +4008,7 @@ def input_case(profile, card, mouse_too):
     agent = Agent("input-" + tag, profile, card, SESS_FILES + [
         "--file", "build/ow/dos/TYPEIN.EXE=/TEST/TYPEIN.EXE", "--file", "build/dj/DIRTEST.EXE=/TEST/DIRTEST.EXE",
         "--file", os.path.join(MGA, "build/djgpp/MOUSETST.EXE") + "=/TEST/MOUSETST.EXE",
+        "--file", "build/ow/dos/MOUSEHND.EXE=/TEST/MOUSEHND.EXE",
         "--mouse", "ps2" if mouse_too else "none",
         "--keys", "@HX-KEYWAIT ready,0.5:0x1c,@HX-KEYWAIT ready,0.5:0x148,@HX-TEST driver," + MOUSE_KEYS,
         "--cmd", "SERSAY HX-START input", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
@@ -4037,6 +4038,10 @@ def input_case(profile, card, mouse_too):
         if mouse_too:
             checks["mouse-rc"] = job("C:\\TEST\\MOUSETST.EXE --noexit", "HX-TEST driver", 2,
                                      "glos key " + MOUSE_KEYS)[1] == 0
+            # The driver's event routine (INT 33h 0Ch): a move, a left press and a release reach the program's own
+            # far routine (GLOS's INT 33h natively, vmouse.c's step 2; CuteMouse hosted)
+            checks["mouse-handler"] = job("C:\\TEST\\MOUSEHND.EXE", "HX-MOUSEHND ready", 1,
+                                          "glos key " + MOUSE_KEYS) == (0, 0)
         else:                                   # no mouse, so no program has it on
             rc, _, err = agent.ssh("glos mouse 5 5")
             checks["mouse-off"] = rc == 1 and "mouse" in err

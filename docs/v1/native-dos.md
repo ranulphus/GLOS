@@ -1048,8 +1048,14 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   use it: 00h/21h reset, 01h/02h, 03h, 04h, 05h/06h presses and releases, 07h/08h ranges, 0Bh mickeys, 0Ch and 14h
   (kept), 0Fh, 13h, 15h-17h state, 1Ah/1Bh, 1Dh/1Eh, 1Fh, 24h (8.05, PS/2), 26h; the virtual screen per BIOS mode
   (640 wide, text cells 8 or 16, 200/350/480 high), looked at again after a mode set. MOUSETST natively with no
-  CuteMouse (loopa-input, bf6): reset, motion and both button edges pass. Next: 0Ch's handler called (a virtual
-  IRQ 12's ARPL into the program's routine), then the cursor drawn (text mode first).
+  CuteMouse (loopa-input, bf6): reset, motion and both button edges pass. **Step 2 (the same day):** 0Ch's and 14h's
+  routine called: an event the mask asks for raises the VM's virtual IRQ 12 (only while the VM has the line open:
+  a session's end puts the system VM's masks back, so each reset and each routine set opens it again, INT 74h
+  GLOS's ARPL); there the routine is called far (AX the events, BX the buttons, CX DX the position, SI DI the
+  mickeys' totals, interrupts off) and its RETF reaches another ARPL that puts the interrupted code back; events
+  meanwhile wait for its return. MOUSEHND (tests/dos/mousehnd.c) in loopa-input: natively under GLOS's driver and
+  hosted under CuteMouse, the move and the left press and release reach its routine. Next: the cursor drawn
+  (text mode first).
 - **Long names:** in the personality (N2, 71xxh). No DOSLFN.
 - **The keyboard's layout:** `[region] layout` reaches the desktop and apps today; native, the machine's INT 16h
   and INT 09h see the layout's characters too. No KEYB.

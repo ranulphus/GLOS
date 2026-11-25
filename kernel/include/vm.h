@@ -184,6 +184,9 @@ void vmouse_int33(struct dos_regs86 *r);
 void vmouse_aux(u8 b, int wheel);               /* a PS/2 mouse byte (vkbc.c) */
 void vmouse_move(int dx, int dy, int buttons);  /* an injected move (buttons -1: as they were) */
 int  vmouse_on(void);
+int  vmouse_event(struct dos_regs86 *r, u32 *handler);  /* INT 74h's ARPL: the routine's call, if one is due */
+void vmouse_event_done(void);                   /* ... and its return */
+void vdos_mouse_irq(void);                      /* vdos.c: INT 74h to GLOS's ARPL, IRQ 12 unmasked */
 void vkbc_direct(int on);                       /* a direct-mode session begins (1) or ends (0) */
 void vkbc_typematic(u32 delay_ms, u32 rate);   /* the keyboard's repeat while the desktop has it (M9) */
 void vkbc_desk(int on);                         /* the desktop has the keyboard and the mouse (1), or the VM again (0) */

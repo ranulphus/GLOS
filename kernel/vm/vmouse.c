@@ -5,8 +5,11 @@
  * (vkbc.c: the AUX bytes, while the desktop hasn't the screen) and by the moves GLOS injects (glos mouse, a USB
  * mouse through GLOS's HID): from a program's first reset on, those are this driver's, not the VM's AUX queue.
  *
- * First step (2026-11-25): the state and the functions. The event handler (0Ch, 14h) is kept but not yet called,
- * and no cursor is drawn: the next two steps.
+ * The event handler (0Ch, 14h; step 2): an event the program's mask asks for raises the VM's virtual IRQ 12, whose
+ * vector (INT 74h, set at the first reset, the line unmasked as a driver unmasks it) is an ARPL of GLOS's (vdos.c):
+ * there the program's routine is called far with the events in AX, the buttons in BX, the position in CX and DX,
+ * the mickeys' running totals in SI and DI, interrupts off; its RETF comes back to another ARPL, which puts the
+ * interrupted code's registers back. Events that come meanwhile wait for its return. No cursor is drawn yet.
  *
  * Positions are in the virtual screen a Microsoft driver gives each BIOS mode: 640 wide in every text and CGA/EGA
  * mode (a text cell 8 or 16 wide, 8 high, positions in its multiples), 200, 350 or 480 high; mode 13h's 320 too is
@@ -34,6 +37,9 @@ static struct {
     u32 handler;
     u16 sens_x, sens_y, dspeed, page;
     u8 pkt[4], npkt;
+    u16 pend;                           /* events not yet given to the handler */
+    u8 in_handler;
+    int rawx, rawy;                     /* the mickeys' running totals (the handler's SI and DI) */
 } m;
 static u32 said;                        /* (functions seen, first time each: what programs ask of it) */
 
@@ -63,6 +69,13 @@ static void geometry(void)
 
 static int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
+/* IRQ 12 open in the VM's PIC (its own bit on the slave, the slave's on the master). A session's end puts the
+   system VM's masks back (session.c), so the line is opened again at each reset and each routine set; while it is
+   shut no request is raised, so none is left waiting behind a mask (a CLI loop then read as vif-stuck). */
+static int line_open(void) { return !(vpic_imr(&vm.pic) & ((1u << 12) | (1u << 2))); }
+static int px_x(void) { return m.x - m.x % m.cellx; }
+static int px_y(void) { return m.y - m.y % m.celly; }
+
 /* The mouse moved by dx, dy mickeys (down and right positive), its buttons now b (bit 0 left, 1 right, 2 middle;
    -1: as they were). Interrupt context or the VM's: with interrupts off. */
 void vmouse_move(int dx, int dy, int b)
@@ -71,6 +84,9 @@ void vmouse_move(int dx, int dy, int b)
     int i;
 
     m.mickx += dx, m.micky += dy;
+    m.rawx += dx, m.rawy += dy;
+    if (dx || dy)
+        m.pend |= 1;
     m.fx += dx * 8, m.fy += dy * 8;
     if (m.ratio_x > 0) {
         m.x += m.fx / m.ratio_x;
@@ -86,11 +102,15 @@ void vmouse_move(int dx, int dy, int b)
         for (i = 0; i < 3; i++) {
             u8 bit = (u8)(1u << i);
             if ((b & bit) && !(m.buttons & bit))
-                m.press[i]++, m.px[i] = m.x, m.py[i] = m.y;
+                m.press[i]++, m.px[i] = m.x, m.py[i] = m.y, m.pend |= (u16)(2u << (2 * i));
             else if (!(b & bit) && (m.buttons & bit))
-                m.release[i]++, m.rx[i] = m.x, m.ry[i] = m.y;
+                m.release[i]++, m.rx[i] = m.x, m.ry[i] = m.y, m.pend |= (u16)(4u << (2 * i));
         }
         m.buttons = (u8)(b & 7);
+    }
+    if (m.handler && (m.pend & m.hmask) && !m.in_handler && line_open()) {
+        vpic_raise(&vm.pic, 12);        /* (the routine is called at INT 74h's ARPL: vmouse_event) */
+        vm_kick();
     }
     irq_restore(f);
 }
@@ -112,11 +132,42 @@ void vmouse_aux(u8 b, int wheel)
     vmouse_move(dx, -dy, m.pkt[0] & 7);
 }
 
+/* INT 74h's ARPL (vdos.c), the VM's thread: 1 and the routine's registers in r and its address in *handler if
+   events the mask asks for wait, 0 if none (a raise that the mask or a 0Ch since has made empty). */
+int vmouse_event(struct dos_regs86 *r, u32 *handler)
+{
+    u32 f = irq_save();
+    u16 ev = m.pend & m.hmask;
+
+    if (!m.handler || !ev || m.in_handler) {
+        irq_restore(f);
+        return 0;
+    }
+    m.pend = 0;
+    m.in_handler = 1;
+    r->ax = ev, r->bx = m.buttons, r->cx = (unsigned)px_x(), r->dx = (unsigned)px_y();
+    r->si = (unsigned)(m.rawx & 0xFFFF), r->di = (unsigned)(m.rawy & 0xFFFF);
+    *handler = m.handler;
+    irq_restore(f);
+    return 1;
+}
+
+/* The routine came back (vdos.c's return ARPL): events that came meanwhile raise the line again. */
+void vmouse_event_done(void)
+{
+    u32 f = irq_save();
+
+    m.in_handler = 0;
+    if (m.handler && (m.pend & m.hmask) && line_open()) {
+        vpic_raise(&vm.pic, 12);
+        vm_kick();
+    }
+    irq_restore(f);
+}
+
 /* Whether GLOS's INT 33h has the mouse (a program reset it). */
 int vmouse_on(void) { return m.on; }
 
-static int px_x(void) { return m.x - m.x % m.cellx; }
-static int px_y(void) { return m.y - m.y % m.celly; }
 
 static void reset(void)
 {
@@ -128,10 +179,11 @@ static void reset(void)
     m.mickx = m.micky = 0;
     m.ratio_x = 8, m.ratio_y = 16;
     m.shown = -1;
-    m.hmask = 0, m.handler = 0;
+    m.hmask = 0, m.handler = 0, m.pend = 0;
     m.sens_x = m.sens_y = m.dspeed = 50;
     m.page = 0;
     m.npkt = 0;
+    vdos_mouse_irq();                   /* (INT 74h GLOS's, IRQ 12 open: the routine's calls; each reset) */
     if (!m.on) {
         m.on = 1;
         irq_restore(f);
@@ -206,9 +258,14 @@ void vmouse_int33(struct dos_regs86 *r)
         irq_restore(f);
         break;
     }
-    case 0x0C:
-        m.hmask = (u16)r->cx, m.handler = (u32)r->es << 16 | (r->dx & 0xFFFF);
+    case 0x0C: {
+        u32 f = irq_save();
+        m.hmask = (u16)r->cx, m.handler = (u32)r->es << 16 | (r->dx & 0xFFFF), m.pend = 0;
+        irq_restore(f);
+        if (m.handler && m.hmask)
+            vdos_mouse_irq();
         break;
+    }
     case 0x0F:
         if (r->cx && r->dx)
             m.ratio_x = (int)(r->cx & 0x7FFF), m.ratio_y = (int)(r->dx & 0x7FFF);
@@ -221,6 +278,8 @@ void vmouse_int33(struct dos_regs86 *r)
         u32 oh = m.handler;
         m.hmask = (u16)r->cx, m.handler = (u32)r->es << 16 | (r->dx & 0xFFFF);
         r->cx = om, r->es = oh >> 16, r->dx = oh & 0xFFFF;
+        if (m.handler && m.hmask)
+            vdos_mouse_irq();
         break;
     }
     case 0x15:                          /* the state's size: what 16h and 17h move */
