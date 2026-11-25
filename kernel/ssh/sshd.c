@@ -1212,6 +1212,12 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         rec_cmd(ch, cmd + 8);
     } else if (!strncmp(cmd, "glos key ", 9) || !strncmp(cmd, "glos type ", 10) || !strncmp(cmd, "glos mouse ", 11)) {
         input_cmd(ch, cmd);
+    } else if (!strcmp(cmd, "glos log sync on") || !strcmp(cmd, "glos log sync off") || !strcmp(cmd, "glos log sync")) {
+        /* glos log sync [on|off]: every log line to COM1 at once (kprintf_sync), for runs that may freeze the PC */
+        if (cmd[13])
+            kprintf_sync(cmd[15] == 'n');
+        say(ch, 0, kprintf_synced() ? "log sync on\n" : "log sync off\n");
+        ssh_chan_exit(ch, 0);
     } else if (!strcmp(cmd, "glos log --follow") || !strcmp(cmd, "glos stat --follow")) {
         u32 *st = kmalloc(sizeof *st);
         if (st)                                 /* the log's place, or the next line's time */

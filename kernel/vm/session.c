@@ -205,7 +205,9 @@ static u32 clock_right(void)
    Blaster DMA and the BIOS clock, as a session's end does (E5). */
 void session_kill(u8 mode, u8 leds)
 {
-    int remode = remode_to(mode);
+    int remode;
+    display_card_settle();                      /* (as at a session's end) */
+    remode = remode_to(mode);
     vm_wr8(0x417, (u8)((vm_rd8(0x417) & ~0x70) | leds));
     sb_stop();
     kprintf("GLOS-SESSION kill-restore mode=%02x%s ticks=%u\n", mode, remode ? " remode=1" : "", clock_right());
@@ -291,6 +293,9 @@ static void end(const char *why)
         bios(&r, 0x21);
         ses.env_seg = 0;
     }
+    display_card_settle();                      /* (a Radeon's engine looked at even with no mode to set: a program
+                                                   that set text mode itself could leave it stuck for the next one,
+                                                   the P3 at 20:55, 2026-11-25) */
     remode = remode_to(ses.mode);               /* the mode it began in, and so the palette */
     vsbdev_session_end();                       /* (the virtual Sound Blaster: silent, as after a reset) */
     if (!mixer_on())

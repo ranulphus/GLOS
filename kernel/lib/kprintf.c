@@ -58,7 +58,7 @@ struct out { char *buf; size_t n, len; };
 int (*kprintf_hold)(void);
 static char held[HELD];
 static u32 held_head, held_tail;        /* written to, written from */
-static u32 direct, deferred;
+static u32 direct, deferred, sync;
 static u8 pumping;
 
 /* The COM1 mirror for glos log: the last 16 KB of the kernel's lines and of
@@ -199,6 +199,18 @@ void kprintf_direct(void)
     direct = 1;
 }
 
+/* glos log sync on|off (2026-11-25, for DOS-GL's hang runs on the P3): each line out at once, from wherever it is
+   written, as at a panic, but not across a program's own unfinished COM1 line; so the last lines before a freeze
+   reach the serial cable. Each costs its time at the UART (~10 ms a line) in the caller's path. */
+void kprintf_sync(int on)
+{
+    if (on)
+        kprintf_flush(1);
+    sync = on != 0;
+}
+
+int kprintf_synced(void) { return sync != 0; }
+
 /* The threads run: lines wait for kprintf_pump(). */
 void kprintf_defer(void) { deferred = 1; }
 
@@ -256,7 +268,7 @@ void kvprintf(const char *fmt, __builtin_va_list ap)
     vfmt(&o, fmt, ap);
     n = o.len < sizeof line ? o.len : sizeof line - 1;
     f = irq_save();
-    if (direct || (!deferred && held_tail == held_head && !(kprintf_hold && kprintf_hold()))) {
+    if (direct || ((!deferred || sync) && held_tail == held_head && !(kprintf_hold && kprintf_hold()))) {
         raw_out(line, n);                       /* (before the threads run, and in a panic) */
     } else {
         if (held_head - held_tail + n > HELD)   /* no room: what waits goes out now */
