@@ -104,8 +104,10 @@ static void modes_read(void)
 static const char *const titles[] = { GUI_N("Display"), GUI_N("Input"), GUI_N("Joystick"), GUI_N("USB"),
     GUI_N("Sound"), GUI_N("Network"), GUI_N("Devices"), GUI_N("Date and Time"), GUI_N("Region"), GUI_N("Disk Cache"), GUI_N("Memory"),
     GUI_N("Remote Desktop"), GUI_N("Desktop"), GUI_N("Saver"), GUI_N("Services"), GUI_N("Shell"), GUI_N("File Types"),
-    GUI_N("Programs") };
-                                                /* (cfg_sections' order) */
+    GUI_N("Programs"), GUI_N("Start-up") };
+                                                /* (cfg_sections' order: one for each, or a page's title is read
+                                                   past the end, as [boot]'s was: the search crashed, 2026-11-25) */
+_Static_assert(sizeof titles / sizeof titles[0] == 19, "a title for each of cfg_sections");
 
 static char *dup(const char *s) { return s ? strcpy(malloc(strlen(s) + 1), s) : NULL; }
 
