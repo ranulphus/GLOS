@@ -482,7 +482,7 @@ before that.
     Their full details are still owed.
 - **Its plan:** written after the audit, and approved by the owner like phase A's documents.
 
-### G. The release (re-planned 2026-11-25: native, no FreeDOS; a DRAFT for the owner)
+### G. The release (re-planned 2026-11-25: native, no FreeDOS; the owner's choices made the same day)
 
 **The owner (2026-11-25):** "we are shipping without FreeDOS and are going native". The release is native GLOS:
 GLOS's own boot sector and loader (`GLOSLDR.SYS`), its own DOS answering INT 21h, beside the PC's MS-DOS or
@@ -504,17 +504,20 @@ EMS and CD-ROM; USB mass storage partly (a stick boots through the BIOS).
   - CD-ROM: ATAPI on GLOS's IDE driver, ISO 9660, MSCDEX's INT 2Fh 15xxh with its device requests, CD audio read
     digitally into GLOS's mixer (the drive's analog output where it can't), ISO and CUE/BIN images as drives
     (GLQuake, GTA and Half-Life ask for MSCDEX);
-  - EMS (LIM 4.0 per machine) and USB mass storage (OHCI and EHCI storage, Bulk-Only): **the owner's choice**
-    (below) whether these come before v1 or after it.
+  - EMS (LIM 4.0 per machine) and USB mass storage (UHCI, OHCI and EHCI storage, Bulk-Only): **before v1** (the
+    owner, 2026-11-25), so hosted mode is gone at v1.
 - **N5:**
-  - an installer that runs on the PC itself (today `install.py` needs another computer), from the floppy or the
-    stick: a new disk, or GLOS in the free space beside MS-DOS or Windows, with the menu;
+  - an installer that runs on the PC itself (today `install.py` needs another computer): **text, in GLOS's shell**
+    (the owner, 2026-11-25), from the setup floppy alone (no desktop or toolkit needed), the stick or the CD: a new
+    disk, or GLOS in the free space beside MS-DOS or Windows, with the menu; the apps then come by network, the
+    stick or the CD;
   - the one command that turns a hosted install into a native one on the same volume (GLOS's boot records, DOS's
     sector kept, `C:\GLOS` kept);
   - XCOPY, MORE and DELTREE as built-ins of GLOS's shell (ATTRIB is in);
   - `--free` proven end to end onto a disk with MS-DOS and onto one with Windows 98.
 - **N3:** the start-up menu's settings (`[boot]` default, timeout, names: in the schema; the loader reading
-  them, checked, with nboot cases: in progress); MS-DOS 7.1 beside GLOS on the same volume on a real bench; Windows 98 started from the menu on bench G.
+  them, checked, with nboot cases: built on native-dos d6cb3e7); MS-DOS 7.1 beside GLOS on the same volume on a
+  real bench; Windows 98 started from the menu on bench G.
 - **N7:** the gate boots native by default; the desktop suites run natively (`desk` hasn't yet); the smoke tier's
   native profiles its default ones; hosted-only cases converted or retired; the size check moves to the native
   floppy (below).
@@ -535,7 +538,9 @@ EMS and CD-ROM; USB mass storage partly (a stick boots through the BIOS).
   floppy goes: a kernel growing past about 1.1 MB packed is then a decision of G's (what the floppy carries), not
   an accident.
 - **The USB stick image** (`make usb-stick`): the whole install with the apps.
-- **A CD** (El Torito) once N4's ATAPI is in: **the owner's choice** whether v1 has one.
+- **A CD** (El Torito, **in v1**: the owner, 2026-11-25) once N4's ATAPI is in: booting the setup floppy's
+  kernel and shell by floppy emulation or no emulation, the whole install with the apps on ISO 9660, the text
+  installer copying from it. `make cd-image`; Loop A boots it (86Box's ATAPI drive); a bench burns and boots one.
 
 **G4. The benches, native**
 
@@ -571,13 +576,15 @@ audit).
 **G7. The version:** API 2.x frozen as GLOS's v1 API; `glos ver`'s "preview" removed; the packages signed with the
 release key (its private half offline).
 
-**The owner's choices for this plan:**
+**The owner's choices for this plan (2026-11-25):**
 
-1. EMS and USB mass storage: before v1 (hosted mode gone at v1), or after v1 (v1 native-first, hosted mode kept as
-   a documented fallback until they land)?
-2. A CD in v1, or the floppy and the stick only?
-3. The on-PC installer: a GLOS app with windows (from the stick, or the floppy's network), or text in GLOS's shell
-   (from the floppy alone)?
+1. EMS and USB mass storage **before v1**: hosted mode is gone at v1, with no fallback kept.
+2. **A CD in v1**, beside the floppy and the stick.
+3. The on-PC installer is **text in GLOS's shell**, from the floppy alone.
+
+The order this gives: N4's mouse and layout, then CD-ROM (the CD's boot needs it), EMS and USB mass storage beside
+them; N5's installer and the upgrade command; N7's native gate; then hosted mode removed; G2-G4 alongside; G5-G7
+last.
 
 ## Designed for the IDE (a follow-up)
 
