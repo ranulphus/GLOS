@@ -521,14 +521,14 @@ void status_add_services(struct gui_window *win, struct gui_widget *page, struct
 /* ---- the card and the screen */
 
 static struct gui_widget *card_line, *mode_line;
-static char card_seen[96], mode_seen[64];
+static char card_seen[96], mode_seen[96];
 
 static void display_poll(void)
 {
     static unsigned last;
     struct glos_sys_system sys;
     struct glos_sys_memory mem;
-    char a[96], b[64], kb[24];
+    char a[96], b[96], kb[24];
     unsigned now = glos_ticks();
     if (!card_line || (last && now - last < 2000))
         return;
@@ -545,9 +545,21 @@ static void display_poll(void)
         kb[0] = 0;
     snprintf(a, sizeof a, GUI_T("Card: %s%s%s"), sys.card[0] ? sys.card : GUI_T("none GLOS can draw on"), kb,
              sys.accel ? GUI_T(" (its engine draws the desktop)") : "");
-    if (sys.screen_w)
-        snprintf(b, sizeof b, GUI_T("Now: %u by %u, %u bits"), sys.screen_w, sys.screen_h, sys.screen_bpp);
-    else
+    if (sys.screen_w) {
+        /* (the refresh the card was set to, from glos display's line: "refresh=75.02", or "refresh=bios" for the
+           BIOS's own timings; G2, 2026-11-25) */
+        char t[512], hz[24] = "";
+        const char *r;
+        unsigned len = 0;
+        if (glos_sys_stat(GLOS_STAT_DISPLAY, t, sizeof t - 1, &len, 0) == 0 && len < sizeof t) {
+            t[len] = 0;
+            if ((r = strstr(t, " refresh=")) != NULL && strncmp(r + 9, "bios", 4)) {
+                size_t k = strcspn(r + 9, " \r\n");
+                snprintf(hz, sizeof hz, GUI_T(", %.*s Hz"), (int)(k < 8 ? k : 8), r + 9);
+            }
+        }
+        snprintf(b, sizeof b, GUI_T("Now: %u by %u, %u bits%s"), sys.screen_w, sys.screen_h, sys.screen_bpp, hz);
+    } else
         snprintf(b, sizeof b, "%s", GUI_T("Now: text mode"));
     if (strcmp(a, card_seen)) {
         strcpy(card_seen, a);
