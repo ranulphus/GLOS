@@ -30,6 +30,7 @@
 #include "../ndos/dtime.h"
 #include "cache.h"
 #include "vdos.h"
+#include "cdrom.h"
 
 static struct dos_m vd;
 static struct ata_dev *cdev;
@@ -228,6 +229,21 @@ static unsigned long c_now(void *ctx)
 }
 
 static int fat_first(const unsigned char *s);
+
+/* GLOS's own DOS asks which disc is in CD drive `drive` (dos21.h: cdmedia; N4's CD-ROM): cdrom.c's volume. */
+static signed char cd_letter[4] = { -1, -1, -1, -1 };
+
+static struct iso_vol *vd_cdmedia(void *ctx, int drive, unsigned *err)
+{
+    int k;
+
+    (void)ctx;
+    for (k = 0; k < 4; k++)
+        if (cd_letter[k] == drive)
+            return cdrom_media(k, err);
+    *err = 0x0F;
+    return 0;
+}
 
 /* GLOS's own DOS asks which volume is in floppy drive `drive` now (dos21.h: media): the one mounted while the
    disk hasn't changed, or while files are open on it (DOS's "invalid disk change": they stay that disk's); else
@@ -437,6 +453,22 @@ static void mount_c(void)
         vd.vol[bv->letter] = &n->v;
         vd.cds.valid |= 1u << bv->letter;
         needs_bios |= !dev;
+    }
+    /* The CD-ROM drives (N4): letters after the last one the disks have, as MSCDEX gives them. */
+    {
+        int nc = cdrom_find(), k, top = 2;
+
+        for (k = 0; k < DOS_DRIVES; k++)
+            if (vd.vol[k] || (vd.removable >> k & 1))
+                top = k;
+        for (k = 0; k < nc && k < 4 && top + 1 + k < DOS_DRIVES; k++) {
+            cd_letter[k] = (signed char)(top + 1 + k);
+            vd.cdrives |= 1u << (top + 1 + k);
+            vd.cds.valid |= 1u << (top + 1 + k);
+            kprintf("GLOS-NATIVE step=drive %c: cdrom %d\n", 'A' + top + 1 + k, k);
+        }
+        if (nc)
+            vd.cdmedia = vd_cdmedia;
     }
     if (!cbios && !needs_bios && xseg) {        /* (GLOS's own driver for all: the BIOS's calls' block back to DOS) */
         dos_mem_free(&vd.mcb, xseg);

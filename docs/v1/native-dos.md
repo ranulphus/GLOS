@@ -1073,7 +1073,13 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   output where it can't), ISO and CUE/BIN images as drives"; the boot CD of G3 on top). The steps:
   C1 ATAPI packets in kernel/drv/ata.c (ata_packet), an ATAPI drive in ata_test's model; Loop A's `run.py
   --cdrom` (RetroGPU branch cdrom); tools/ndos/mkiso.py for the images (Python alone; El Torito floppy
-  emulation): **built**. C2 kernel/drv/cdrom.c, the drives: found from ide.c's probe, sectors of 2048 bytes with
+  emulation): **built**. **C2-C4's first part built the same evening:** cdrom.c finds the drives (IDENTIFY
+  PACKET's device type 05h), reads by READ(10) packets (another try after MEDIUM or HARDWARE ERROR; a disc's
+  change mounts afresh), asks TEST UNIT READY at most once a second while mounted; iso.c host-tested on mkiso's
+  and xorriso's images; GLOS's DOS answers its read-only calls on a CD's drive and refuses the rest (05h) (C4's
+  list in dos21_test). `jobs.py cdrom` natively (bf6 and the 486, with LOOPA_RUNPY's run.py until RetroGPU's has
+  --cdrom; SKIP without): the drive D:, DIR, a folder of 91 files, TYPE, VOL's label, 70,000 bytes copied to C:
+  the same, MD refused: PASS. Still owed of C4: 71xxh, FCBs and 6Ch on a CD's drive. Planned: C2 kernel/drv/cdrom.c, the drives: found from ide.c's probe, sectors of 2048 bytes with
   a small cache, the disc's change (UNIT ATTENTION) and its absence (NOT READY), the TOC. C3 kernel/fs/iso.c, ISO
   9660 read-only over a sector reader (level 1 names as DOS sees them, path tables not needed: folders walked),
   host-tested on mkiso's images and, where it is, xorriso's. C4 GLOS's DOS: a CD drive as DOS has one under

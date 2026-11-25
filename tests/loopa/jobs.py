@@ -8217,6 +8217,71 @@ def nboot_floppy_case(profile, card):
         not bad
 
 
+def cdrom_runpy():
+    """The run.py that has --cdrom (LOOPA_RUNPY's, or RETROGPU's once it has it): its path, or None."""
+    p = os.environ.get("LOOPA_RUNPY", os.path.join(MGA, "tools/loopa/run.py"))
+    return p if os.path.exists(p) and "--cdrom" in open(p).read() else None
+
+
+def cdrom_case(profile, card):
+    """N4's CD-ROM (docs/v1/native-dos.md, C1-C4): a disc of mkiso.py's making in 86Box's ATAPI drive (run.py
+    --cdrom), GLOS started natively. Its driver finds the drive and mounts the disc; the drive is D:, after C:, as
+    MSCDEX letters it; DIR of its root and of a folder of more than a sector of records, TYPE, VOL's label; a
+    file copied from it to C: the same byte for byte (fetched by SFTP); a folder made on it refused. Skipped
+    until RetroGPU's run.py has --cdrom (LOOPA_RUNPY names a branch's)."""
+    tag = "cdrom-" + profile
+    if not cdrom_runpy():
+        return "  %-22s SKIP RetroGPU's run.py has no --cdrom (LOOPA_RUNPY)" % tag, True
+    d = os.path.join(ROOT, "out", tag + "-img")
+    src = os.path.join(d, "src")
+    subprocess.run(["rm", "-rf", d])
+    os.makedirs(os.path.join(src, "SUB", "DEEP"))
+    open(os.path.join(src, "README.TXT"), "wb").write(b"hello from GLOS's CD\r\n")
+    data = bytes((i * 131 + (i >> 7)) & 0xFF for i in range(70000))
+    open(os.path.join(src, "SUB", "DATA.BIN"), "wb").write(data)
+    open(os.path.join(src, "SUB", "DEEP", "X.TXT"), "wb").write(b"deep")
+    for n in range(1, 91):
+        open(os.path.join(src, "SUB", "F%d.TXT" % n), "wb").write(b"%d" % n)
+    iso = os.path.join(d, "disc.iso")
+    mk = subprocess.run([sys.executable, os.path.join(ROOT, "tools/ndos/mkiso.py"), iso, src, "--label", "GLOSTEST"],
+                        capture_output=True)
+    checks, info = {"image": mk.returncode == 0}, ""
+    if not checks["image"]:
+        return "  %-22s FAIL image=%r" % (tag, mk.stderr.decode("latin-1")[-300:]), False
+    agent = Agent(tag + "-" + card, profile, card, ["--cdrom", iso, "--cmd", "C:\\TEST\\GLOS.EXE"], timeout=900)
+    try:
+        checks["listen"] = agent.listening()
+        if checks["listen"]:
+            out = lambda c: (lambda r: (r[0], (r[1] + r[2]).replace("\r", "")))(agent.ssh(c))
+            rc, o = out("dir D:\\")
+            checks["dir"] = rc == 0 and "README   TXT" in o and "SUB" in o and "<DIR>" in o
+            rc, o = out("dir D:\\SUB")
+            checks["dir-sub"] = rc == 0 and "91 file(s)" in o and "DATA     BIN         70,000" in o
+            rc, o = out("type D:\\README.TXT")
+            checks["type"] = rc == 0 and "hello from GLOS's CD" in o
+            rc, o = out("vol D:")
+            checks["label"] = rc == 0 and "Volume in drive D is GLOSTEST" in o
+            rc, o = out("copy D:\\SUB\\DATA.BIN C:\\DATA.BIN")
+            got = os.path.join(d, "got.bin")
+            batch = os.path.join(d, "batch")
+            open(batch, "w").write("get /C/DATA.BIN %s\n" % got)
+            subprocess.run(["sftp", "-P", str(agent.port)] + agent.base[3:] + ["-i", agent.key, "-b", batch, "glos@127.0.0.1"],
+                           capture_output=True, timeout=300)
+            checks["copy"] = rc == 0 and os.path.exists(got) and open(got, "rb").read() == data
+            rc, o = out("md D:\\NEW")
+            checks["md-refused"] = rc != 0
+            agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    log = agent.wait()
+    checks["found"] = re.search(r'GLOS-CD drive=0 dev=\d+ model="', log) is not None \
+        and "GLOS-NATIVE step=drive D: cdrom 0" in log and 'GLOS-CD drive=0 mount=0 label="GLOSTEST"' in log
+    checks["clean"] = "GLOS-PANIC" not in log and "GLOS-WARN" not in log
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % (tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad) + info), \
+        not bad
+
+
 def nboot_upgrade_case(profile, card, fat=16, msdos=False):
     """Phase G's upgrade (docs/v1/native-dos.md): a GLOS that DOS starts made to start by itself on the same volume.
     A hard disk of one partition (FAT16, or a FAT32 one just under 2 GiB, sparse) that starts FreeDOS (GLOS's formatter
@@ -13435,7 +13500,7 @@ def main():
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
                                       "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time", "netapp", "https", "sshc", "pkg", "vnc", "cache",
                                       "umaprobe", "mem-page", "int2f", "umb", "joy", "xfer", "api", "thr", "floppy", "ndos",
-                                      "nboot"])
+                                      "nboot", "cdrom"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -13739,6 +13804,9 @@ def main():
                       a.jobs)                   # (a hosted GLOS made to start by itself on its own volume)
         res += matrix(nboot_upgrade_case, [c + (32, True) for c in cases if c[0] == "bf6"], a.jobs)    # (... MS-DOS 7.1's)
         return 0 if all(r[1] for r in res) else 1
+    if a.suite == "cdrom":                      # (N4's CD-ROM natively: the bf6, the 486)
+        cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
+        return 0 if all(r[1] for r in matrix(cdrom_case, cases, a.jobs)) else 1
     if a.suite == "ndos":                       # (native machines: the bf6 with VME, the 486 without)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(ndos_case, cases, a.jobs)) else 1
