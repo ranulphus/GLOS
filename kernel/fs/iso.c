@@ -193,6 +193,23 @@ int iso_lookup(struct iso_vol *v, const char *path, struct iso_entry *e)
     }
 }
 
+int iso_dir_at(struct iso_vol *v, unsigned long lba, struct iso_entry *d)
+{
+    const unsigned char *r;
+    if (lba == v->root.lba) {
+        *d = v->root;
+        return ISO_OK;
+    }
+    if (sector(v, lba) != ISO_OK)
+        return ISO_EIO;
+    r = v->buf;
+    if (r[0] < 34 || r[32] != 1 || r[33] != 0 || !(r[25] & 0x02) || le32(r + 2) != lba)
+        return ISO_ENOTDIR;
+    entry_of(r, d);
+    d->name[0] = 0;
+    return ISO_OK;
+}
+
 long iso_read(struct iso_vol *v, const struct iso_entry *f, unsigned long off, void *buf, unsigned long n)
 {
     unsigned char *out = buf;

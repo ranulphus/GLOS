@@ -44,6 +44,26 @@ static struct fsv_vol *media(void *c, int drive, unsigned *err)
 }
 static int idles;
 static void idle(void *c) { (void)c; idles++; }
+
+/* A CD's drive (N4, as MSCDEX's): an image tools/ndos/mkiso.py made, read 2048 bytes a sector; a disc in or not. */
+static unsigned char *cd_img;
+static unsigned long cd_len;
+static struct iso_vol cd_vol;
+static int cd_in;
+static int cd_rd(void *c, unsigned long lba, unsigned count, unsigned char *b)
+{
+    (void)c;
+    if ((lba + count) * ISO_SECTOR > cd_len)
+        return -1;
+    memcpy(b, cd_img + lba * ISO_SECTOR, (size_t)count * ISO_SECTOR);
+    return 0;
+}
+static struct iso_vol *cdmedia(void *c, int drive, unsigned *err)
+{
+    (void)c;
+    *err = 0x15;
+    return drive == 4 && cd_in ? &cd_vol : 0;
+}
 static void type(const char *s) { dos_type(&m, (const unsigned char *)s, (unsigned)strlen(s)); }
 
 #define CHECK(c, ...) do { if (!(c)) { printf("FAIL line %d: ", __LINE__); printf(__VA_ARGS__); printf("\n"); fails++; } } while (0)
@@ -1234,6 +1254,155 @@ int main(void)
         CHECK(r.ax != 0xFFFF && r.cx == 512, "36h of B: with the disk back: ax %x", r.ax);
         m.removable = 0, m.media = 0, m.vol[1] = 0, m.cds.valid &= ~(1u << 1);
         free(disk2);
+    }
+
+    /* ---- a CD's drive (N4: E: here, as MSCDEX's: redirected, read only) */
+    {
+        static const struct iso_dev cdd = { cd_rd, 0 };
+        unsigned tp = dos_cur_psp(&m), th, k, found;
+        unsigned char data[5000];
+        FILE *f;
+
+        for (k = 0; k < sizeof data; k++)
+            data[k] = (unsigned char)(k * 7 + 3);
+        if (system("rm -rf build/host/dos21cd && mkdir -p build/host/dos21cd/src/SUB/DEEP") == 0) {
+            f = fopen("build/host/dos21cd/src/README.TXT", "wb");
+            fputs("hello from the CD", f), fclose(f);
+            f = fopen("build/host/dos21cd/src/SUB/DATA.BIN", "wb");
+            fwrite(data, 1, sizeof data, f), fclose(f);
+            f = fopen("build/host/dos21cd/src/SUB/DEEP/X.TXT", "wb");
+            fputs("deep", f), fclose(f);
+        }
+        CHECK(system("python3 tools/ndos/mkiso.py build/host/dos21cd/a.iso build/host/dos21cd/src --label GAMECD"
+                     " > /dev/null") == 0, "mkiso.py");
+        f = fopen("build/host/dos21cd/a.iso", "rb");
+        if (f) {
+            fseek(f, 0, SEEK_END);
+            cd_len = (unsigned long)ftell(f);
+            fseek(f, 0, SEEK_SET);
+            cd_img = malloc(cd_len);
+            CHECK(fread(cd_img, 1, cd_len, f) == cd_len, "the image read");
+            fclose(f);
+        }
+        CHECK(cd_img && iso_mount(&cd_vol, &cdd) == ISO_OK, "the CD mounted");
+        m.cdrives = 1u << 4;
+        m.cds.valid |= 1u << 4;
+        m.cdmedia = cdmedia;
+        cd_in = 1;
+        str(tp, 0x300, "E:\\README.TXT");
+        r.ds = tp, r.dx = 0x300, r.flags = 0;
+        call(&r, 0x3D00);
+        th = r.ax;
+        CHECK(!(r.flags & 1), "3Dh E:\\README.TXT: cf %u ax %x", r.flags & 1, r.ax);
+        r.bx = th, r.cx = 100, r.ds = tp, r.dx = 0x400;
+        call(&r, 0x3F00);
+        CHECK(!(r.flags & 1) && r.ax == 17 && !memcmp(mem + lin(tp, 0x400), "hello from the CD", 17), "3Fh from the CD: %x", r.ax);
+        r.bx = th, r.cx = 0, r.dx = 6;
+        call(&r, 0x4200);
+        r.bx = th, r.cx = 4, r.ds = tp, r.dx = 0x400;
+        call(&r, 0x3F00);
+        CHECK(!(r.flags & 1) && r.ax == 4 && !memcmp(mem + lin(tp, 0x400), "from", 4), "42h then 3Fh on the CD");
+        r.bx = th, r.cx = 0, r.dx = 0;
+        call(&r, 0x4202);
+        CHECK(!(r.flags & 1) && r.ax == 17 && r.dx == 0, "42h to the end: %x", r.ax);
+        r.bx = th;
+        call(&r, 0x4400);
+        CHECK(!(r.flags & 1) && (r.dx & 0x8000) && (r.dx & 0x3F) == 4, "4400h: a redirected file of E: (%x)", r.dx);
+        r.bx = th, r.cx = 1, r.ds = tp, r.dx = 0x400;
+        call(&r, 0x4000);
+        CHECK((r.flags & 1) && r.ax == 0x05, "40h to a CD's file: %x (05h)", r.ax);
+        r.bx = th;
+        call(&r, 0x3E00);
+        CHECK(!(r.flags & 1), "3Eh");
+        str(tp, 0x300, "E:\\README.TXT");
+        r.ds = tp, r.dx = 0x300;
+        call(&r, 0x3D02);
+        CHECK((r.flags & 1) && r.ax == 0x05, "3Dh to write on the CD: %x (05h)", r.ax);
+        str(tp, 0x300, "E:\\NEW.TXT");
+        r.ds = tp, r.dx = 0x300, r.cx = 0;
+        call(&r, 0x3C00);
+        CHECK((r.flags & 1) && r.ax == 0x05, "3Ch on the CD: %x", r.ax);
+        call(&r, 0x4100);
+        CHECK((r.flags & 1) && r.ax == 0x05, "41h on the CD: %x", r.ax);
+        call(&r, 0x3900);
+        CHECK((r.flags & 1) && r.ax == 0x05, "39h on the CD: %x", r.ax);
+        str(tp, 0x300, "E:\\README.TXT");
+        r.ds = tp, r.dx = 0x300, r.cx = 0x20;
+        call(&r, 0x4301);
+        CHECK((r.flags & 1) && r.ax == 0x05, "4301h on the CD: %x", r.ax);
+        call(&r, 0x4300);
+        CHECK(!(r.flags & 1) && r.cx == 0x01, "4300h of a CD's file: read-only (%x)", r.cx);
+        str(tp, 0x300, "E:\\SUB");
+        r.ds = tp, r.dx = 0x300;
+        call(&r, 0x4300);
+        CHECK(!(r.flags & 1) && r.cx == 0x11, "4300h of a CD's folder (%x)", r.cx);
+        str(tp, 0x300, "E:\\NONE.TXT");
+        r.ds = tp, r.dx = 0x300;
+        call(&r, 0x3D00);
+        CHECK((r.flags & 1) && r.ax == 0x02, "3Dh of a file that isn't there: %x", r.ax);
+        /* finds */
+        str(tp, 0x300, "E:\\SUB\\*.*");
+        r.ds = tp, r.dx = 0x300, r.cx = 0x10;
+        call(&r, 0x4E00);
+        for (found = 0; !(r.flags & 1) && found < 10; found++)
+            call(&r, 0x4F00);
+        CHECK(found == 2 && r.ax == 0x12, "4Eh/4Fh in E:\\SUB, folders too: %u (%x)", found, r.ax);
+        str(tp, 0x300, "E:\\*.TXT");
+        r.ds = tp, r.dx = 0x300, r.cx = 0;
+        call(&r, 0x4E00);
+        {
+            unsigned char *dta = mem + lin(tp, 0x80);   /* (the PSP's DTA) */
+            CHECK(!(r.flags & 1) && !strcmp((char *)dta + 0x1E, "README.TXT") && dta[0x1A] == 17 && (dta[0] & 0x80),
+                  "4Eh E:\\*.TXT: [%s] %u", dta + 0x1E, dta[0x1A]);
+            call(&r, 0x4F00);
+            CHECK((r.flags & 1) && r.ax == 0x12, "4Fh: no more (%x)", r.ax);
+            str(tp, 0x300, "E:\\*.*");
+            r.ds = tp, r.dx = 0x300, r.cx = 0x08;
+            call(&r, 0x4E00);
+            CHECK(!(r.flags & 1) && !strcmp((char *)dta + 0x1E, "GAMECD") && dta[0x15] == 0x08, "the label: [%s]",
+                  dta + 0x1E);
+        }
+        /* folders */
+        str(tp, 0x300, "E:\\SUB");
+        r.ds = tp, r.dx = 0x300;
+        call(&r, 0x3B00);
+        CHECK(!(r.flags & 1), "3Bh E:\\SUB: %x", r.ax);
+        str(tp, 0x300, "E:DATA.BIN");
+        r.ds = tp, r.dx = 0x300;
+        call(&r, 0x3D00);
+        th = r.ax;
+        CHECK(!(r.flags & 1), "3Dh E:DATA.BIN in E:'s folder: %x", r.ax);
+        r.bx = th, r.cx = 5000, r.ds = tp, r.dx = 0x1000;
+        call(&r, 0x3F00);
+        CHECK(!(r.flags & 1) && r.ax == 5000 && !memcmp(mem + lin(tp, 0x1000), data, 5000), "3Fh 5000 bytes across "
+              "sectors: %x", r.ax);
+        r.bx = th;
+        call(&r, 0x3E00);
+        str(tp, 0x300, "E:\\NOWHERE");
+        r.ds = tp, r.dx = 0x300;
+        call(&r, 0x3B00);
+        CHECK((r.flags & 1) && r.ax == 0x03, "3Bh to a folder that isn't there: %x", r.ax);
+        r.dx = 5;
+        call(&r, 0x3600);
+        CHECK(r.ax == 1 && r.bx == 0 && r.cx == 2048 && r.dx == cd_vol.sectors, "36h of E:: %x %x %x %x", r.ax, r.bx,
+              r.cx, r.dx);
+        r.bx = 5, r.flags = 0;
+        call(&r, 0x4409);
+        CHECK(!(r.flags & 1) && r.dx == 0x1000, "4409h E:: remote (%x)", r.dx);
+        r.bx = 5, r.flags = 0;
+        call(&r, 0x4408);
+        CHECK((r.flags & 1) && r.ax == 0x01, "4408h E:: the redirector's (%x)", r.ax);
+        cd_in = 0;                              /* (the disc taken out) */
+        str(tp, 0x300, "E:\\README.TXT");
+        r.ds = tp, r.dx = 0x300, r.flags = 0;
+        call(&r, 0x3D00);
+        CHECK((r.flags & 1) && r.ax == 0x15, "3Dh on E: with no disc: %x (15h)", r.ax);
+        str(tp, 0x300, "E:\\*.*");
+        r.ds = tp, r.dx = 0x300, r.cx = 0;
+        call(&r, 0x4E00);
+        CHECK((r.flags & 1) && r.ax == 0x15, "4Eh on E: with no disc: %x", r.ax);
+        m.cdrives = 0, m.cdmedia = 0, m.cds.valid &= ~(1u << 4);
+        free(cd_img);
     }
 
     /* ---- what isn't there */

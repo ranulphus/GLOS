@@ -6,6 +6,7 @@
 #define K_NDOS_FIND_H
 
 #include "../fs/fsv.h"
+#include "../fs/iso.h"
 
 #define DOS_DTA_FIND 43                 /* the bytes of the DTA a search uses */
 
@@ -16,6 +17,13 @@ int dos_findfirst(struct fsv_vol *v, unsigned drive, const char *dir, const char
                   unsigned char *dta);
 /* 4Fh: the next, from the DTA alone. 0, or 12h. */
 int dos_findnext(struct fsv_vol *v, unsigned char *dta);
+/* The same on a CD's drive (N4: as MSCDEX's, a redirected drive): the DTA's drive byte with bit 7 set, the
+   folder's extent where a FAT search keeps its cluster, the place in it where the entry's index is. No "." and
+   ".." (a CD's folders list none under MSCDEX); 08h alone finds the volume's label. */
+int dos_findfirst_cd(struct iso_vol *cv, unsigned drive, const char *dir, const char *spec, unsigned attr, int cp,
+                     unsigned char *dta);
+int dos_findnext_cd(struct iso_vol *cv, unsigned char *dta);
+
 /* An entry's short name ("NAME.EXT", "." and "..") as its 11 bytes in a folder. */
 void dos_name11(const char *s, unsigned char out[11]);
 

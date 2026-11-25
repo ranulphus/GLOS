@@ -9,6 +9,7 @@
 #define K_NDOS_FILES_H
 
 #include "../fs/fsv.h"
+#include "../fs/iso.h"
 
 #define DOS_SFT_MAX 255                 /* entries at most (a handle table holds a byte: FFh is "closed") */
 #define DOS_SFT_SIZE 0x3B
@@ -24,6 +25,9 @@ enum { DOS_DEV_NONE = 0, DOS_DEV_CON, DOS_DEV_AUX, DOS_DEV_PRN, DOS_DEV_NUL };
 struct dos_sft_k {                      /* the kernel's side of an entry */
     int dev;                            /* DOS_DEV_*, or 0: a file */
     struct fsv_file f;
+    struct iso_vol *cd;                 /* a CD's file (N4: a drive as MSCDEX's, read only), not f's: its entry, */
+    struct iso_entry ce;                /* ... and where it is read from */
+    unsigned long cpos;
 };
 
 /* A file open through an FCB (0Fh, 16h: no handle). The program's FCB keeps a place here and a ticket (in its
@@ -73,6 +77,12 @@ int dos_open(struct dos_files *t, unsigned psp, struct fsv_vol *v, unsigned driv
 /* 3Ch (replace) and 5Bh (not replace): made with attr, opened read-write, compatibility mode. */
 int dos_create(struct dos_files *t, unsigned psp, struct fsv_vol *v, unsigned drive, const char *path,
                unsigned char attr, int replace, unsigned *h);
+/* 3Dh on a CD's drive (N4): path on ISO volume cv, read access alone (anything else: DOS_EACCES, as MSCDEX
+   answers); the entry marked a redirected file's (its device word's bit 15). 0 and *h, or a DOS error. */
+int dos_open_cd(struct dos_files *t, unsigned psp, struct iso_vol *cv, unsigned drive, const char *path,
+                unsigned mode, unsigned *h);
+/* A CD file's bytes from where its handle is (3Fh): read into dst, the place moved on. The bytes, or -1. */
+long dos_read_cd(struct dos_files *t, unsigned i, void *dst, unsigned long n);
 /* 3Eh. */
 int dos_close(struct dos_files *t, unsigned psp, unsigned h);
 /* 45h, 46h. */

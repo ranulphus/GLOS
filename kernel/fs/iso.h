@@ -47,6 +47,10 @@ int iso_next(struct iso_vol *v, const struct iso_entry *dir, unsigned long *pos,
    ISO_OK; ISO_ENOENT (its last part isn't there), ISO_ENOPATH (a folder on the way isn't), ISO_EIO. */
 int iso_lookup(struct iso_vol *v, const char *path, struct iso_entry *e);
 
+/* The folder whose extent begins at lba, from its own "." record (a search kept in a DTA has its place alone).
+   ISO_OK, ISO_ENOTDIR (no folder's records there), ISO_EIO. */
+int iso_dir_at(struct iso_vol *v, unsigned long lba, struct iso_entry *d);
+
 /* Up to n bytes of a file from off: the bytes read (0 at or past its end), or ISO_EIO. */
 long iso_read(struct iso_vol *v, const struct iso_entry *f, unsigned long off, void *buf, unsigned long n);
 

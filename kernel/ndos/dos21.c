@@ -157,6 +157,10 @@ static struct fsv_vol *vol_err(struct dos_m *m, int d, unsigned *err)
     *err = 0x0F;
     if (d < 0 || d >= DOS_DRIVES)
         return 0;
+    if (m->cdrives >> d & 1) {
+        *err = 0x05;                            /* (a CD's drive: nothing of FAT's, so no write either) */
+        return 0;
+    }
     if ((m->removable >> d & 1) && m->media)
         m->vol[d] = m->media(m->ctx, d, err);
     return m->vol[d];
@@ -167,6 +171,33 @@ static struct fsv_vol *vol_of(struct dos_m *m, int d)
     unsigned e;
 
     return vol_err(m, d, &e);
+}
+
+/* A CD drive's disc now (N4): its volume, or 0 with *err (0Fh: no such drive, 15h: not ready). */
+static struct iso_vol *cd_of(struct dos_m *m, int d, unsigned *err)
+{
+    *err = 0x0F;
+    if (d < 0 || d >= DOS_DRIVES || !(m->cdrives >> d & 1) || !m->cdmedia)
+        return 0;
+    *err = 0x15;
+    return m->cdmedia(m->ctx, d, err);
+}
+
+/* A path's drive and whole path, and its volume: a FAT one in *v, or a CD's in *cv (one of the two set): 0, or a
+   DOS error. For the calls a CD drive answers (read only); the rest take resolve_str, which refuses it. */
+static int resolve_any(struct dos_m *m, const char *p, struct fsv_vol **v, struct iso_vol **cv, int *drive, char *out)
+{
+    unsigned e;
+    int r = dos_resolve(&m->cds, m->cp, p, drive, out, 128);
+
+    *v = 0, *cv = 0;
+    if (r)
+        return r;
+    if (m->cdrives >> *drive & 1)
+        return (*cv = cd_of(m, *drive, &e)) ? 0 : (int)e;
+    if (!(*v = vol_err(m, *drive, &e)))
+        return (int)e;
+    return 0;
 }
 
 /* A path made a drive's volume and its whole path there (out: 128 bytes): 0, or a DOS error. */
@@ -929,6 +960,14 @@ static int file_io(struct dos_m *m, struct dos_regs86 *r, unsigned ah)
         r->ax = ah == 0x40 ? (unsigned)cnt : 0; /* (no ports: what's written goes nowhere) */
         return ok(r);
     }
+    if (m->files.k[i].cd) {                     /* (a CD's file: read alone) */
+        if (ah == 0x40)
+            return err(m, r, 0x05);
+        if ((got = dos_read_cd(&m->files, (unsigned)i, m->mem + a, cnt)) < 0)
+            return err(m, r, 0x1E);             /* (read fault) */
+        r->ax = (unsigned)got;
+        return ok(r);
+    }
     got = ah == 0x3F ? dos_read(&m->files, cur_psp(m), r->bx, m->mem + a, cnt)
                      : dos_write(&m->files, cur_psp(m), r->bx, m->mem + a, cnt);
     if (got < 0)
@@ -965,7 +1004,9 @@ static int ioctl(struct dos_m *m, struct dos_regs86 *r, unsigned al)
                 set_al(r, dos_key_peek(m) >= 0 || m->line_at < m->line_n ? 0xFF : 0);
                 if (!(r->ax & 0xFF) && m->idle)
                     m->idle(m->ctx);
-            } else
+            } else if (m->files.k[i].cd)
+                set_al(r, m->files.k[i].cpos < m->files.k[i].ce.size ? 0xFF : 0);
+            else
                 set_al(r, m->files.k[i].dev || m->files.k[i].f.pos < fsv_size(&m->files.k[i].f) ? 0xFF : 0);
         } else {
             set_al(r, 0xFF);
@@ -984,6 +1025,14 @@ static int ioctl(struct dos_m *m, struct dos_regs86 *r, unsigned al)
     case 0x09:
     case 0x0E:
         d = (r->bx & 0xFF) ? (int)(r->bx & 0xFF) - 1 : m->cds.current;
+        if (d >= 0 && d < DOS_DRIVES && (m->cdrives >> d & 1)) {
+            if (al == 0x09) {                   /* (a CD's drive: remote, as MSCDEX's; 4408h and 440Eh are the
+                                                   redirector's to refuse) */
+                r->dx = 0x1000;
+                return ok(r);
+            }
+            return err(m, r, 0x01);
+        }
         if (d < 0 || d >= DOS_DRIVES || !(m->vol[d] || (m->removable >> d & 1)))
             return err(m, r, 0x0F);
         if (al == 0x08)
@@ -1009,6 +1058,11 @@ static int find(struct dos_m *m, struct dos_regs86 *r, unsigned ah)
     if (dl + DOS_DTA_FIND > m->size)
         return err(m, r, 0x09);
     if (ah == 0x4F) {
+        if (dta[0] & 0x80) {                    /* (a CD's search: its drive's disc as it is now) */
+            unsigned ce;
+            struct iso_vol *cv = cd_of(m, dta[0] & 0x7F, &ce);
+            return cv ? done(m, r, dos_findnext_cd(cv, dta)) : err(m, r, 0x12);
+        }
         if (dta[0] >= DOS_DRIVES || !(v = vol_of(m, dta[0])))
             return err(m, r, 0x12);
         return done(m, r, dos_findnext(v, dta));
@@ -1023,9 +1077,14 @@ static int find(struct dos_m *m, struct dos_regs86 *r, unsigned ah)
     dir[last - spec] = 0;
     if (!dir[0] || dir[last - spec - 1] == ':')
         dir[last - spec] = '.', dir[last - spec + 1] = 0;
-    e = resolve_str(m, dir, &v, &drive, path);
-    if (e)
-        return err(m, r, e == 0x02 ? 0x03 : (unsigned)e);
+    {
+        struct iso_vol *cv;
+        e = resolve_any(m, dir, &v, &cv, &drive, path);
+        if (e)
+            return err(m, r, e == 0x02 ? 0x03 : (unsigned)e);
+        if (cv)
+            return done(m, r, dos_findfirst_cd(cv, (unsigned)drive, path, *last ? last : "*.*", r->cx & 0xFF, m->cp, dta));
+    }
     return done(m, r, dos_findfirst(v, (unsigned)drive, path, *last ? last : "*.*", r->cx & 0xFF, m->cp, dta));
 }
 
@@ -2575,6 +2634,17 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
         unsigned long fr;
 
         d = (r->dx & 0xFF) ? (int)(r->dx & 0xFF) - 1 : m->cds.current;
+        if (d >= 0 && d < DOS_DRIVES && (m->cdrives >> d & 1)) {     /* (a CD: its size, nothing free, as MSCDEX) */
+            unsigned ce;
+            struct iso_vol *cv = cd_of(m, d, &ce);
+            if (!cv) {
+                r->ax = 0xFFFF;
+                return DOS21_DONE;
+            }
+            r->ax = 1, r->bx = 0, r->cx = ISO_SECTOR;
+            r->dx = (unsigned)(cv->sectors > 0xFFFF ? 0xFFFF : cv->sectors);
+            return DOS21_DONE;
+        }
         if (d < 0 || d >= DOS_DRIVES || !(v = vol_of(m, d)) || fsv_free(v, &fr) != 0) {
             r->ax = 0xFFFF;
             return DOS21_DONE;
@@ -2605,15 +2675,24 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
         if (ah == 0x3A && !strcmp(path, m->cds.cwd[drive]))
             return err(m, r, 0x10);             /* (the current folder) */
         return done(m, r, fs_err(ah == 0x39 ? fsv_mkdir(v, path) : fsv_rmdir(v, path), 0x03));
-    case 0x3B:
-        if ((e = resolve(m, r->ds, r->dx, &v, &drive, path)) != 0)
+    case 0x3B: {
+        struct iso_vol *cv;
+        char p3b[128];
+        if (str_in(m, r->ds, r->dx, p3b, sizeof p3b) != 0)
+            return err(m, r, 0x03);
+        if ((e = resolve_any(m, p3b, &v, &cv, &drive, path)) != 0)
             return err(m, r, e == 0x02 ? 0x03 : (unsigned)e);
-        if (strcmp(path, "\\")) {
+        if (cv && strcmp(path, "\\")) {          /* (a CD's folder) */
+            struct iso_entry ce;
+            if ((e = iso_lookup(cv, path, &ce)) != ISO_OK || !ce.dir)
+                return err(m, r, e == ISO_EIO ? 0x1F : 0x03);
+        } else if (strcmp(path, "\\")) {
             if ((e = fsv_lookup(v, path, &fe)) != 0)
                 return err(m, r, (unsigned)fs_err(e, 0x03));
             if (!(fe.attr & FAT_A_DIR))
                 return err(m, r, 0x03);
         }
+    }
         if (strlen(path) >= sizeof m->cds.cwd[0])
             return err(m, r, 0x03);
         strcpy(m->cds.cwd[drive], path);
@@ -2625,7 +2704,12 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
             return err(m, r, 0x03);
         if ((d = dev_name(path2)) != 0)
             e = dos_open(&m->files, cur_psp(m), 0, 0, "", d, ah == 0x3D ? al : 2, &h);
-        else if ((e = resolve_str(m, path2, &v, &drive, path)) != 0)
+        else if (ah == 0x3D && dos_resolve(&m->cds, m->cp, path2, &drive, path, 128) == 0
+                 && (m->cdrives >> drive & 1)) {        /* (a CD's file: opened to be read) */
+            unsigned ce;
+            struct iso_vol *cv = cd_of(m, drive, &ce);
+            e = cv ? dos_open_cd(&m->files, cur_psp(m), cv, (unsigned)drive, path, al, &h) : (int)ce;
+        } else if ((e = resolve_str(m, path2, &v, &drive, path)) != 0)
             ;
         else if (ah == 0x3D)
             e = no_file(v, path, dos_open(&m->files, cur_psp(m), v, (unsigned)drive, path, 0, al, &h));
@@ -2719,6 +2803,22 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
     case 0x43:
         if (al > 1)
             break;
+        if (al == 0) {                          /* (a CD's file or folder: its attributes) */
+            struct iso_vol *cv;
+            char p43[128];
+            if (str_in(m, r->ds, r->dx, p43, sizeof p43) != 0)
+                return err(m, r, 0x03);
+            if ((e = resolve_any(m, p43, &v, &cv, &drive, path)) != 0)
+                return err(m, r, (unsigned)e);
+            if (cv) {
+                struct iso_entry ce;
+                e = iso_lookup(cv, path, &ce);
+                if (e != ISO_OK)
+                    return err(m, r, e == ISO_ENOENT ? 0x02 : e == ISO_EIO ? 0x1F : 0x03);
+                r->cx = ce.attr;
+                return ok(r);
+            }
+        }
         if ((e = resolve(m, r->ds, r->dx, &v, &drive, path)) != 0)
             return err(m, r, (unsigned)e);
         if (al == 0) {

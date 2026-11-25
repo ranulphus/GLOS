@@ -135,27 +135,27 @@ host-test-run: build/host/libpdfbr32.a
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Ikernel/include -Iinclude -o build/host/vsb_test \
 	  tests/host/vsb_test.c kernel/vm/vsb.c kernel/vm/vdma.c && build/host/vsb_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-format-truncation -Ikernel/include -Iinclude -o build/host/fsv_test \
-	  tests/host/fsv_test.c kernel/fs/fsv.c kernel/fs/fat.c kernel/disk/fatfmt.c kernel/disk/mbr.c \
+	  tests/host/fsv_test.c kernel/fs/fsv.c kernel/fs/iso.c kernel/fs/fat.c kernel/disk/fatfmt.c kernel/disk/mbr.c \
 	  kernel/disk/mbrboot.S kernel/disk/fdboot.S $(CP_SRCS) && build/host/fsv_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Ikernel/include -Iinclude -o build/host/names_test \
 	  tests/host/names_test.c kernel/ndos/names.c kernel/ndos/fucase.c kernel/fs/fat.c $(CP_SRCS) && build/host/names_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-format-truncation -Ikernel/include -Iinclude -o build/host/files_test \
-	  tests/host/files_test.c kernel/ndos/files.c kernel/ndos/share.c kernel/ndos/psp.c kernel/fs/fsv.c kernel/fs/fat.c \
+	  tests/host/files_test.c kernel/ndos/files.c kernel/ndos/share.c kernel/ndos/psp.c kernel/fs/fsv.c kernel/fs/iso.c kernel/fs/fat.c \
 	  kernel/disk/fatfmt.c kernel/disk/mbr.c kernel/disk/mbrboot.S kernel/disk/fdboot.S $(CP_SRCS) && build/host/files_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Ikernel/include -Iinclude -o build/host/path_test \
 	  tests/host/path_test.c kernel/ndos/path.c kernel/ndos/names.c kernel/ndos/fucase.c kernel/fs/fat.c $(CP_SRCS) && build/host/path_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-format-truncation -Ikernel/include -Iinclude -o build/host/find_test \
-	  tests/host/find_test.c kernel/ndos/find.c kernel/ndos/names.c kernel/ndos/fucase.c kernel/fs/fsv.c kernel/fs/fat.c kernel/disk/fatfmt.c \
+	  tests/host/find_test.c kernel/ndos/find.c kernel/ndos/names.c kernel/ndos/fucase.c kernel/fs/fsv.c kernel/fs/iso.c kernel/fs/fat.c kernel/disk/fatfmt.c \
 	  kernel/disk/mbr.c kernel/disk/mbrboot.S kernel/disk/fdboot.S $(CP_SRCS) && build/host/find_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-format-truncation -Ikernel/include -Iinclude -o build/host/dos21_test \
 	  tests/host/dos21_test.c kernel/ndos/dos21.c kernel/ndos/files.c kernel/ndos/share.c kernel/ndos/psp.c kernel/ndos/exe.c \
 	  kernel/ndos/mcb.c kernel/ndos/path.c kernel/ndos/find.c kernel/ndos/names.c kernel/ndos/fucase.c kernel/ndos/dtime.c \
-	  kernel/fs/fsv.c kernel/fs/fat.c kernel/disk/fatfmt.c kernel/disk/mbr.c kernel/disk/mbrboot.S kernel/disk/fdboot.S \
+	  kernel/fs/fsv.c kernel/fs/iso.c kernel/fs/fat.c kernel/disk/fatfmt.c kernel/disk/mbr.c kernel/disk/mbrboot.S kernel/disk/fdboot.S \
 	  $(CP_SRCS) && build/host/dos21_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-format-truncation -Ikernel/include -Iinclude -o build/host/fcb_test \
 	  tests/host/fcb_test.c kernel/ndos/dos21.c kernel/ndos/files.c kernel/ndos/share.c kernel/ndos/psp.c kernel/ndos/exe.c \
 	  kernel/ndos/mcb.c kernel/ndos/path.c kernel/ndos/find.c kernel/ndos/names.c kernel/ndos/fucase.c kernel/ndos/dtime.c \
-	  kernel/fs/fsv.c kernel/fs/fat.c kernel/disk/fatfmt.c kernel/disk/mbr.c kernel/disk/mbrboot.S kernel/disk/fdboot.S \
+	  kernel/fs/fsv.c kernel/fs/iso.c kernel/fs/fat.c kernel/disk/fatfmt.c kernel/disk/mbr.c kernel/disk/mbrboot.S kernel/disk/fdboot.S \
 	  $(CP_SRCS) && build/host/fcb_test
 	@$(HOST_CC) -m32 -O2 -g -Wall -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint -o build/host/crypto_kat \
 	  tests/host/crypto_kat.c $(TINYSSH_SRCS) && build/host/crypto_kat
@@ -641,7 +641,7 @@ KCFLAGS := -m32 -march=i486 -ffreestanding -fno-pic -fno-pie -fno-stack-protecto
            -Ithird_party/lwip/src/include -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint -Ikernel/ssh \
            -I$(RETROGPU)/hal/include
 KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/arch/mtrr.c kernel/arch/pmc.c kernel/core/main.c kernel/core/timer.c \
-         kernel/core/sched.c kernel/drv/pci.c kernel/drv/dev.c kernel/drv/devlist.c kernel/drv/cstore.c kernel/drv/cache.c kernel/drv/ata.c kernel/drv/ide.c kernel/vm/ndm.c kernel/vm/ndcmd.c kernel/vm/vdos.c kernel/ndos/exe.c kernel/ndos/dtime.c kernel/fs/fat.c kernel/fs/fsv.c kernel/ndos/psp.c kernel/ndos/dos21.c kernel/ndos/files.c kernel/ndos/share.c kernel/ndos/mcb.c kernel/ndos/path.c kernel/ndos/find.c kernel/ndos/names.c kernel/ndos/fucase.c kernel/drv/nic.c kernel/drv/ne2k.c kernel/drv/rtl8139.c kernel/drv/e100.c \
+         kernel/core/sched.c kernel/drv/pci.c kernel/drv/dev.c kernel/drv/devlist.c kernel/drv/cstore.c kernel/drv/cache.c kernel/drv/ata.c kernel/drv/ide.c kernel/vm/ndm.c kernel/vm/ndcmd.c kernel/vm/vdos.c kernel/ndos/exe.c kernel/ndos/dtime.c kernel/fs/fat.c kernel/fs/fsv.c kernel/fs/iso.c kernel/ndos/psp.c kernel/ndos/dos21.c kernel/ndos/files.c kernel/ndos/share.c kernel/ndos/mcb.c kernel/ndos/path.c kernel/ndos/find.c kernel/ndos/names.c kernel/ndos/fucase.c kernel/drv/nic.c kernel/drv/ne2k.c kernel/drv/rtl8139.c kernel/drv/e100.c \
          kernel/net/net.c kernel/net/sock.c kernel/lib/libc.c \
          kernel/core/random.c kernel/core/kat.c kernel/ssh/ssh.c kernel/ssh/sshbuf.c kernel/ssh/sshkeys.c \
          kernel/ssh/sshd.c \

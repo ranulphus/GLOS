@@ -151,6 +151,12 @@ static void refresh(struct dos_files *t, unsigned i)
     unsigned char *e = entry(t, i);
     struct fsv_file *f = &t->k[i].f;
 
+    if (!t->k[i].dev && t->k[i].cd) {
+        wr16(e + 0x0B, (unsigned)(t->k[i].ce.lba & 0xFFFF));
+        wr32(e + 0x11, t->k[i].ce.size);
+        wr32(e + 0x15, t->k[i].cpos);
+        return;
+    }
     if (t->k[i].dev || !f->n)
         return;
     wr16(e + 0x0B, (unsigned)(f->n->first & 0xFFFF));
@@ -243,6 +249,63 @@ int dos_open(struct dos_files *t, unsigned psp, struct fsv_vol *v, unsigned driv
     j[hd] = (unsigned char)i;
     *h = (unsigned)hd;
     return 0;
+}
+
+int dos_open_cd(struct dos_files *t, unsigned psp, struct iso_vol *cv, unsigned drive, const char *path,
+                unsigned mode, unsigned *h)
+{
+    int hd = free_handle(t, psp), i, r, k;
+    unsigned size;
+    unsigned char *j = jft(t, psp, &size), *e;
+    struct iso_entry ce;
+    const char *s;
+
+    if ((mode & 7) == 3 || (mode & 7) > 4 || ((mode >> 4) & 7) > 4)
+        return DOS_EINVALID;
+    if ((mode & 7) != 0)
+        return DOS_EACCES;                      /* (a CD: read alone) */
+    r = iso_lookup(cv, path, &ce);
+    if (r == ISO_ENOENT)
+        return DOS_ENOENT;
+    if (r != ISO_OK)
+        return r == ISO_EIO ? 0x1F : DOS_ENOPATH;
+    if (ce.dir)
+        return DOS_EACCES;
+    if (hd < 0 || (i = handle_entry(t)) < 0)
+        return DOS_ENFILE;
+    e = entry(t, (unsigned)i);
+    memset(e, 0, DOS_SFT_SIZE);
+    memset(&t->k[i].f, 0, sizeof t->k[i].f);
+    wr16(e + 2, mode);
+    e[4] = ce.attr;
+    wr16(e + 5, (drive & 0x3F) | 0x40 | 0x8000);    /* (bit 15: a redirector's file, as MSCDEX's are) */
+    wr16(e + 0x0D, ce.time);
+    wr16(e + 0x0F, ce.date);
+    memset(e + 0x20, ' ', 11);
+    for (s = ce.name, k = 0; *s && *s != '.' && k < 8; s++)
+        e[0x20 + k++] = (unsigned char)*s;
+    if (*s == '.')
+        for (s++, k = 8; *s && k < 11; s++)
+            e[0x20 + k++] = (unsigned char)*s;
+    wr16(e + 0x31, psp);
+    t->k[i].dev = DOS_DEV_NONE;
+    t->k[i].cd = cv, t->k[i].ce = ce, t->k[i].cpos = 0;
+    refresh(t, (unsigned)i);
+    wr16(e, 1);
+    j[hd] = (unsigned char)i;
+    *h = (unsigned)hd;
+    return 0;
+}
+
+long dos_read_cd(struct dos_files *t, unsigned i, void *dst, unsigned long n)
+{
+    long got = iso_read(t->k[i].cd, &t->k[i].ce, t->k[i].cpos, dst, n);
+
+    if (got < 0)
+        return -1;
+    t->k[i].cpos += (unsigned long)got;
+    refresh(t, i);
+    return got;
 }
 
 int dos_create(struct dos_files *t, unsigned psp, struct fsv_vol *v, unsigned drive, const char *path,
@@ -352,6 +415,7 @@ static void release(struct dos_files *t, unsigned i)
             t->lock[k].used = 0;
     if (!t->k[i].dev && t->k[i].f.n)
         fsv_close(&t->k[i].f);
+    t->k[i].cd = 0;
     wr16(entry(t, i), 0);
 }
 
@@ -451,6 +515,13 @@ int dos_seek(struct dos_files *t, unsigned psp, unsigned h, int whence, long off
         return 0x01;                            /* (an origin DOS has not: invalid function) */
     if (t->k[i].dev) {
         *pos = 0;
+        return 0;
+    }
+    if (t->k[i].cd) {                           /* (a CD's file: its own place, wrapped as a disk file's is) */
+        base = whence == 0 ? 0 : whence == 1 ? (long)t->k[i].cpos : (long)t->k[i].ce.size;
+        t->k[i].cpos = (unsigned long)base + (unsigned long)off;
+        *pos = t->k[i].cpos;
+        refresh(t, (unsigned)i);
         return 0;
     }
     base = whence == 0 ? 0 : whence == 1 ? (long)t->k[i].f.pos : (long)fsv_size(&t->k[i].f);

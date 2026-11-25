@@ -76,6 +76,11 @@ struct dos_m {
        volume is in it now (vol[] is set from its answer), or 0 and *err (15h: not ready, no disk; 0Fh). */
     unsigned removable;
     struct fsv_vol *(*media)(void *ctx, int drive, unsigned *err);
+    /* CD drives (N4: as MSCDEX's, redirected drives, read only; bit 0 A:): at each use cdmedia says which disc's
+       ISO 9660 volume is in it now, or 0 and *err (15h: not ready, no disc). Every other call on such a drive
+       is refused (05h, access denied, as MSCDEX's answer to a write). */
+    unsigned cdrives;
+    struct iso_vol *(*cdmedia)(void *ctx, int drive, unsigned *err);
     unsigned unanswered;
     int ended;                          /* the root's child has ended: the machine with it */
     int root_runs;                      /* the root is a program that runs on (the system VM's stub): its children's
