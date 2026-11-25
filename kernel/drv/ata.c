@@ -595,3 +595,86 @@ int ata_flush(struct ata_dev *d)
         io->hold(io->ctx, 0);
     return r;
 }
+
+/* ---- ATAPI packets (N4: the CD-ROM drive) */
+
+static int packet_(struct ata_dev *d, const unsigned char cdb[12], unsigned char *buf, unsigned long len,
+                   unsigned long *got)
+{
+    struct ata_chan *ch = d->ch;
+    unsigned long limit = len < 0xF800UL ? len : 0xF800UL, have = 0;
+    unsigned short w[6], junk[256];
+    unsigned char s;
+    int r, i;
+
+    if (got)
+        *got = 0;
+    if (!d->present || !d->atapi)
+        return ATA_ENOTSUP;
+    if (limit & 1)
+        limit++;                                /* (an even byte count, as the drive moves words) */
+    if (!limit)
+        limit = 2;
+    control(ch, C_NIEN);
+    if ((r = select_dev(d, 0)) != ATA_OK)
+        return finish(d, r);
+    out(ch, R_ERR, 0);                          /* (features: PIO, no overlap) */
+    out(ch, R_LBA1, limit & 0xFF);
+    out(ch, R_LBA2, (limit >> 8) & 0xFF);
+    out(ch, R_STATUS, 0xA0);
+    settle(ch);
+    if ((r = not_busy(ch, ATA_T_CMD, &s)) != ATA_OK)
+        return finish(d, r);
+    if ((s & (S_ERR | S_DF)) || !(s & S_DRQ) || (in(ch, R_COUNT) & 3) != 1)
+        return finish(d, ATA_EDEVICE);          /* (it wants no packet: not ATAPI after all, or confused) */
+    for (i = 0; i < 6; i++)
+        w[i] = (unsigned short)(cdb[2 * i] | cdb[2 * i + 1] << 8);
+    ch->io->out16s(ch->io->ctx, ch->base + R_DATA, w, 6);
+    settle(ch);
+    for (;;) {
+        unsigned long n, take, k;
+
+        if ((r = not_busy(ch, ATA_T_PACKET, &s)) != ATA_OK)
+            return finish(d, r);
+        if (s & (S_ERR | S_DF))
+            break;
+        if (!(s & S_DRQ))
+            break;                              /* (the status phase: done) */
+        if ((in(ch, R_COUNT) & 3) != 2)         /* (data to the host is IO 1, CoD 0; anything else isn't ours) */
+            return finish(d, ATA_EDEVICE);
+        n = in(ch, R_LBA1) | (unsigned long)in(ch, R_LBA2) << 8;
+        if (!n)
+            return finish(d, ATA_EDEVICE);
+        take = have < len ? len - have : 0;
+        if (take > n)
+            take = n;
+        if (take >= 2) {
+            ch->io->in16s(ch->io->ctx, ch->base + R_DATA, (unsigned short *)(void *)(buf + have), (unsigned)(take / 2));
+            have += take & ~1UL;
+        }
+        for (k = take & ~1UL; k < n;) {         /* (an odd last byte, or more than was wanted: read, kept where it fits) */
+            unsigned words = (unsigned)((n - k + 1) / 2 > 256 ? 256 : (n - k + 1) / 2), j;
+            ch->io->in16s(ch->io->ctx, ch->base + R_DATA, junk, words);
+            for (j = 0; j < words * 2 && k < n; j++, k++)
+                if (have < len)
+                    buf[have++] = ((unsigned char *)junk)[j];
+        }
+        settle(ch);
+    }
+    if (got)
+        *got = have;
+    return finish(d, ATA_OK);
+}
+
+int ata_packet(struct ata_dev *d, const unsigned char cdb[12], void *buf, unsigned long len, unsigned long *got)
+{
+    const struct ata_io *io = d->ch->io;
+    int r;
+
+    if (io->hold)
+        io->hold(io->ctx, 1);
+    r = packet_(d, cdb, (unsigned char *)buf, len, got);
+    if (io->hold)
+        io->hold(io->ctx, 0);
+    return r;
+}

@@ -3,7 +3,10 @@
  * reads status 00h, a channel with nothing FFh), a soft reset posts signatures, data moves in DRQ blocks (READ/WRITE
  * MULTIPLE's size once set), INTRQ is raised unless nIEN holds it off and cleared by reading the status.
  * Faults: a sector that won't read, a write that fails, a drive that stays busy. Sectors hold a pattern of their
- * own LBA unless written, so a wrong address shows as wrong data. "ata_test: 0 failures" when all held. */
+ * own LBA unless written, so a wrong address shows as wrong data. An ATAPI drive (a CD-ROM, N4) takes PACKET:
+ * its 12 bytes, then its answer in pieces no longer than the host's byte count (nor its own piece size), then
+ * the status; CHECK CONDITION with sense data, a disc changed (UNIT ATTENTION), none in (NOT READY).
+ * "ata_test: 0 failures" when all held. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,6 +54,15 @@ struct drive {
     unsigned char *wdata[MAXW];
     int nw;
     char model[41];
+    /* ATAPI (a CD-ROM drive) */
+    int pkt;                            /* 0 none, 1 its packet wanted, 2 its answer under way */
+    unsigned char cdb[12];
+    unsigned cdb_words, limit, piece_max, pieces;
+    unsigned char *resp;
+    unsigned long resp_len, resp_pos, piece_end;
+    int media, changed;                 /* a disc in; changed since (UNIT ATTENTION owed) */
+    u64 disc;                           /* its 2048-byte sectors */
+    unsigned char sense, asc, ascq;
 };
 
 static struct {
@@ -234,6 +246,19 @@ static void command(struct drive *d, unsigned cmd)
         return;
     }
     switch (cmd) {
+    case 0xA0:                                  /* PACKET */
+        if (!d->atapi) {
+            abort_cmd(d);
+            return;
+        }
+        d->limit = d->lba1[0] | d->lba2[0] << 8;
+        d->pkt = 1;
+        d->cdb_words = 0;
+        d->dir = 2;
+        d->count[0] = 1;                        /* (CoD: the packet wanted) */
+        d->status = 0x58;
+        d->busy = 2;
+        return;
     case 0xEC:
     case 0xA1:
         if ((cmd == 0xEC) != !d->atapi) {
@@ -320,6 +345,143 @@ static void command(struct drive *d, unsigned cmd)
     default:
         abort_cmd(d);
     }
+}
+
+/* ---- ATAPI: the packet's command run, its answer given in pieces */
+
+static void pkt_status(struct drive *d)
+{
+    d->pkt = 0;
+    d->dir = 0;
+    d->count[0] = 3;                            /* (CoD and IO: the status phase) */
+    d->busy = 2;
+    raise_irq();
+}
+
+static void pkt_check(struct drive *d, unsigned key, unsigned asc, unsigned ascq)
+{
+    d->sense = (unsigned char)key, d->asc = (unsigned char)asc, d->ascq = (unsigned char)ascq;
+    d->status = 0x51;
+    d->err = (unsigned char)(key << 4 | 0x04);
+    pkt_status(d);
+}
+
+static void pkt_piece(struct drive *d)
+{
+    unsigned long n = d->resp_len - d->resp_pos, lim = d->limit & ~1UL;
+
+    if (!n) {
+        d->status = 0x50;
+        free(d->resp);
+        d->resp = 0;
+        pkt_status(d);
+        return;
+    }
+    if (lim >= 2048)
+        lim &= ~2047UL;                         /* (as drives do: whole sectors when the count allows) */
+    if (d->piece_max && lim > d->piece_max)
+        lim = d->piece_max;
+    if (n > lim)
+        n = lim;
+    d->piece_end = d->resp_pos + n;
+    d->lba1[0] = (unsigned char)n, d->lba2[0] = (unsigned char)(n >> 8);
+    d->count[0] = 2;                            /* (IO, not CoD: data to the host) */
+    d->status = 0x58;
+    d->pkt = 2;
+    d->dir = 1;
+    d->busy = 3;
+    d->pieces++;
+    raise_irq();
+}
+
+static void pkt_answer(struct drive *d, const unsigned char *data, unsigned long n, unsigned long alloc)
+{
+    if (n > alloc)
+        n = alloc;
+    d->resp = malloc(n ? n : 1);
+    memcpy(d->resp, data, n);
+    d->resp_len = n, d->resp_pos = 0;
+    d->sense = d->asc = d->ascq = 0;
+    pkt_piece(d);
+}
+
+static unsigned long be32(const unsigned char *p) { return (unsigned long)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3]; }
+
+static void pkt_run(struct drive *d)
+{
+    unsigned char *c = d->cdb, out[32];
+    unsigned long lba, n, i;
+
+    if (c[0] != 0x03 && c[0] != 0x1B && d->media && d->changed) {   /* (REQUEST SENSE and START STOP: not held) */
+        d->changed = 0;
+        pkt_check(d, 6, 0x28, 0);
+        return;
+    }
+    switch (c[0]) {
+    case 0x00:                                  /* TEST UNIT READY */
+        if (!d->media) {
+            pkt_check(d, 2, 0x3A, 0);
+            return;
+        }
+        d->status = 0x50;
+        pkt_status(d);
+        return;
+    case 0x03:                                  /* REQUEST SENSE */
+        memset(out, 0, 18);
+        out[0] = 0x70, out[2] = d->sense, out[7] = 10, out[12] = d->asc, out[13] = d->ascq;
+        pkt_answer(d, out, 18, c[4]);
+        return;
+    case 0x1B:                                  /* START STOP UNIT: 2 eject, 3 load */
+        if ((c[4] & 3) == 2)
+            d->media = 0;
+        else if ((c[4] & 3) == 3 && !d->media)
+            d->media = 1, d->changed = 1;
+        d->status = 0x50;
+        pkt_status(d);
+        return;
+    case 0x25:                                  /* READ CAPACITY */
+        if (!d->media) {
+            pkt_check(d, 2, 0x3A, 0);
+            return;
+        }
+        n = (unsigned long)d->disc - 1;
+        out[0] = (unsigned char)(n >> 24), out[1] = (unsigned char)(n >> 16), out[2] = (unsigned char)(n >> 8);
+        out[3] = (unsigned char)n, out[4] = 0, out[5] = 0, out[6] = 0x08, out[7] = 0;
+        pkt_answer(d, out, 8, 8);
+        return;
+    case 0x28:                                  /* READ(10) */
+        if (!d->media) {
+            pkt_check(d, 2, 0x3A, 0);
+            return;
+        }
+        lba = be32(c + 2), n = (unsigned long)c[7] << 8 | c[8];
+        if (lba + n > d->disc) {
+            pkt_check(d, 5, 0x21, 0);
+            return;
+        }
+        {
+            unsigned char *b = malloc(n * 2048 + 1);
+            for (i = 0; i < n * 2048; i++)
+                b[i] = pattern(lba + i / 2048, (unsigned)(i % 2048));
+            pkt_answer(d, b, n * 2048, n * 2048);
+            free(b);
+        }
+        return;
+    case 0x43:                                  /* READ TOC, format 0: one data track and the lead-out */
+        if (!d->media) {
+            pkt_check(d, 2, 0x3A, 0);
+            return;
+        }
+        memset(out, 0, 20);
+        out[1] = 18, out[2] = 1, out[3] = 1;
+        out[5] = 0x14, out[6] = 1;              /* (track 1 at LBA 0) */
+        out[13] = 0x14, out[14] = 0xAA;
+        out[16] = (unsigned char)(d->disc >> 24), out[17] = (unsigned char)(d->disc >> 16);
+        out[18] = (unsigned char)(d->disc >> 8), out[19] = (unsigned char)d->disc;
+        pkt_answer(d, out, 20, (unsigned long)c[7] << 8 | c[8]);
+        return;
+    }
+    pkt_check(d, 5, 0x20, 0);                   /* (an opcode it hasn't got) */
 }
 
 static struct drive *selected(void)
@@ -442,6 +604,20 @@ static void m_in16s(void *ctx, unsigned port, unsigned short *buf, unsigned coun
 
     (void)ctx;
     ch.us += count;
+    if (d->atapi && d->pkt == 2 && port == 0x1F0 && !d->busy) {
+        for (i = 0; i < count; i++) {
+            if (d->resp_pos >= d->piece_end) {
+                printf("FAIL model: ATAPI data read past the piece\n");
+                fails++;
+                return;
+            }
+            buf[i] = (unsigned short)(d->resp[d->resp_pos] | (d->resp_pos + 1 < d->piece_end ? d->resp[d->resp_pos + 1] << 8 : 0));
+            d->resp_pos += d->resp_pos + 1 < d->piece_end ? 2 : 1;
+        }
+        if (d->resp_pos == d->piece_end)
+            pkt_piece(d);
+        return;
+    }
     if (port != 0x1F0 || !d->present || d->dir != 1 || !(d->status & 0x08) || d->busy) {
         printf("FAIL model: data read with no data to give (dir %d status %02x)\n", d->dir, d->status);
         fails++;
@@ -475,6 +651,21 @@ static void m_out16s(void *ctx, unsigned port, const unsigned short *buf, unsign
 
     (void)ctx;
     ch.us += count;
+    if (d->atapi && d->pkt == 1 && port == 0x1F0 && !d->busy) {
+        for (i = 0; i < count && d->cdb_words < 6; i++, d->cdb_words++) {
+            d->cdb[2 * d->cdb_words] = (unsigned char)buf[i];
+            d->cdb[2 * d->cdb_words + 1] = (unsigned char)(buf[i] >> 8);
+        }
+        if (i < count) {
+            printf("FAIL model: more than the packet's 12 bytes\n");
+            fails++;
+        }
+        if (d->cdb_words == 6) {
+            d->busy = 4;
+            pkt_run(d);
+        }
+        return;
+    }
     if (port != 0x1F0 || !d->present || d->dir != 2 || !(d->status & 0x08) || d->busy) {
         printf("FAIL model: data written when none was asked for (dir %d status %02x)\n", d->dir, d->status);
         fails++;
@@ -577,6 +768,96 @@ static void left_clean(const char *what)
 }
 
 /* ---- the tests */
+
+static void cdb(unsigned char c[12], unsigned op, unsigned long lba, unsigned n)
+{
+    memset(c, 0, 12);
+    c[0] = (unsigned char)op;
+    c[2] = (unsigned char)(lba >> 24), c[3] = (unsigned char)(lba >> 16), c[4] = (unsigned char)(lba >> 8);
+    c[5] = (unsigned char)lba, c[7] = (unsigned char)(n >> 8), c[8] = (unsigned char)n;
+}
+
+/* ATAPI packets (N4): a CD-ROM drive as device 1 beside a disk. */
+static void t_atapi(void)
+{
+    struct drive *cd;
+    unsigned char c[12], b[3 * 2048 + 64];
+    unsigned long got, i;
+    int r, ok;
+
+    setup();
+    ata_disk(&ch.d[0], "DISK", 100000, 1, 0, 16);
+    cd = &ch.d[1];
+    cd->present = 1, cd->atapi = 1, cd->media = 1, cd->changed = 1, cd->disc = 1000;
+    strcpy(cd->model, "CD-ROM");
+    CHECK(probe() == ATA_OK && dev[1].present && dev[1].atapi && !dev[0].atapi, "the CD-ROM drive found");
+    cdb(c, 0x00, 0, 0);
+    CHECK(ata_packet(&dev[0], c, b, 0, &got) == ATA_ENOTSUP, "a packet to a disk refused");
+    r = ata_packet(&dev[1], c, b, 0, &got);
+    CHECK(r == ATA_EDEVICE && dev[1].err >> 4 == 6, "the disc's change first: UNIT ATTENTION (r %d err %02x)", r,
+          dev[1].err);
+    memset(c, 0, 12), c[0] = 0x03, c[4] = 18;
+    r = ata_packet(&dev[1], c, b, 18, &got);
+    CHECK(r == ATA_OK && got == 18 && b[0] == 0x70 && b[2] == 6 && b[12] == 0x28, "REQUEST SENSE: %d %lu %02x/%02x", r,
+          got, b[2], b[12]);
+    cdb(c, 0x00, 0, 0);
+    CHECK(ata_packet(&dev[1], c, b, 0, &got) == ATA_OK, "TEST UNIT READY: ready");
+    cdb(c, 0x25, 0, 0);
+    r = ata_packet(&dev[1], c, b, 8, &got);
+    CHECK(r == ATA_OK && got == 8 && be32(b) == 999 && be32(b + 4) == 2048, "READ CAPACITY: %lu %lu", be32(b),
+          be32(b + 4));
+    cdb(c, 0x28, 5, 3);
+    cd->pieces = 0;
+    r = ata_packet(&dev[1], c, b, 3 * 2048, &got);
+    for (ok = 1, i = 0; i < 3 * 2048; i++)
+        ok &= b[i] == pattern(5 + i / 2048, (unsigned)(i % 2048));
+    CHECK(r == ATA_OK && got == 3 * 2048 && ok && cd->pieces == 1, "READ(10) 3 sectors: %d %lu ok %d pieces %u", r, got,
+          ok, cd->pieces);
+    cd->piece_max = 2048, cd->pieces = 0;       /* (a drive that gives a sector at a time) */
+    memset(b, 0, sizeof b);
+    r = ata_packet(&dev[1], c, b, 3 * 2048, &got);
+    for (ok = 1, i = 0; i < 3 * 2048; i++)
+        ok &= b[i] == pattern(5 + i / 2048, (unsigned)(i % 2048));
+    CHECK(r == ATA_OK && got == 3 * 2048 && ok && cd->pieces == 3, "... a sector a piece: %d %lu ok %d pieces %u", r,
+          got, ok, cd->pieces);
+    cd->piece_max = 0;
+    cdb(c, 0x28, 1, 2);                         /* (more than the buffer: the rest read and dropped) */
+    r = ata_packet(&dev[1], c, b, 2048, &got);
+    for (ok = 1, i = 0; i < 2048; i++)
+        ok &= b[i] == pattern(1, (unsigned)i);
+    CHECK(r == ATA_OK && got == 2048 && ok && !cd->pkt, "an answer longer than asked for: %d %lu", r, got);
+    cdb(c, 0x00, 0, 0);
+    CHECK(ata_packet(&dev[1], c, b, 0, &got) == ATA_OK, "... the drive left done");
+    memset(c, 0, 12), c[0] = 0x03, c[4] = 18;
+    r = ata_packet(&dev[1], c, b, 17, &got);
+    CHECK(r == ATA_OK && got == 17, "an odd length: %d %lu", r, got);
+    cdb(c, 0x28, 999, 2);
+    r = ata_packet(&dev[1], c, b, 2 * 2048, &got);
+    CHECK(r == ATA_EDEVICE && dev[1].err >> 4 == 5, "READ past the disc's end: ILLEGAL REQUEST (%d %02x)", r, dev[1].err);
+    memset(c, 0, 12), c[0] = 0x03, c[4] = 18;
+    CHECK(ata_packet(&dev[1], c, b, 18, &got) == ATA_OK && b[12] == 0x21, "... its sense: LBA out of range (%02x)", b[12]);
+    memset(c, 0, 12), c[0] = 0x43, c[8] = 20;
+    r = ata_packet(&dev[1], c, b, 20, &got);
+    CHECK(r == ATA_OK && got == 20 && b[2] == 1 && b[3] == 1 && b[14] == 0xAA && be32(b + 16) == 1000,
+          "READ TOC: %d %lu", r, got);
+    memset(c, 0, 12), c[0] = 0x43, c[8] = 12;
+    r = ata_packet(&dev[1], c, b, 12, &got);
+    CHECK(r == ATA_OK && got == 12, "READ TOC cut to its allocation: %d %lu", r, got);
+    memset(c, 0, 12), c[0] = 0x1B, c[4] = 2;
+    CHECK(ata_packet(&dev[1], c, b, 0, &got) == ATA_OK && !cd->media, "ejected");
+    cdb(c, 0x00, 0, 0);
+    r = ata_packet(&dev[1], c, b, 0, &got);
+    CHECK(r == ATA_EDEVICE && dev[1].err >> 4 == 2, "no disc: NOT READY (%d %02x)", r, dev[1].err);
+    memset(c, 0, 12), c[0] = 0xFF;
+    r = ata_packet(&dev[1], c, b, 0, &got);
+    CHECK(r == ATA_EDEVICE && dev[1].err >> 4 == 5, "an opcode it hasn't got: ILLEGAL REQUEST (%d %02x)", r, dev[1].err);
+    left_clean("atapi");
+    CHECK(hold_depth == 0, "ata_packet's hold given back");
+    cd->stuck = 1;
+    cdb(c, 0x00, 0, 0);
+    CHECK(ata_packet(&dev[1], c, b, 0, &got) == ATA_ETIMEOUT, "a drive that stays busy: ATA_ETIMEOUT");
+    cd->stuck = 0;
+}
 
 static void t_probe(void)
 {
@@ -832,6 +1113,7 @@ int main(void)
 {
     t_probe();
     t_hosted();
+    t_atapi();
     t_rw("LBA28 MULTIPLE", 200000, 1, 0, 16);
     t_rw("LBA28 SINGLE", 200000, 1, 0, 0);
     t_rw("LBA28 MULTIPLE 2", 50000, 1, 0, 2);

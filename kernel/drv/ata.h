@@ -5,7 +5,7 @@
  * Polled, with the channel's interrupt held off (nIEN) for the length of each command and the status read at
  * its end (which clears a pending one), so the BIOS beside GLOS finds the channel as it left it. LBA28, LBA48
  * past 2^28 sectors, CHS for drives without LBA; READ/WRITE MULTIPLE where the drive has them; FLUSH CACHE.
- * ATAPI devices are found and named, their packets come with N4. */
+ * ATAPI devices (a CD-ROM drive: N4) take their commands as 12-byte packets (ata_packet; kernel/drv/cdrom.c's). */
 #ifndef K_ATA_H
 #define K_ATA_H
 
@@ -68,6 +68,17 @@ int ata_write(struct ata_dev *d, unsigned long lba_lo, unsigned long lba_hi, uns
 int ata_verify(struct ata_dev *d, unsigned long lba_lo, unsigned long lba_hi, unsigned long n, unsigned long *done);
 /* The drive's write cache written out (FLUSH CACHE, or its EXT form). */
 int ata_flush(struct ata_dev *d);
+
+/* An ATAPI device's command: the 12-byte packet (PACKET, A0h, by PIO), then what it answers, up to len bytes into
+   buf (more is read and dropped, so the drive is left done), in the pieces the drive gives (its byte count each
+   time; no more than len, nor 0F800h, asked for a piece). ATA_OK with the bytes in *got; ATA_EDEVICE where the
+   drive says CHECK CONDITION, its sense key in ata_dev.err's top four bits (REQUEST SENSE, a packet of its own,
+   says more); ATA_ENOTSUP for a device that isn't ATAPI. Data from the host (a packet that writes) isn't taken:
+   no CD-ROM command GLOS sends has any. got may be 0. */
+int ata_packet(struct ata_dev *d, const unsigned char cdb[12], void *buf, unsigned long len, unsigned long *got);
+
+/* An ATAPI drive's answer may wait for its disc to spin up: the time allowed for each piece (ms). */
+#define ATA_T_PACKET 20000UL
 
 /* Time allowed (ms): a drive spinning up after a reset; a command to start moving data; between blocks. */
 #define ATA_T_RESET 31000UL
