@@ -1404,6 +1404,35 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             say(ch, 0, line);
             ssh_chan_exit(ch, 0);
         }
+    } else if (ci_starts(cmd, "glos cdrom") && (!cmd[10] || cmd[10] == ' ')) {
+        /* glos cdrom: the CD drives (N4, native GLOS's own: kernel/drv/cdrom.c); glos cdrom mount PATH: an ISO 9660
+           image, or a CUE sheet's data track, as a drive of its own (C7), the next letter; glos cdrom eject X:: an
+           image taken away, or a drive's tray opened (not while a program has a file open there). */
+        const char *p = cmd + 10;
+        char t[512];
+        int e = 0;
+        while (*p == ' ')
+            p++;
+        if (!(vm.bi->flags & BI_F_NATIVE)) {
+            say(ch, 1, "glos cdrom: a native GLOS's (under DOS, DOS's own MSCDEX has the drives)\n");
+            ssh_chan_exit(ch, 1);
+            return 0;
+        }
+        if (!*p) {
+            vdos_cd_list(t, sizeof t);
+        } else if (ci_starts(p, "mount ") && p[6]) {
+            e = vdos_cd_mount(p + 6, t, sizeof t) < 0;
+        } else if (ci_starts(p, "eject ") && p[6] && p[7] == ':' && !p[8]) {
+            int l = (p[6] | 32) - 'a';
+            e = l < 0 || l > 25 || vdos_cd_eject(l, t, sizeof t) != 0;
+            if (l < 0 || l > 25)
+                ksnprintf(t, sizeof t, "glos cdrom eject X:\n");
+        } else {
+            ksnprintf(t, sizeof t, "glos cdrom [mount PATH | eject X:]\n");
+            e = 2;
+        }
+        say(ch, e != 0, t);
+        ssh_chan_exit(ch, e);
     } else if (ci_starts(cmd, "glos mtrr") && (!cmd[9] || cmd[9] == ' ')) {
         /* glos mtrr: the CPU's variable memory-type ranges. glos mtrr lfb on: the video card's linear framebuffer
            write-combining (its prefetchable memory, by PCI); glos mtrr wc BASE MB: a range named (hexadecimal

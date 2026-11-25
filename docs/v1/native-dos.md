@@ -1091,7 +1091,13 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   drive's own output):** mkiso.py --cue --tone makes a mixed-mode disc (the image, then tone tracks as CUE/BIN);
   `jobs.py cdrom`'s cdaudio case (bf6, an SB16 beside the drive) with CDTEST audio: the TOC's tracks (IOCTL input
   10, 11), PLAY AUDIO busy, the Q channel's time moving, STOP pausing with the time held, RESUME, STOP twice:
-  PASS. Owed: the digital way (READ CD's audio frames into GLOS's mixer), the default where a drive gives them. Planned: C2 kernel/drv/cdrom.c, the drives: found from ide.c's probe, sectors of 2048 bytes with
+  PASS. Owed: the digital way (READ CD's audio frames into GLOS's mixer), the default where a drive gives them. **C7 built:** `glos cdrom` (the shell's CDROM): the drives listed; `mount PATH`: an ISO 9660 image or a CUE
+  sheet's first data track (MODE1/2048, or MODE1/2352's user data) on one of GLOS's FAT volumes as the next
+  drive letter, read through fsv (its lock shares the file with the VM's calls), MSCDEX's units following
+  (mscdex_units), a TOC of one data track made for it; `eject X:`: an image taken away (refused while a program
+  has a file open there), a drive's tray opened. MSCDEX's header is made at the start whether or not a drive is
+  there (no DOS memory is taken while programs run). `jobs.py cdrom`'s cdimage case (no CD-ROM drive: RetroGPU's
+  run.py as it is): mount, DIR, a copy the same, CDTEST's checks, eject, the CUE sheet: bf6 and 486 PASS. Planned: C2 kernel/drv/cdrom.c, the drives: found from ide.c's probe, sectors of 2048 bytes with
   a small cache, the disc's change (UNIT ATTENTION) and its absence (NOT READY), the TOC. C3 kernel/fs/iso.c, ISO
   9660 read-only over a sector reader (level 1 names as DOS sees them, path tables not needed: folders walked),
   host-tested on mkiso's images and, where it is, xorriso's. C4 GLOS's DOS: a CD drive as DOS has one under

@@ -469,10 +469,11 @@ static void mount_c(void)
             vd.cds.valid |= 1u << (top + 1 + k);
             kprintf("GLOS-NATIVE step=drive %c: cdrom %d\n", 'A' + top + 1 + k, k);
         }
-        if (nc) {
+        {                                       /* (MSCDEX's driver header, mscdex.c: now, while nothing runs, for
+                                                   the images mounted later too) */
             unsigned seg, largest;
             vd.cdmedia = vd_cdmedia;
-            if (dos_mem_alloc(&vd.mcb, 2, 8, &seg, &largest) == 0) {    /* (MSCDEX's driver header: mscdex.c) */
+            if (dos_mem_alloc(&vd.mcb, 2, 8, &seg, &largest) == 0) {
                 mscdex_setup(seg, nc, cd_letter);
                 cd_entry_points(seg);
             }
@@ -866,6 +867,94 @@ void vdos_mouse_irq(void)
     set_vec(0x74, arpl[V74]);
     vpic_write(&vm.pic, 0xA1, (u8)(vpic_read(&vm.pic, 0xA1) & ~0x10));
     vpic_write(&vm.pic, 0x21, (u8)(vpic_read(&vm.pic, 0x21) & ~0x04));
+}
+
+/* ---- images as CD drives (C7: glos cdrom, sshd.c) */
+
+static int free_letter(void)
+{
+    int k, top = 2;
+    for (k = 0; k < DOS_DRIVES; k++)
+        if (vd.vol[k] || (vd.removable >> k & 1) || (vd.cdrives >> k & 1))
+            top = k;
+    return top + 1 < DOS_DRIVES ? top + 1 : -1;
+}
+
+int vdos_cd_mount(const char *path, char *msg, unsigned room)
+{
+    char full[128];
+    int drive, u, l;
+    u32 f;
+
+    if (!ready || dos_resolve(&vd.cds, vd.cp, path, &drive, full, sizeof full) != 0 || !(vd.cdrives >> drive & 1 ? 0 : vd.vol[drive])) {
+        ksnprintf(msg, room, "glos cdrom: %s isn't a file on one of GLOS's disks\n", path);
+        return -1;
+    }
+    if ((l = free_letter()) < 0) {
+        ksnprintf(msg, room, "glos cdrom: no drive letter is free\n");
+        return -1;
+    }
+    u = cdrom_mount_image(vd.vol[drive], full, path);
+    if (u < 0) {
+        ksnprintf(msg, room, u == -2 ? "glos cdrom: four CD drives already\n" : u == -4 ?
+                  "glos cdrom: %s has no data track GLOS reads (MODE1/2048 or 2352 first)\n" :
+                  "glos cdrom: %s can't be opened\n", path);
+        return -1;
+    }
+    f = irq_save();
+    cd_letter[u] = (signed char)l;
+    vd.cdrives |= 1u << l;
+    vd.cds.valid |= 1u << l;
+    mscdex_units(cd_letter);
+    irq_restore(f);
+    kprintf("GLOS-CD image=%d letter=%c\n", u, 'A' + l);
+    ksnprintf(msg, room, "%c: is %s\n", 'A' + l, path);
+    return l;
+}
+
+int vdos_cd_eject(int letter, char *msg, unsigned room)
+{
+    int u, k;
+    u32 f;
+
+    for (u = 0; u < 4 && cd_letter[u] != letter; u++)
+        ;
+    if (u == 4) {
+        ksnprintf(msg, room, "glos cdrom: %c: is no CD drive\n", 'A' + letter);
+        return -1;
+    }
+    for (k = 0; k < (int)vd.files.n && k < DOS_SFT_MAX; k++)
+        if (vd.files.k[k].cd && vd.files.k[k].cd == cdrom_vol(u)) {    /* (cd is cleared when a file closes) */
+            ksnprintf(msg, room, "glos cdrom: a program has a file open on %c:\n", 'A' + letter);
+            return -1;
+        }
+    if (!cdrom_is_image(u)) {                   /* (a drive: its tray opened) */
+        cdrom_tray(u, 1);
+        ksnprintf(msg, room, "%c:'s tray is open\n", 'A' + letter);
+        return 0;
+    }
+    f = irq_save();
+    cd_letter[u] = -1;
+    vd.cdrives &= ~(1u << letter);
+    vd.cds.valid &= ~(1u << letter);
+    mscdex_units(cd_letter);
+    irq_restore(f);
+    cdrom_unmount_image(u);
+    ksnprintf(msg, room, "%c: is gone\n", 'A' + letter);
+    return 0;
+}
+
+int vdos_cd_list(char *out, unsigned room)
+{
+    int u, n = 0;
+    out[0] = 0;
+    for (u = 0; u < 4; u++)
+        if (cd_letter[u] >= 0)
+            n += ksnprintf(out + n, room - (unsigned)n, "%c:  %s\n", 'A' + cd_letter[u],
+                           cdrom_is_image(u) ? cdrom_image_name(u) : "a CD-ROM drive");
+    if (!n)
+        ksnprintf(out, room, "No CD drives\n");
+    return 0;
 }
 
 /* MSCDEX's INT 2Fh 15xxh (v86.c's INT 2Fh, at the chain's bottom): 1 if answered. */

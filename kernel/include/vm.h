@@ -183,6 +183,11 @@ int  vkeyb_int09(void);                         /* vkeyb.c: INT 09h's ARPL, 1 if
 struct dos_regs86;
 struct trapframe;
 void mscdex_setup(unsigned seg, int n, const signed char *letters);     /* mscdex.c: GLOS's MSCDEX (N4) */
+void mscdex_units(const signed char *letters);
+int  vdos_cd_mount(const char *path, char *msg, unsigned room);     /* vdos.c: an image as a CD drive (C7): its
+                                                   letter (0 A:), or -1 with msg */
+int  vdos_cd_eject(int letter, char *msg, unsigned room);       /* 0, or -1 with msg */
+int  vdos_cd_list(char *out, unsigned room);    /* the CD drives, a line each */
 int  mscdex_int2f(struct dos_regs86 *r);
 void mscdex_request(u32 r, int unit);
 void mscdex_strategy(unsigned es, unsigned bx);

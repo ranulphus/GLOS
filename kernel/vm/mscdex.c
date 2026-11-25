@@ -55,14 +55,49 @@ static unsigned long from_redbook(u32 rb)
 
 static unsigned long addr(int mode, u32 v) { return mode ? from_redbook(v) : v; }
 
+/* The units' letters now (-1: a unit not in use; images come and go: C7): the header's first letter and count. */
+void mscdex_units(const signed char *letters)
+{
+    u32 h = lin(hdr_seg, 0);
+    int k, first = -1, n = 0;
+
+    for (k = 0; k < UNITS; k++) {
+        letter[k] = letters[k];
+        if (letters[k] >= 0) {
+            n++;
+            if (first < 0 || letters[k] < first)
+                first = letters[k];
+        }
+    }
+    units = n ? UNITS : 0;                      /* (the slots looked through; count() the ones in use) */
+    if (hdr_seg) {
+        vm_wr8(h + 20, (u8)(first >= 0 ? first + 1 : 0));
+        vm_wr8(h + 21, (u8)n);
+    }
+}
+
+static int count(void)
+{
+    int k, n = 0;
+    for (k = 0; k < units; k++)
+        n += letter[k] >= 0;
+    return n;
+}
+
+static int first_letter(void)
+{
+    int k, f = -1;
+    for (k = 0; k < units; k++)
+        if (letter[k] >= 0 && (f < 0 || letter[k] < f))
+            f = letter[k];
+    return f;
+}
+
 void mscdex_setup(unsigned seg, int n, const signed char *letters)
 {
     u32 h = lin(seg, 0);
-    int k;
 
-    units = n > UNITS ? UNITS : n;
-    for (k = 0; k < units; k++)
-        letter[k] = letters[k];
+    (void)n;
     hdr_seg = seg;
     wr32(h, 0xFFFFFFFFu);                       /* (the last in no chain of DOS's) */
     vm_wr16(h + 4, 0xC800);                     /* character device, IOCTL, open and close */
@@ -70,18 +105,17 @@ void mscdex_setup(unsigned seg, int n, const signed char *letters)
     vm_wr16(h + 8, 0x18);
     memcpy(vm_ptr(h + 10), "GLOSCD01", 8);
     vm_wr16(h + 18, 0);
-    vm_wr8(h + 20, (u8)(units ? letter[0] + 1 : 0));    /* (MSCDEX's: the first letter, 1 = A:) */
-    vm_wr8(h + 21, (u8)units);
     vm_wr8(h + 0x16, 0x63), vm_wr8(h + 0x17, 0xC0);
     vm_wr8(h + 0x18, 0x63), vm_wr8(h + 0x19, 0xC0);
-    kprintf("GLOS-MSCDEX units=%d first=%c header=%04x:0000\n", units, units ? 'A' + letter[0] : '-', seg);
+    mscdex_units(letters);                      /* (+20: the first letter, 1 = A:; +21: the units) */
+    kprintf("GLOS-MSCDEX units=%d first=%c header=%04x:0000\n", count(), count() ? 'A' + first_letter() : '-', seg);
 }
 
 static int unit_of(unsigned drive)
 {
     int k;
     for (k = 0; k < units; k++)
-        if ((unsigned)letter[k] == drive)
+        if (letter[k] >= 0 && (unsigned)letter[k] == drive)
             return k;
     return -1;
 }
@@ -252,7 +286,7 @@ int mscdex_int2f(struct dos_regs86 *r)
     int u, k;
     static unsigned char sec[2048];
 
-    if (!units || (r->ax >> 8) != 0x15)
+    if (!count() || (r->ax >> 8) != 0x15)
         return 0;
     if (!(said & 0x80000000u)) {
         said |= 0x80000000u;
@@ -260,15 +294,18 @@ int mscdex_int2f(struct dos_regs86 *r)
     }
     switch (al) {
     case 0x00:
-        r->bx = (unsigned)units, r->cx = (unsigned)letter[0];
+        r->bx = (unsigned)count(), r->cx = (unsigned)first_letter();
         return 1;
-    case 0x01:
-        for (k = 0; k < units; k++) {
-            u32 at = lin(r->es, r->bx) + 5u * k;
-            vm_wr8(at, (u8)k);
-            wr32(at + 1, (u32)hdr_seg << 16);
-        }
+    case 0x01: {
+        int i = 0;
+        for (k = 0; k < units; k++)
+            if (letter[k] >= 0) {
+                u32 at = lin(r->es, r->bx) + 5u * i++;
+                vm_wr8(at, (u8)k);
+                wr32(at + 1, (u32)hdr_seg << 16);
+            }
         return 1;
+    }
     case 0x02:
     case 0x03:
     case 0x04:
@@ -313,10 +350,14 @@ int mscdex_int2f(struct dos_regs86 *r)
     case 0x0C:
         r->bx = 0x0217;
         return 1;
-    case 0x0D:
-        for (k = 0; k < units; k++)
-            vm_wr8(lin(r->es, r->bx) + k, (u8)letter[k]);
+    case 0x0D: {
+        int i = 0, l;
+        for (l = 0; l < 26; l++)                /* (in the letters' order) */
+            for (k = 0; k < units; k++)
+                if (letter[k] == l)
+                    vm_wr8(lin(r->es, r->bx) + i++, (u8)l);
         return 1;
+    }
     case 0x0E:
         if (r->bx == 0)
             r->dx = 0x0100;                     /* (the primary descriptor) */

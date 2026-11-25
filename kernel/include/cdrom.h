@@ -3,6 +3,7 @@
 #define K_CDROM_H
 
 #include "../fs/iso.h"
+#include "../fs/fsv.h"
 
 int cdrom_find(void);                   /* the ATAPI CD-ROM drives ide.c found: how many (native GLOS's alone) */
 int cdrom_count(void);
@@ -25,5 +26,12 @@ int cdrom_stop(int i);
 int cdrom_pause(int i, int resume);
 int cdrom_subq(int i, unsigned char *buf16);
 int cdrom_tray(int i, int open);
+/* An image as a unit (C7): an ISO 9660 file, or a CUE sheet's first data track, on volume v at path (shown: how
+   it is named to people). Its unit, or -2 (none free), -3 (not opened), -4 (a sheet with no data track GLOS reads). */
+int cdrom_mount_image(struct fsv_vol *v, const char *path, const char *shown);
+void cdrom_unmount_image(int i);
+int cdrom_is_image(int i);
+struct iso_vol *cdrom_vol(int i);       /* unit i's volume (mounted or not): which open files are on it */
+const char *cdrom_image_name(int i);
 
 #endif
