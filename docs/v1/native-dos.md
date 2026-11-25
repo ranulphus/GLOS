@@ -1059,8 +1059,15 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   default; 0Ah sets them), put back when the mouse leaves or the cursor is hidden if the cell still holds the
   driver's word (a program's own writing kept); at a session's end the cursor is taken off and the program's routine
   forgotten (a killed program's routine would otherwise be called next). MOUSEHND cursor in loopa-input: native and
-  hosted (CuteMouse) alike. Next: the graphics cursor (09h's shapes; modes 4-6, 0Dh-13h), for programs that let the
-  driver draw it.
+  hosted (CuteMouse) alike. **Step 4 (the same day):** the graphics cursor in modes
+  4, 5, 6, 0Dh, 0Eh, 10h, 11h, 12h and 13h: 16 x 16 screen pixels from the hot spot (half the virtual x in the
+  320-wide modes), (pixel AND screen mask) XOR (cursor mask as the mode's white: 0Fh, CGA 3 or 1), the Microsoft
+  arrow until 09h gives a shape; the pixels under it kept and put back where they still show the driver's drawing.
+  Planar modes through the VGA's registers, put back as they were (indices, the read map, map mask, set/reset,
+  function, bit mask and the latches, kept in each plane's last byte as shot.c keeps them). 10h's area hides it
+  until the next 01h. MOUSEHND gcursor in loopa-input (natively; CuteMouse's pixels differ): 13h, 12h, 04h, 06h,
+  0Dh and the arrow OK on the bf6. Owed: a silicon check of the planar modes on a bench's real VGA (the latches
+  above all). Mode 0Fh and SVGA modes: no cursor drawn (as CuteMouse).
 - **Long names:** in the personality (N2, 71xxh). No DOSLFN.
 - **The keyboard's layout:** `[region] layout` reaches the desktop and apps today; native, the machine's INT 16h
   and INT 09h see the layout's characters too. No KEYB.
