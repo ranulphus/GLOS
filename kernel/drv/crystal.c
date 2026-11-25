@@ -103,6 +103,23 @@ static int codec_there(void)
     return (rd(0x0C) & 0x0F) == 0x0A;
 }
 
+/* A Crystal part's own control port answers where it was put (registers that read back: 86Box's model, and the
+   chips' data sheets). Another maker's Windows Sound System card has a codec at 534h that answers codec_there()
+   all the same (86Box's "wss", an AD1848 at 530h; an OPTi card's CS4231 before opti.c came first), and nothing
+   at the control port: open bus, FFh. Read only: registers 0 to 4 and 6 (7 is the status, which a read
+   clears; 5 the RAM's port). 1 if any isn't FFh, or there is no control port to look at. */
+static int ctrl_there(void)
+{
+    static const u8 regs[] = { 0, 1, 2, 3, 4, 6 };
+    u32 i;
+    if (!cs.ctrl)
+        return 1;
+    for (i = 0; i < sizeof regs; i++)
+        if (inb((u16)(cs.ctrl + regs[i])) != 0xFF)
+            return 1;
+    return 0;
+}
+
 static int hex(const char *s, u32 *v)
 {
     u32 x = 0, n = 0;
@@ -244,8 +261,8 @@ int crystal_init(const char *cfg)
     slam(0x33, 1, 1);
     outb(PNP_ADDR, 0x79);                       /* the part active */
     pause(1000);
-    if (!codec_there()) {
-        kprintf("GLOS-SOUND crystal none wss=%x\n", cs.wss);
+    if (!codec_there() || !ctrl_there()) {
+        kprintf("GLOS-SOUND crystal none wss=%x%s\n", cs.wss, codec_there() ? " reason=no-control-port" : "");
         if (cfg && strcmp(cfg, "auto"))         /* (named in [sound] crystal, and not there; auto only looked) */
             dev_note("crystal", "crystal", DEVS_REFUSED, "no-chip", res());
         return -1;

@@ -567,7 +567,8 @@ DOSBench within 3% under native GLOS of plain DOS (the P1 target, kept). Phase H
 - `thr`'s interrupts on a no-VME 486, natively;
 - the GUI scripts' races under load (`term-run`'s MODE done, `studio-step`'s chord, the Terminal's first keys);
 - the Games Library's overwritten output, and any `GLOS-WARN pmm-` line (the loose kernel frame);
-- Crystal's automatic look taking another maker's WSS codec at 534h;
+- ~~Crystal's automatic look taking another maker's WSS codec at 534h~~ (closed 2026-11-25: its control port must
+  answer too);
 - from the old list: the intermittent direct-mode session failure on the 486, T19 windowed on the G200, the rare
   SSH channel message, the Xbox 360 pad.
 

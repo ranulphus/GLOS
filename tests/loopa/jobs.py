@@ -5922,6 +5922,35 @@ def crystal_off_case(profile, vcard, card):
                              "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+def crystal_wss_case(profile, vcard, card):
+    """Crystal's automatic look and another maker's Windows Sound System card (86Box's "wss": an AD1848 at 530h,
+    its codec at 534h where a Crystal part's is put): the codec answers, but no Crystal control port does, so the
+    card is not taken for a Crystal part (it was, and played silence: docs/v1/phase-h.md's open fault, 2026-11-25),
+    and GLOS has no card of Crystal's."""
+    tag = "%s-%s-crystal-wss" % (profile, vcard)
+    cfg = batfile("audio-%s/GLOS.CFG" % tag, ["; jobs.py audio, another maker's WSS card", "[time]", "sntp = off"])
+    agent = Agent("audio-" + tag, profile, card, ["--card", vcard, "--sound", "wss",
+        "--file", cfg + "=/TEST/GLOS.CFG", "--cmd", "SERSAY HX-START audio", "--cmd", "VECCHK save",
+        "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
+    checks = {"listen": agent.listening()}
+    try:
+        t0 = time.time()
+        while time.time() - t0 < 30 and not re.search(r"GLOS-SOUND crystal [^\n]*\n", agent.log()):
+            time.sleep(0.5)
+        checks["not-crystal"] = "GLOS-SOUND crystal none wss=534 reason=no-control-port\n" in agent.log() \
+            and "GLOS-SOUND crystal wss=" not in agent.log()
+        checks["no-card"] = " card=crystal " not in agent.ssh("glos audio")[1]
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text) and hx_vecchk(text)
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("audio-" + tag, "PASS" if not bad else "FAIL",
+                             "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 # (machine, video card, network card, desktop): windowed DOS-GL (M8 step D)
 GLWIN_CASES =[("bf6", "g200", "ne2kpci", "800x600x16"), ("bf6", "g400", "ne2kpci", "1024x768x16"),
                ("bf6", "g450", "ne2kpci", "1024x768x16")]
@@ -13352,6 +13381,9 @@ def main():
         if not os.environ.get("LOOPA_AUDIO_SOUND") or "off" in os.environ["LOOPA_AUDIO_SOUND"].split(","):
             res += matrix(crystal_off_case, [c[:3] for c in AUDIO_CASES if len(c) > 3
                                              and (not a.profile or c[0] in a.profile)][:1], a.jobs)
+        if not os.environ.get("LOOPA_AUDIO_SOUND") or "wss" in os.environ["LOOPA_AUDIO_SOUND"].split(","):
+            res += matrix(crystal_wss_case, [c for c in [("bf6", "g200", "ne2kpci")] if not a.profile or c[0] in a.profile],
+                          a.jobs)
         if not os.environ.get("LOOPA_AUDIO_SOUND"):     # the virtual Sound Blaster: on an SB16, on a Crystal chip, on
             vsb = [("bf6", "g200", "ne2kpci", "sb16", True), ("bf6", "g200", "ne2kpci", "cs4236b", True),   # the 486;
                    ("486dx2", "vbe", "ne2k", "sb16", True), ("bf6", "g200", "ne2kpci", "sb16", False),     # and off,

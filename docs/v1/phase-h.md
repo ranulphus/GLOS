@@ -352,9 +352,11 @@ chip another driver has set up).
   side's DMA stopped after GLOS (SBCHK). The Crystal and ESS cases unchanged.
 - **Not done:** the 82C931 (Plug and Play, its password at F8Dh: 86Box's needs its PnP ROM, which RetroGPU's
   sparse ROM set hasn't); no bench has an OPTi chip.
-- **Still open:** Crystal's automatic look takes any CS4231 answering at 534h for a Crystal part (another
-  maker's Windows Sound System card at 530h would play silence the same way). A Crystal-only check (its control
-  port, or I25's version) would close it.
+- **Closed (2026-11-25):** Crystal's automatic look took any codec answering at 534h for a Crystal part
+  (another maker's Windows Sound System card at 530h would play silence the same way). Now a Crystal part's own
+  control port must answer too (registers 0 to 4 and 6, read only: not all FFh, as open bus is). Loop A's audio
+  suite has 86Box's "wss" card (an AD1848 at 530h): `GLOS-SOUND crystal none wss=534 reason=no-control-port`,
+  and no card of Crystal's; the three Crystal cards unchanged.
 
 ## Shared lines, the second half (2026-11-25)
 
