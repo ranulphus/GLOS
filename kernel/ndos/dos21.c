@@ -1171,6 +1171,26 @@ static int ext_open(struct dos_m *m, struct dos_regs86 *r)
         r->ax = h, r->cx = 1;
         return ok(r);
     }
+    if (dos_resolve(&m->cds, m->cp, p, &drive, path, 128) == 0 && (m->cdrives >> drive & 1)) {
+        unsigned ce;                            /* (a CD's file: opened if it is there and to be read) */
+        struct iso_vol *cv = cd_of(m, drive, &ce);
+        struct iso_entry ie;
+        if (!cv)
+            return err(m, r, ce);
+        there = iso_lookup(cv, path, &ie) == ISO_OK;
+        if (there && ie.dir)
+            return err(m, r, 0x05);
+        if (there_act > 2 || none_act > 1)
+            return err(m, r, 0x01);
+        if (!there)
+            return err(m, r, none_act ? 0x05 : 0x02);
+        if (there_act != 1)
+            return err(m, r, there_act ? 0x05 : 0x50);
+        if ((e = dos_open_cd(&m->files, cur_psp(m), cv, (unsigned)drive, path, mode, &h)) != 0)
+            return err(m, r, (unsigned)e);
+        r->ax = h, r->cx = 1;
+        return ok(r);
+    }
     if ((e = resolve_str(m, p, &v, &drive, path)) != 0)
         return err(m, r, (unsigned)e);
     there = fsv_lookup(v, path, &fe) == 0;
@@ -1489,6 +1509,9 @@ static int lfn_path(struct dos_m *m, unsigned seg, unsigned off, struct fsv_vol 
         return 0x03;
     if ((e = dos_resolve_long(&m->cds, m->lfn_in, drive, m->lfn_res, sizeof m->lfn_res)) != 0)
         return e;
+    if (m->cdrives >> *drive & 1)
+        return 0x7100;                          /* (a CD's drive has no long names, as under MSCDEX with no Windows:
+                                                   "not supported", so DJGPP and others use 3Dh and the rest there) */
     if (!(*v = vol_err(m, *drive, &u)))
         return (int)u;
     cp_to_utf8(m->cp, m->lfn_res, out, DOS_LONG_PATH * 2);

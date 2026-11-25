@@ -1392,6 +1392,30 @@ int main(void)
         r.bx = 5, r.flags = 0;
         call(&r, 0x4408);
         CHECK((r.flags & 1) && r.ax == 0x01, "4408h E:: the redirector's (%x)", r.ax);
+        /* 6Ch: open if there (to read); 71xxh: "not supported" on a CD's drive (AX 7100h), as under MSCDEX
+           with no Windows, so DJGPP's library uses the calls above there */
+        str(tp, 0x300, "E:\\README.TXT");
+        r.ds = tp, r.si = 0x300, r.bx = 0x0000, r.dx = 0x0001, r.flags = 0;
+        call(&r, 0x6C00);
+        th = r.ax;
+        CHECK(!(r.flags & 1) && r.cx == 1, "6Ch on the CD: opened (%x %x)", r.ax, r.cx);
+        r.bx = th;
+        call(&r, 0x3E00);
+        r.ds = tp, r.si = 0x300, r.bx = 0x0000, r.dx = 0x0012, r.flags = 0;
+        call(&r, 0x6C00);
+        CHECK((r.flags & 1) && r.ax == 0x05, "6Ch to replace on the CD: %x (05h)", r.ax);
+        str(tp, 0x300, "E:\\NONE.TXT");
+        r.ds = tp, r.si = 0x300, r.bx = 0x0000, r.dx = 0x0001, r.flags = 0;
+        call(&r, 0x6C00);
+        CHECK((r.flags & 1) && r.ax == 0x02, "6Ch of a file not there: %x", r.ax);
+        str(tp, 0x300, "E:\\");
+        r.ds = tp, r.dx = 0x300, r.es = tp, r.di = 0x500, r.cx = 32, r.flags = 0;
+        call(&r, 0x71A0);
+        CHECK((r.flags & 1) && r.ax == 0x7100, "71A0h on the CD: not supported (%x)", r.ax);
+        str(tp, 0x300, "E:\\README.TXT");
+        r.ds = tp, r.si = 0x300, r.bx = 0x0000, r.dx = 0x0001, r.flags = 0;
+        call(&r, 0x716C);
+        CHECK((r.flags & 1) && r.ax == 0x7100, "716Ch on the CD: not supported (%x)", r.ax);
         cd_in = 0;                              /* (the disc taken out) */
         str(tp, 0x300, "E:\\README.TXT");
         r.ds = tp, r.dx = 0x300, r.flags = 0;

@@ -1079,7 +1079,10 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   and xorriso's images; GLOS's DOS answers its read-only calls on a CD's drive and refuses the rest (05h) (C4's
   list in dos21_test). `jobs.py cdrom` natively (bf6 and the 486, with LOOPA_RUNPY's run.py until RetroGPU's has
   --cdrom; SKIP without): the drive D:, DIR, a folder of 91 files, TYPE, VOL's label, 70,000 bytes copied to C:
-  the same, MD refused: PASS. Still owed of C4: 71xxh, FCBs and 6Ch on a CD's drive. **C5 built (the same night):** kernel/vm/mscdex.c, MSCDEX 2.23's INT 2Fh 1500h-150Eh and 1510h's
+  the same, MD refused: PASS. **C4b:** 71xxh on a CD's drive answers AX 7100h (not supported), as MSCDEX's drives
+  under MS-DOS 7.1 with no Windows: DJGPP's library (71A0h per drive) then uses the short-name calls there; 6Ch
+  opens a CD's file that is there to be read (any other action 05h). A DJGPP program (DISKRD) reads 70,000 bytes
+  from D:, SFTP fetches a file from it: bf6 and 486 PASS. Still owed of C4: FCBs on a CD's drive. **C5 built (the same night):** kernel/vm/mscdex.c, MSCDEX 2.23's INT 2Fh 1500h-150Eh and 1510h's
   device requests (IOCTL input 0, 1, 4, 6-12, 15; output 0, 1, 2, 5; open, close; READ LONG cooked and its
   prefetch; SEEK; PLAY, STOP, RESUME by the drive's own audio), the driver's header in a block of DOS memory with
   its strategy and interrupt routines as ARPLs (a program that calls the driver itself is answered the same).

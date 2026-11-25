@@ -8249,6 +8249,7 @@ def cdrom_case(profile, card):
     if not checks["image"]:
         return "  %-22s FAIL image=%r" % (tag, mk.stderr.decode("latin-1")[-300:]), False
     agent = Agent(tag + "-" + card, profile, card, ["--cdrom", iso, "--file", "build/ow/dos/CDTEST.EXE=/TEST/CDTEST.EXE",
+                                                    "--file", "build/dj/DISKRD.EXE=/TEST/DISKRD.EXE",
                                                     "--cmd", "C:\\TEST\\GLOS.EXE"], timeout=900)
     try:
         checks["listen"] = agent.listening()
@@ -8274,6 +8275,17 @@ def cdrom_case(profile, card):
             # MSCDEX's INT 2Fh 15xxh as programs ask it (C5): tests/dos/cdtest.c's checks, each a line
             rc, o = out("C:\\TEST\\CDTEST.EXE")
             checks["mscdex"] = rc == 0 and "CDTEST done failures=0" in o
+            # A DJGPP program's read (its library asks 71A0h, told "not supported" on a CD, and uses 3Dh there)
+            rc2, o2 = out("C:\\TEST\\DISKRD.EXE D:\\SUB\\DATA.BIN")
+            checks["djgpp-read"] = "DISKRD test=seq32 bytes=70000 " in o2
+            if not checks["djgpp-read"]:
+                info += " diskrd=%r" % o2[-300:]
+            # ... and the SFTP server's
+            got2 = os.path.join(d, "got2.txt")
+            open(batch, "w").write("get /D/README.TXT %s\n" % got2)
+            subprocess.run(["sftp", "-P", str(agent.port)] + agent.base[3:] + ["-i", agent.key, "-b", batch, "glos@127.0.0.1"],
+                           capture_output=True, timeout=300)
+            checks["sftp-get"] = os.path.exists(got2) and open(got2, "rb").read() == b"hello from GLOS's CD\r\n"
             if not checks["mscdex"]:
                 info += " cdtest=%r" % [l for l in o.split("\n") if "FAIL" in l or "done" in l][:8]
             agent.ssh("glos exit")
