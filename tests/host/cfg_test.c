@@ -127,6 +127,10 @@ int dos_post(struct dos_req *q)
 /* ---- the tests */
 
 static const struct { const char *sec, *key, *val; int ok; } values[] = {
+    { "boot", "default", "glos", 1 }, { "boot", "default", "DOS", 1 }, { "boot", "default", "partition 2", 1 },
+    { "boot", "default", "partition 9", 0 }, { "boot", "default", "partition", 0 }, { "boot", "default", "windows", 0 },
+    { "boot", "timeout", "0", 1 }, { "boot", "timeout", "off", 1 }, { "boot", "timeout", "61", 0 },
+    { "boot", "dos_name", "Windows 98", 1 },
     { "display", "mode", "800x600x16", 1 }, { "display", "mode", "none", 1 }, { "display", "mode", "800x600x24", 0 },
     { "display", "mode", "100x600x16", 0 }, { "display", "mode", "800x600", 0 }, { "display", "accel", "OFF", 1 },
     { "display", "accel", "maybe", 0 }, { "display", "gpu_watchdog", "500", 1 }, { "display", "gpu_watchdog", "off", 1 },

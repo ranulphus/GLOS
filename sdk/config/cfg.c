@@ -10,7 +10,7 @@
 
 const char *const cfg_sections[] = { "display", "input", "joystick", "usb", "sound", "net", "devices", "time", "region", "cache",
                                      "memory", "vnc", "desktop", "saver", "services", "shell", "open", "program",
-                                     0 };
+                                     "boot", 0 };
 
 const struct cfg_key cfg_schema[] = {
     /* [display] (M6, M7, M8) */
@@ -189,6 +189,15 @@ const struct cfg_key cfg_schema[] = {
       "As the shell: the master environment's size" },
     { "shell", "options", CFG_TEXT, CFG_RESTART, 0, 79, "line", "", "&Flags",
       "GLOS.EXE's flags: /DPMITRACE, /NOVME, /GDB, /DIRECT" },
+    /* [boot] (native GLOS's start-up menu: the loader reads them, GLOSLDR.SYS; 2026-11-25) */
+    { "boot", "default", CFG_TEXT, CFG_RESTART, 1, 12, "boot", "glos", "&Start",
+      "What the start-up menu starts when nobody chooses: glos, dos (the DOS on GLOS's volume), or partition N" },
+    { "boot", "timeout", CFG_NUMBER, CFG_RESTART, 0, 60, "off", "5", "&Wait (seconds)",
+      "How long the start-up menu waits before starting it (0: at once; off: until a key is pressed)" },
+    { "boot", "glos_name", CFG_TEXT, CFG_RESTART, 0, 31, "line", "", "&GLOS's name",
+      "GLOS's line in the menu (empty: GLOS)" },
+    { "boot", "dos_name", CFG_TEXT, CFG_RESTART, 0, 31, "line", "", "&DOS's name",
+      "The other system's line in the menu (empty: as the loader finds it, MS-DOS or Windows)" },
     /* [open] (M9): a kind of file and the program that opens it */
     { "open", "*", CFG_PATH, CFG_NOW, 0, 79, 0, "", "Opened by",
       "The program the file manager opens a kind of file with (.TXT = NOTEPAD.EXE)" },
@@ -428,6 +437,20 @@ int cfg_check(const struct cfg_key *k, const char *v, char *why, int room)
             if (cfg_page(v) < 0)
                 return say(why, room, "off, auto, or a page's segment from C800 to EF00 (D800)", "", "");
             return 0;
+        }
+        if (same(k->choices ? k->choices : "", "boot")) {
+            if (same(v, "glos") || same(v, "dos"))
+                return 0;
+            if (len(v) == 11 && v[0] == 'p' && v[9] == ' ' && v[10] >= '1' && v[10] <= '8') {
+                char head[10];
+                int i;
+                for (i = 0; i < 9; i++)
+                    head[i] = v[i];
+                head[9] = 0;
+                if (same(head, "partition"))
+                    return 0;
+            }
+            return say(why, room, "glos, dos, or partition 1 to 8", "", "");
         }
         if (same(k->choices ? k->choices : "", "tz")) {
             struct tz z;

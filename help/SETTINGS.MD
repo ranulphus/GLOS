@@ -41,6 +41,8 @@ theme = slate
 | net hostname | a name | The PC's name on the network |
 | saver wait | minutes, or off | When the screen saver starts |
 | saver saver | blank, stars, pipes, text, objects, maze | Which one |
+| boot default | glos, dos, partition 1 to 8 | What the start-up menu of a PC that starts GLOS by itself starts when nobody chooses |
+| boot timeout | seconds (0 to 60), or off | How long that menu waits |
 
 Some changes take effect at once, some when GLOS next starts. The Control Panel says which, for each.
 
