@@ -699,7 +699,8 @@ build/lwip/%.o: third_party/lwip/src/%.c $(wildcard kernel/net/port/*.h kernel/n
 build/kernel/app/api2.c.o: build/build_id
 build/kernel/app/api2.c.o: KCFLAGS += -DGLOS_BUILD='"$(BUILD_ID)"'
 # GLOS's own INT 21h is built for size: one large dispatcher whose work is done elsewhere (the file system, the
-# cache, the disk), and the 720 KB floppy's packed kernel has little room left (GLOSK.PAK: 607,232 bytes).
+# cache, the disk), and the packed kernel has a floppy's room to fit (GLOSK.PAK: 607,232 bytes on a 720 KB disk
+# until phase G dropped that size, 2026-11-25; the 1.2 MB disk's room is the ceiling now: docs/v1-route.md, G3).
 build/kernel/ndos/dos21.c.o: KCFLAGS += -Os
 build/kernel/%.o: kernel/% $(wildcard kernel/include/*.h include/glos/*.h)
 	@mkdir -p $(dir $@)
@@ -1175,8 +1176,8 @@ build/glos/KEYS/PKG/GLOS.PUB: tools/pkg/GLOS.PUB
 	$(Q)python3 -c "import base64,sys; w=open(sys.argv[1]).read().split(); \
 	  sys.exit(0 if w[0] == 'glos-pkg-ed25519' and len(base64.b64decode(w[1], validate=True)) == 32 else 'bad key')" $<
 	$(Q)cp $< $@
-# GLOS's setup floppy (docs/floppy.md; tools/floppy): build/floppy/glos1440.img (FLOPPY_SIZE=1440, 1200 or 720: a
-# 1.44 MB, 1.2 MB or 720 KB disk; the smaller two with the kernel packed), a disk that boots FreeDOS and
+# GLOS's setup floppy (docs/floppy.md; tools/floppy): build/floppy/glos1440.img (FLOPPY_SIZE=1440 or 1200: a
+# 1.44 MB or 1.2 MB disk, the smaller with the kernel packed; 720 KB no longer), a disk that boots FreeDOS and
 # starts GLOS with its network and SSH; tools/floppy/install.py then puts the whole system on the PC's hard disk from
 # this computer. Its host key is made once (build/floppy/keys, kept from one image to the next); who may log in is
 # FLOPPY_AUTHKEYS, an ed25519 public key (or a file of them).
@@ -1241,7 +1242,8 @@ loopa-floppy: all build/kernel/GLOSK.PAK apps build/apps/FETCH.EXE build/apps/PK
 	$(Q)$(DEV) env FREEDOS_FLOPPY_URL=$(FREEDOS_FLOPPY_URL) FREEDOS_FLOPPY_SHA256=$(FREEDOS_FLOPPY_SHA256) \
 	  tools/floppy/mkfloppy.sh out/floppy-test-1440.img out/floppy-keys glos-setup 1440
 	$(Q)$(DEV) env FREEDOS_FLOPPY_URL=$(FREEDOS_FLOPPY_URL) FREEDOS_FLOPPY_SHA256=$(FREEDOS_FLOPPY_SHA256) \
-	  tools/floppy/mkfloppy.sh out/floppy-test-720.img out/floppy-keys glos-setup 720
+	  tools/floppy/mkfloppy.sh out/floppy-test-1200.img out/floppy-keys glos-setup 1200
+	@# (the 1.2 MB disk is made, not started: the packed kernel's size check, its room said by mkfloppy)
 	$(Q)$(DEV) env FREEDOS_FLOPPY_URL=$(FREEDOS_FLOPPY_URL) FREEDOS_FLOPPY_SHA256=$(FREEDOS_FLOPPY_SHA256) \
 	  tools/floppy/mkfloppy.sh out/floppy-test-1440-lpt.img out/floppy-keys glos-setup 1440 "client LPT1"
 	$(Q)$(DEV) env FREEDOS_FLOPPY_URL=$(FREEDOS_FLOPPY_URL) tests/loopa/fdboot-volumes.sh out/floppy-test-1440.img out/fdboot

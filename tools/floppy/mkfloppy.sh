@@ -3,8 +3,8 @@
 # kernel with GLOS as its shell, its network and SSH on, so that the rest is put on the PC's hard disk from another computer
 # (tools/floppy/install.py). In the dev container (mtools), from the repository's root.
 #
-# SIZE: 1440 (a 3.5" 1.44 MB disk, the default), 1200 (5.25" 1.2 MB) or 720 (3.5" 720 KB). The smaller two carry
-# the kernel packed (build/kernel/GLOSK.PAK, which GLOS.EXE unpacks), and the 720 KB disk no program of FreeDOS's.
+# SIZE: 1440 (a 3.5" 1.44 MB disk, the default) or 1200 (5.25" 1.2 MB, the kernel packed: build/kernel/GLOSK.PAK,
+# which GLOS.EXE unpacks). 720 KB is no longer made (phase G, 2026-11-25: the packed kernel outgrew its room).
 #
 # On it: FreeDOS 1.4's kernel (KERNEL.SYS) and, on the larger two, a few of its tools (as its own boot floppy has
 # them: FreeDOS's programs, unchanged, under their own licences, the GPL for most); GLOS.EXE, GLOSK.BIN and
@@ -19,9 +19,8 @@ case $size in
           keep="ATTRIB.COM XCOPY.EXE MEM.EXE MORE.EXE DELTREE.COM";;
     1200) fd=120m kernel=build/kernel/GLOSK.PAK
           keep="ATTRIB.COM XCOPY.EXE MEM.EXE MORE.EXE DELTREE.COM";;
-    720)  fd=720k kernel=build/kernel/GLOSK.PAK
-          keep="";;
-    *) echo "mkfloppy: SIZE is 1440, 1200 or 720"; exit 1;;
+    720)  echo "mkfloppy: 720 KB is no longer made: the packed kernel outgrew it (phase G, docs/v1-route.md G3)"; exit 1;;
+    *) echo "mkfloppy: SIZE is 1440 or 1200"; exit 1;;
 esac
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)

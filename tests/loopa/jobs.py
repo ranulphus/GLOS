@@ -9891,7 +9891,10 @@ def free_port():
 
 
 NETAPP_CASES = [("bf6", "ne2kpci"), ("486dx2", "ne2k")]
-FLOPPY_CASES = [("486dx4", "ne2k", 1440), ("486dx4", "ne2k", 720), ("486dx4", "plip", 1440)]
+# (The packed kernel's case went with the 720 KB disk, which phase G dropped as a target on 2026-11-25: the kernel
+# outgrew its 607,232 bytes of room. A 1.2 MB disk wants a 5.25" drive, which Loop A's PCs haven't got: the Makefile
+# makes one as the size check and says its room. The packed kernel starts on the native floppy: loopa-nboot.)
+FLOPPY_CASES = [("486dx4", "ne2k", 1440), ("486dx4", "plip", 1440)]
 
 
 def mbr_case(profile):
@@ -10151,7 +10154,7 @@ def fdboot_case(profile, kind):
 
 def floppy_case(profile, card, size):
     """GLOS's setup floppy (docs/floppy.md; tools/floppy): a PC with a blank hard disk boots the floppy (made by
-    the Makefile with the tests' keys: out/floppy-test-SIZE.img; the 720 KB one has the kernel packed), GLOS
+    the Makefile with the tests' keys: out/floppy-test-SIZE.img; a disk other than 1.44 MB has the kernel packed), GLOS
     answers on the network from it, and
     tools/floppy/install.py --new-disk partitions and formats the disk, puts FreeDOS on it from the floppy and
     GLOS's files by SFTP. Then the PC is started from the disk alone: GLOS comes up as the installed system (its

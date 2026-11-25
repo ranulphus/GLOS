@@ -1,6 +1,6 @@
 # GLOS's setup floppy
 
-A floppy (3.5" 1.44 MB or 720 KB, or 5.25" 1.2 MB) that boots a PC into GLOS with its network on, so that GLOS
+A floppy (3.5" 1.44 MB or 5.25" 1.2 MB) that boots a PC into GLOS with its network on, so that GLOS
 can be put on the PC's hard disk from another computer, over SSH and SFTP. For bench PCs, and any PC with a floppy drive and a network card GLOS
 drives (NE2000 and its clones, ISA or PCI; the RTL8139 family; Intel's PRO/100).
 
@@ -12,7 +12,7 @@ disk.
 
     make all apps build/apps/FETCH.EXE build/apps/PKG.EXE      (in the dev container)
     make floppy                                                build/floppy/glos1440.img
-    make floppy FLOPPY_SIZE=720                                build/floppy/glos720.img (or 1200)
+    make floppy FLOPPY_SIZE=1200                               build/floppy/glos1200.img
 
 - **On the floppy:** FreeDOS 1.4's kernel with its `ATTRIB`, `XCOPY`, `MEM`, `MORE` and `DELTREE` (FreeDOS's own
   programs, unchanged, from its boot floppy: `tools/setup/versions.mk`); `A:\GLOS` with `GLOS.EXE`, `GLOSK.BIN`,
@@ -23,9 +23,9 @@ disk.
   back to.
 - **No `FDISK`, `FORMAT` or `SYS`** (since 2026-11-13): the disk is laid out, formatted and made to start by
   GLOS's own `DISK` command ([below](#the-disk-command)), which `install.py --new-disk` uses.
-- **The smaller disks** carry the kernel packed (`tools/packkernel.py`: deflate, half the size; `GLOS.EXE` unpacks
-  it and checks its sum, and takes either form under the name `GLOSK.BIN`). The 720 KB disk has no program of
-  FreeDOS's but the kernel, and about 115 KB to spare.
+- **The 1.2 MB disk** carries the kernel packed (`tools/packkernel.py`: deflate, half the size; `GLOS.EXE` unpacks
+  it and checks its sum, and takes either form under the name `GLOSK.BIN`). A 720 KB disk is no longer made
+  (phase G, 2026-11-25): the packed kernel outgrew the 607,232 bytes it had there.
 - **Who may log in:** `FLOPPY_AUTHKEYS`, an ed25519 public key or a file of them (by default `~/.ssh/glos_bench.pub`,
   else `~/.ssh/id_ed25519.pub`). GLOS takes public keys only.
 - **Who the PC is:** a host key made once for the floppy (`build/floppy/keys/HOSTKEY`, kept from one image to the
