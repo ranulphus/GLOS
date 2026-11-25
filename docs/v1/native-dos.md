@@ -1130,8 +1130,10 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   (NBOOT_ONLY=upgrade; FAT16 on the bf6 and the 486, FAT32 just under 2 GiB on the bf6): hosted FreeDOS and GLOS on one
   partition, the question, the upgrade, the disk's first sector and the volume's figures unchanged and the kept
   sector the old one; the disk alone then starts GLOS by itself, the menu offering FreeDOS; 2 pressed, FreeDOS
-  starts from the kept sector. Owed: MS-DOS 7.1 on the same volume in Loop A (the private disk) and on a real
-  bench (N3's item); an AUTOEXEC.BAT that starts GLOS.EXE still does so when DOS is chosen.
+  starts from the kept sector. And on a copy of the private MS-DOS 7.1 disk (NBOOT_MSDOS=1; its FAT32 volume,
+  hosted GLOS under MS-DOS 7.1): the volume's third sector, where MS-DOS's boot code goes on, unchanged, the menu
+  offering "Windows 95/98 (on GLOS's volume)", MS-DOS 7.1 started again from it: PASS. Owed: a real bench (N3's
+  item); an AUTOEXEC.BAT that starts GLOS.EXE still does so when DOS is chosen.
 
 ## N6: several DOS programs at once
 
