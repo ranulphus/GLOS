@@ -2318,6 +2318,23 @@ def shell_case(profile, card):
         t.expect("C:\\TEST>")
         t.send("b hello\r")
         checks["batch"] = t.expect("from batch hello")
+        # XCOPY, MORE and DELTREE (built in since 2026-11-25): MORE's page waits for a key, DELTREE asks
+        t.send("md xs && md xs\\sub && echo one> xs\\a.txt && echo two> xs\\sub\\b.txt && xcopy xs xd /s\r")
+        checks["xcopy"] = t.expect("Reading source file(s)...\nXS\\A.TXT\nXS\\SUB\\B.TXT\n") \
+            and t.expect("2 File(s) copied\n") and t.expect("C:\\TEST>")
+        t.send("for %i in (1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30) do "
+               "echo line %i>> m.txt\r")
+        t.expect("C:\\TEST>")
+        t.send("more m.txt\r")
+        checks["more-page"] = t.expect("line 24\n-- More --")
+        t.send(" ")
+        checks["more-rest"] = t.expect("line 30\n") and t.expect("C:\\TEST>")
+        t.send("deltree xd\r")
+        checks["deltree-ask"] = t.expect('Delete directory "XD" and all its subdirectories? [yn] ')
+        t.send("y")
+        checks["deltree"] = t.expect("y\nDeleting XD...\n") and t.expect("C:\\TEST>")
+        t.send("deltree /y xs m.txt && dir /b xd\r")
+        checks["deltree-gone"] = t.expect("Deleting XS...\nDeleting M.TXT...\n") and t.expect("File not found")
         t.send("echo from a file > in.txt\r")
         t.expect("C:\\TEST>")
         t.send("conin line < in.txt\r")           # (its input from a file: the line whole to COMMAND.COM)
