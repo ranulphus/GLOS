@@ -51,6 +51,9 @@ struct pnp_dev *pnpbus_find(unsigned long vendor, unsigned io, unsigned irq, uns
     return 0;
 }
 
+/* The bus as its scan found it, or 0 if it has not been scanned (the device list: devlist.c). */
+const struct pnp *pnpbus_scanned(void) { return scanned ? &bus : 0; }
+
 /* Whether a device of the bus that is on (as set up) holds any port of lo..hi: a legacy card's probe keeps off it
    (sb16.c). Only a bus scanned already is asked: a probe never scans it by itself. */
 int pnpbus_io_busy(u16 lo, u16 hi)

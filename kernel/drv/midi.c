@@ -263,6 +263,8 @@ void midi_late(void)
     }
 }
 
+u16 midi_mpu_port(void) { return md.mpu; }   /* (the device list: whose a Plug and Play MPU-401 is) */
+
 static const char *port_name(u32 port) { return port == MIDI_FM ? "fm" : "mpu"; }
 
 int midi_open(struct app *a, u32 port, int in)

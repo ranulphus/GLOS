@@ -316,3 +316,15 @@ port=330`, played; the hosted case unchanged (BLASTER says, the probe never runs
 ESS, still wants `[sound] blaster` (the native installer carrying the old DOS's BLASTER over is the native-dos
 session's script).
 
+## The Devices page's ISA Plug and Play cards (2026-11-25)
+
+The device list (`kernel/drv/devlist.c`: the Control Panel's Devices page, `glos devices`, the shell's DEVICES) now
+has a line for each logical device the Plug and Play bus's scan found, `pnpCSN.LDN`, with its kind by its IDs
+(an SB-compatible or a known maker's audio device sound, a game port input, IDE storage, serial and parallel
+ports port), its IRQ, DMA and ports as set, and its state: on, with the driver, when its ports are among those of
+a device one of GLOS's drivers has (the Crystal driver sets its card up with its own key, not through the bus) or
+it is the MPU-401 GLOS's MIDI uses; dos when it is set up and GLOS doesn't drive it; none when nothing has set it
+up. The list never scans the bus itself (`pnpbus_scanned`): the cards appear on a PC without BLASTER, or after
+`glos pnp`. Loop A's three Crystal cases check it (`pnp-list`: the WSS device GLOS's); the CS4232's second DMA
+channel is 3 where the others' is 0.
+

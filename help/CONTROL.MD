@@ -39,7 +39,9 @@ programs (its Sound Blaster), bridges and the PC's system devices. Choose one to
 
 - its name and maker (PCI devices are named from the PCI ID Project's list, PCIIDS.DAT beside GLOS, and USB
   devices from the list of USB IDs, USBIDS.DAT);
-- where it is (its PCI place, its USB port, or built into the PC);
+- where it is (its PCI place, its USB port, an ISA Plug and Play card's number and device, or built into
+  the PC). Plug and Play cards are listed once GLOS has looked at them: on a PC with no BLASTER setting, where it
+  looks for its sound card there, or after `glos pnp`; one nothing has set up is listed as **Not in use**;
 - what serves it: **Working** (one of GLOS's drivers has it), **Turned off** (left to DOS), **Not working**
   (GLOS's driver could not use it, and why), **DOS's** (GLOS has no driver of its own for it: DOS's drivers
   and programs use it as the BIOS set it up), or **Kept quiet** (nothing drives it, and GLOS keeps its

@@ -5595,6 +5595,12 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True, share=False):
                 r"id=CSC0000 compat=\S+ on io0=534 io1=388 io2=220 irq0=5 dma0=1", o_pnp) is not None)
             if not checks["pnp"]:
                 print("    %s pnp: rc=%d %r" % (tag, rc_pnp, o_pnp[-400:]))
+            # (... and the device list then has its logical devices, the audio one GLOS's Crystal driver's)
+            o_dv = agent.ssh("glos devices")[1].replace("\r", "")
+            checks["pnp-list"] = re.search(r"^pnp1\.0 kind=sound state=on driver=crystal name=CSC\w+ irq=5 dma=1,\d "
+                                           r"io=0534-", o_dv, re.M) is not None
+            if not checks["pnp-list"]:
+                print("    %s pnp-list: %r" % (tag, [l for l in o_dv.split("\n") if l.startswith("pnp")][:6]))
         checks["exit"] = agent.ssh("glos exit")[0] == 0
     except subprocess.TimeoutExpired:
         checks["timeout"] = False

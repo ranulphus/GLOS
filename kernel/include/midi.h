@@ -41,4 +41,6 @@ u16 cmi8738_mpu(void);                          /* ... and its MPU-401's */
 u16 cmi8738_fm_legacy(void);                    /* an older chip's FM, at the legacy address (388h) */
 u16 cmi8738_mpu_legacy(void);                   /* ... and its MPU-401 (330h) */
 
+u16 midi_mpu_port(void);                /* the MPU-401 GLOS uses (0: none) */
+
 #endif
