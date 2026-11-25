@@ -5708,7 +5708,11 @@ def joy_case(profile, vcard, card):
         agent.ssh("glos config set program:JOYTEST.EXE joymap rx -ry lx ly 2 1 none 3")
         j = run("C:\\TEST\\JOYTEST.EXE 3")
         c = j["count"] if j else [None]
-        checks["program-map"] = j is not None and j["buttons"] == "0101" and None not in c and c[2] < c[3] < c[0] < c[1]
+        u = j["us"] if j else [None]
+        # (the axes in the map's order by their timings; the loop's counts may tie on the 486 under load, 20 and
+        # 30 read 3 each: gate 56, 2026-11-24, counts 3,21,2,3, times 205,1019,121,166 us)
+        checks["program-map"] = (j is not None and j["buttons"] == "0101" and None not in c and None not in u
+                                 and u[2] < u[3] < u[0] < u[1] and c[2] <= c[3] <= c[0] <= c[1])
         checks["program-map-ends"] = " source=usb a=10,20 b=30,40 buttons=1010 " in agent.ssh("glos joy")[1]
         if not checks["program-map"]:
             info.append("program-map %r" % (j,))
