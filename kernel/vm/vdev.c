@@ -344,8 +344,9 @@ static void rtc_tick(u8 c)
    on devserver, 2026-11-14 and 15.) */
 static void watchdog(struct trapframe *tf, u32 now)
 {
-    if (vm.thread->vif || !vpic_pending(&vm.pic) || vm.direct || gdbp_stopped()) {    /* (direct mode: the real IF, the
-                                                   program's own; glos gdb holds a stopped one) */
+    if (vm.thread->vif || !vpic_pending(&vm.pic) || vm.direct || gdbp_stopped() || vm.bios_slow) {    /* (direct
+                                                   mode: the real IF, the program's own; glos gdb holds a stopped
+                                                   one; the BIOS's DDC for GLOS) */
         vm.stuck_since = 0;
         vm.stuck_n = 0;
         vm.stuck_warned = 0;

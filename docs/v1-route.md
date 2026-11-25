@@ -528,6 +528,10 @@ EMS and CD-ROM; USB mass storage partly (a stick boots through the BIOS).
 
 - The refresh rate (2026-11-25): `[display] refresh` (auto, 60, 70, 75, 85 Hz) through VBE 3.0's CRTC timings
   where the card's BIOS has them, limited by the monitor's EDID (DDC); elsewhere the BIOS's rate, said so.
+  **Built** (phase-h, 2026-11-25; [graphics.md](graphics.md) 2.1): GTF timings, the card's nearest clock, the
+  EDID's range limits, the Control Panel's fifteen-second try, `glos display hz` measuring the retraces; Loop A's
+  refresh case on 86Box's G400 (60, 70, 75, 85 within 1%) and S3 (not VBE 3.0: the BIOS's own, said why). Owed:
+  real monitors on the benches (a CRT for 85 Hz).
 
 **G3. The media**
 

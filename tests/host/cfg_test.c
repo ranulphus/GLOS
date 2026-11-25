@@ -42,6 +42,7 @@ int ksnprintf(char *b, size_t n, const char *fmt, ...)
 static char applied[256];
 int display_ask(int what, u32 w, u32 h, u32 b) { snprintf(applied, sizeof applied, "display %d %ux%ux%u", what, w, h, b); return 0; }
 void gpu_watchdog(u32 ms) { snprintf(applied, sizeof applied, "watchdog %u", ms); }
+void display_refresh_changed(void) { snprintf(applied, sizeof applied, "refresh"); }
 void mixer_enable(int on) { snprintf(applied, sizeof applied, "mixer %d", on); }
 void mixer_set_rate(u32 r) { snprintf(applied, sizeof applied, "rate %u", r); }
 void mixer_master_set(u32 volume, int mute) { snprintf(applied, sizeof applied, "master %u %d", volume, mute); }

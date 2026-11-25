@@ -112,6 +112,17 @@ for "draw this again" and must not be trusted for "this is hidden".
   memory.
 - **At 8 bits** the DAC is loaded with the GLOS palette: 8 bits a colour if the BIOS can switch the DAC to
   that (4F08h), 6 otherwise (the S3 Trio64V2 and the G200 in 86Box: 6).
+- **The refresh rate** (`[display] refresh`: auto, 60, 70, 75, 85; phase G's G2, the owner's choice of
+  2026-11-25, "VBE 3.0 + monitor limits"; `kernel/gfx/timing.c`). auto is the BIOS's own timings, as before. A
+  rate: where the BIOS is VBE 3.0 (4F00h's version), the mode is set with CRTC timings (4F02h, BX bit 11, a
+  CRTCInfoBlock at ES:DI in the stub's EXEC buffers): VESA's GTF timings for the size and the rate, the clock
+  made the card's nearest (4F0Bh) and the refresh worked out again from it, checked against the monitor's EDID
+  (4F15h BL=01h, read once: its range limits, vertical Hz, horizontal kHz and the pixel clock; a monitor that
+  gives none is not checked). The log says `GLOS-DISPLAY refresh=75.00 want=75 total=1056x625 pclk=... h=...kHz`,
+  or `refresh=bios want=N reason="..."` where it couldn't (the BIOS not VBE 3.0, the monitor's ranges, the BIOS
+  refusing the timings: then the plain mode set). It applies to the desktop's mode and to full-screen apps' own
+  modes; a change through the Control Panel is tried for fifteen seconds as a new mode is. `glos display hz`
+  counts the card's retraces (3DAh bit 3) for the rate it really makes; `glos display` has `refresh=`.
 
 ### 2.2 Sessions
 

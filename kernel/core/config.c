@@ -514,6 +514,15 @@ int kcfg_layout(void)                       /* keymap.h's number for [region] la
     return id < 0 ? KEYMAP_US : id;
 }
 
+/* [display] refresh at start-up: the desktop's first mode was set before this file was read (the loader gives
+   its size), so it is set again at the rate asked for; auto leaves it as it is. */
+static void refresh_config(void)
+{
+    char v[8];
+    if (kcfg_get("display", "refresh", v, sizeof v) >= 0 && !same(v, "auto"))
+        display_refresh_changed();
+}
+
 void kcfg_apply(const char *section, const char *key, const char *v)
 {
     if (same(section, "display") && same(key, "mode")) {
@@ -528,6 +537,8 @@ void kcfg_apply(const char *section, const char *key, const char *v)
             display_ask(DISPLAY_OFF, 0, 0, 0);
         else
             display_ask(DISPLAY_ON, w, h, b);
+    } else if (same(section, "display") && same(key, "refresh")) {
+        display_refresh_changed();
     } else if (same(section, "display") && same(key, "gpu_watchdog")) {
         gpu_watchdog(same(v, "off") ? 0 : num(v));
     } else if (same(section, "sound") && same(key, "mixer")) {
@@ -625,6 +636,7 @@ static void apply_read(void)
     usb_late();                                 /* [usb] enabled: GLOS's USB controllers */
     wc_config();                                /* [display] write_combining */
     mga_clocks_config();                        /* [display] clocks: a G400 on Matrox's own (gfx/mga.c) */
+    refresh_config();                           /* [display] refresh */
 }
 
 /* The desktop has come on (display.c, the VM thread): [desktop] start's programs, beside GLOS.EXE when they have

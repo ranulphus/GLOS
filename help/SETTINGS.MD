@@ -27,6 +27,7 @@ theme = slate
 | Section and name | Values | What it is |
 |---|---|---|
 | display mode | 640x480x8, 800x600x16, 1024x768x32 ... or none | The screen. "none" is no desktop: the command line alone |
+| display refresh | auto, 60, 70, 75, 85 | The screen's refresh rate (Hz), where the card can set one and the monitor takes it. auto is the card's own |
 | desktop start | FILES.EXE | What starts with the desktop. Without FILES.EXE there are no icons and no Start menu |
 | desktop theme | slate, dark, contrast | The colours |
 | desktop text | small, normal, large | The size of text |

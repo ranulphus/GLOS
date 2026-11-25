@@ -4325,6 +4325,80 @@ def display_case(profile, vcard, card, cfg_mode, accel="on"):
                                "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+REFRESH_CASES = [("bf6", "g400", "ne2kpci"), ("bf6", "vbe", "ne2kpci")]
+
+
+def refresh_case(profile, vcard, card):
+    """[display] refresh (phase G's G2, the owner's choice of 2026-11-25: VBE 3.0 and the monitor's limits): the
+    desktop at 800x600x16 with refresh = 75 in GLOS.CFG. Where the card's BIOS takes CRTC timings (VBE 3.0) the
+    log has the timings set (GLOS-DISPLAY refresh=75.xx, the monitor's EDID asked first) and the retraces glos
+    display hz counts are 75 a second within 1%; glos config set display refresh 85, 70 and 60 each set the mode
+    again at that rate, counted the same; auto gives the BIOS's own timings back (no refresh line for that mode
+    set). Where the BIOS can't, the log says why, and the rate counted is the BIOS's own whatever is asked. GLOS
+    leaves cleanly (the BIOS's VBE 3.0 calls overran the stub's stack at first, and the way out hung)."""
+    import time
+    tag = "%s-%s" % (profile, vcard)
+    cfg = ["--file", batfile("refresh-%s/GLOS.CFG" % tag, ["[display]", "mode = 800x600x16", "refresh = 75"]) +
+           "=/TEST/GLOS.CFG"]
+    agent = Agent("refresh-" + tag, profile, card, ["--card", vcard] + cfg + [
+        "--cmd", "SERSAY HX-START refresh", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
+    checks, info = {"listen": agent.listening()}, ""
+
+    def hz():                                   # the retraces counted: Hz, 0.0 if none
+        m = re.search(r"hz=(\d+)\.(\d+)", agent.ssh("glos display hz")[1])
+        return int(m.group(1)) + int(m.group(2)) / 100.0 if m else 0.0
+
+    def until(what, n=1, limit=60):             # the n-th line with `what` is in the log
+        t0 = time.time()
+        while time.time() - t0 < limit:
+            if agent.log().count(what) >= n:
+                return True
+            time.sleep(0.5)
+        return False
+
+    def sets(n):                                # the n-th desktop mode set
+        return until("GLOS-DISPLAY on mode=", n)
+
+    try:
+        # (The first mode set comes before GLOS.CFG is read: the second, at the rate asked for, after it.)
+        checks["on"] = until("GLOS-DISPLAY refresh=") and sets(2)
+        log = agent.log()
+        n0 = log.count("GLOS-DISPLAY on mode=")
+        vbe3 = "GLOS-DISPLAY refresh=75." in log
+        h = hz()
+        info += " %s hz=%.2f" % ("crtc" if vbe3 else "bios", h)
+        if vbe3:
+            # (Each rate within 1%: the card's nearest clock moves it a little, 70 to 69.75 and 85 to 84.74 on 86Box's
+            # G400; the BIOS's own 800x600 is 60.45 there.)
+            checks["edid-asked"] = "GLOS-DISPLAY edid " in log
+            got, n = {75: h}, n0
+            for rate in (85, 70, 60):
+                n += 1
+                checks["set-%d" % rate] = agent.ssh("glos config set display refresh %d" % rate)[0] == 0 and sets(n)
+                got[rate] = hz()
+                checks["log-%d" % rate] = ("GLOS-DISPLAY refresh=%d." % rate) in agent.log() \
+                    or ("GLOS-DISPLAY refresh=%d." % (rate - 1)) in agent.log()
+            info += " " + " ".join("%d:%.2f" % (r, got[r]) for r in sorted(got))
+            checks["rates"] = all(abs(got[r] - r) < r * 0.01 for r in got)
+            refreshes = agent.log().count("GLOS-DISPLAY refresh=")
+            checks["auto"] = agent.ssh("glos config set display refresh auto")[0] == 0 and sets(n + 1) \
+                and agent.log().count("GLOS-DISPLAY refresh=") == refreshes \
+                and "refresh=bios" in agent.ssh("glos display")[1]
+            info += " auto:%.2f" % hz()
+        else:
+            checks["why"] = re.search(r'GLOS-DISPLAY refresh=bios want=75 reason="[^"]+"', log) is not None
+            checks["bios-rate"] = 55 < h < 90         # (the BIOS's own: 60 to 85 Hz at 800x600)
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text)
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % ("refresh-" + tag, "PASS" if not bad else "FAIL", info,
+                               "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 DESK_CASES = [("bf6", "vbe", "ne2kpci"), ("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k"), ("bf6", "g400", "ne2kpci"),
               ("bf6", "g450", "ne2kpci"), ("486dx2", "g200pci", "ne2k"), ("486dx2", "g450pci", "ne2k")]
 
@@ -12901,8 +12975,9 @@ def control_script(schema):
         return v
 
     for k in schema:
-        if k["section"] in ("open", "program") or k["type"] == "CFG_MODE":
-            continue
+        if k["section"] in ("open", "program") or k["type"] == "CFG_MODE" or (k["section"], k["key"]) == ("display",
+                                                                                                         "refresh"):
+            continue                            # (the mode and the refresh rate are tried: the screen's case below)
         if k["type"] == "CFG_CHOICE" and len(k["choices"]) == 1:
             continue                            # (one choice: nothing to change it to)
         to(cfg_pages().index(k["section"]))
@@ -13292,7 +13367,9 @@ def main():
         return 0 if all(r[1] for r in matrix(gpu_case, cases, a.jobs)) else 1
     if a.suite == "display":
         cases = [c for c in DISPLAY_CASES if not a.profile or c[0] in a.profile]
-        return 0 if all(r[1] for r in matrix(display_case, cases, a.jobs)) else 1
+        res = [] if os.environ.get("DISPLAY_ONLY") == "refresh" else matrix(display_case, cases, a.jobs)
+        res += matrix(refresh_case, [c for c in REFRESH_CASES if not a.profile or c[0] in a.profile], a.jobs)
+        return 0 if all(r[1] for r in res) else 1
     if a.suite == "apps":
         cases = [c for c in APPS_CASES if not a.profile or c[0] in a.profile]
         res = matrix(apps_case, cases, a.jobs)

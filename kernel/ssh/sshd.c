@@ -1246,9 +1246,10 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         kfree(b);
         ssh_chan_exit(ch, 0);
     } else if (!strcmp(cmd, "glos display") || !strncmp(cmd, "glos display ", 13)) {
-        /* glos display [on [WxHxBITS] | off | card [WxHxBITS] | vram KB]: the desktop's screen (gfx/display.c).
+        /* glos display [on [WxHxBITS] | off | card [WxHxBITS] | vram KB | hz]: the desktop's screen (gfx/display.c).
            The VM thread does it when the stub next asks: the answer says only that it was asked. vram: at most
-           this much of a Matrox card's memory for the desktop's windows from now on (0: as much as there is). */
+           this much of a Matrox card's memory for the desktop's windows from now on (0: as much as there is).
+           hz: the refresh the card makes, measured by its retraces ([display] refresh's proof, G2). */
         const char *q = cmd + 12;
         char b[256];
         int what = -1, w = 0, h = 0, bits = 0;
@@ -1260,7 +1261,13 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             what = DISPLAY_CARD, q += 4;
         else if (!strcmp(q, "off"))
             what = DISPLAY_OFF, q += 3;
-        else if (!strncmp(q, "vram ", 5)) {
+        else if (!strcmp(q, "hz")) {
+            u32 hz = display_measure_hz();
+            ksnprintf(b, sizeof b, "display hz=%u.%02u\n", hz / 100, hz % 100);
+            say(ch, 0, b);
+            ssh_chan_exit(ch, hz ? 0 : 1);
+            return 0;
+        } else if (!strncmp(q, "vram ", 5)) {
             int kb = -1;
             q += 5;
             if (number(&q, &kb) == 0 && !*q && kb >= 0) {
@@ -1277,7 +1284,7 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
                 || w < 320 || w > 1600 || h < 200 || h > 1200 || (bits != 8 && bits != 16 && bits != 32)))
             what = -2;
         if ((what < 0 && *q) || what == -2) {
-            say(ch, 1, "glos display: usage: glos display [on [WxHxBITS] | card [WxHxBITS] | off | vram KB] (BITS 8, 16 or 32)\n");
+            say(ch, 1, "glos display: usage: glos display [on [WxHxBITS] | card [WxHxBITS] | off | vram KB | hz] (BITS 8, 16 or 32)\n");
             ssh_chan_exit(ch, 2);
         } else if (what < 0) {
             ssh_chan_write(ch, 0, (const uint8_t *)b, display_stat(b, sizeof b));

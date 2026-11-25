@@ -69,6 +69,8 @@ struct vm {
     u32 stuck_since;
     u32 stuck_n;                        /* ... the timer's interrupts that have come since */
     u8 stuck_warned;
+    u8 bios_slow;                       /* a BIOS call of GLOS's own that keeps interrupts off for long (the monitor's
+                                           EDID by DDC, 4F15h): not a program's, so not warned of (gfx/display.c) */
     /* counts for the leave line */
     u32 n_gp, n_int, n_irq;
     /* the VM thread and its waits */

@@ -30,7 +30,7 @@
 #include "control.h"
 
 #define MAXVAL 256
-#define MAXCTL 96                       /* (the schema's settings: 53 with API 2.0 step 5's) */
+#define MAXCTL 128                      /* (the schema's settings: 93 with [display] refresh, 2026-11-25) */
 #define MAXPROG 64
 #define TRY_SECONDS 15
 #define MAXCHOICE 40                    /* (a list's values: the screen's modes are the most) */
@@ -253,7 +253,7 @@ static void load_page(int page)
 
 static struct ctl *ctl_add(struct gui_widget *form, const struct cfg_key *k, int page)
 {
-    struct ctl *c = &ctls[nctl++];
+    struct ctl *c = &ctls[nctl < MAXCTL - 1 ? nctl++ : nctl];   /* (past the last: the last's widget again) */
     struct gui_widget *row;
     static char choices[MAXCTL][96];
     memset(c, 0, sizeof *c);
@@ -663,13 +663,20 @@ static void show_val(const struct val *v)
     }
 }
 
+/* A setting whose change is tried for fifteen seconds and goes back unless kept: the screen's mode, and its
+   refresh rate (G2: a rate the monitor can't show leaves it dark). */
+static int tried(const struct cfg_key *k)
+{
+    return k->type == CFG_MODE || (!strcmp(k->section, "display") && !strcmp(k->key, "refresh"));
+}
+
 /* Every change checked, then set: 1 if they all were. */
 static int apply(void)
 {
     char why[200], one[200], msg[300];
-    int i, pass, later = 0, n = 0;
-    struct val *mode = NULL;
-    char *old_mode = NULL;                      /* (the mode before, NULL the default: for going back) */
+    int i, j, pass, later = 0, n = 0, ntried = 0;
+    struct val *mode[2] = { NULL, NULL };
+    char *old_mode[2] = { NULL, NULL };         /* (the values before, NULL the default: for going back) */
     save_all();
     for (i = 0; i < nvals; i++) {              /* checked first: nothing is set if one is wrong */
         struct val *v = &vals[i];
@@ -706,7 +713,7 @@ static int apply(void)
             struct val *v = &vals[i];
             unsigned when = 0;
             int r;
-            if (!val_changed(v) || (v->k->type == CFG_MODE) != (pass == 1))
+            if (!val_changed(v) || tried(v->k) != (pass == 1))
                 continue;
             why[0] = 0;
             r = glos_setting_set(v->sec, v->key, v->now, &when, why, sizeof why) != 0 ? -1
@@ -719,32 +726,37 @@ static int apply(void)
                 return 0;
             }
             say_value(v->now ? "set" : "unset", v);
-            if (v->k->type == CFG_MODE && r == CFG_NOW) {
-                mode = v;
-                old_mode = dup(v->was);
+            if (tried(v->k) && r == CFG_NOW && ntried < 2) {
+                mode[ntried] = v;
+                old_mode[ntried++] = dup(v->was);
             } else if (r > CFG_NOW)
                 later = 1;
             free(v->was);
             v->was = dup(v->now);
             n++;
         }
-    if (mode && strcmp(val_text(mode), "none")) {
+    if (ntried && strcmp(val_text(mode[0]), "none")) {
         if (try_mode()) {
-            printf("CONTROL mode kept %s\n", val_text(mode));
-        } else {                                /* the mode before, again */
-            glos_setting_set(mode->sec, mode->key, old_mode, 0, why, sizeof why);       /* (NULL: out of the file) */
-            free(mode->now);
-            free(mode->was);
-            mode->now = dup(old_mode);
-            mode->was = dup(old_mode);
-            for (i = 0; i < nctl; i++)
-                if (ctls[i].k == mode->k)
-                    ctl_load(&ctls[i]);
-            printf("CONTROL mode back %s\n", val_text(mode));
+            for (j = 0; j < ntried; j++)
+                printf("CONTROL %s kept %s\n", mode[j]->k->type == CFG_MODE ? "mode" : mode[j]->key, val_text(mode[j]));
+        } else {                                /* as it was before, again */
+            for (j = ntried - 1; j >= 0; j--) {
+                struct val *m = mode[j];
+                glos_setting_set(m->sec, m->key, old_mode[j], 0, why, sizeof why);  /* (NULL: out of the file) */
+                free(m->now);
+                free(m->was);
+                m->now = dup(old_mode[j]);
+                m->was = dup(old_mode[j]);
+                for (i = 0; i < nctl; i++)
+                    if (ctls[i].k == m->k)
+                        ctl_load(&ctls[i]);
+                printf("CONTROL %s back %s\n", m->k->type == CFG_MODE ? "mode" : m->key, val_text(m));
+            }
         }
         fflush(stdout);
     }
-    free(old_mode);
+    for (j = 0; j < 2; j++)
+        free(old_mode[j]);
     changes_made += n;
     gui_set_text(status, !n       ? GUI_T("Nothing was changed.")
                          : later ? GUI_T("Applied. Some changes take effect later (see each one).")

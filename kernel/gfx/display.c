@@ -48,6 +48,7 @@
 #include "mm.h"
 #include "pci.h"
 #include "radeon.h"
+#include "timing.h"
 #include "sched.h"
 #include "timer.h"
 #include "vm.h"
@@ -82,6 +83,12 @@ static struct {
     u16 bad_w, bad_h;                           /* a size the card had no mode for, or would not set */
     u8 app_ask;                                 /* the VM thread is to make it so */
     void (*app_done)(void);                     /* ... and tell this when it has */
+    /* The refresh rate ([display] refresh, G2): */
+    u16 vbe_ver;                                /* the BIOS's VBE (0300h: 3.0, which takes CRTC timings) */
+    u8 edid_asked;                              /* the monitor's EDID read (once) ... */
+    struct edid_limits edid;                    /* ... and what it said */
+    u16 hz;                                     /* the refresh the card was set to, in hundredths of a Hz (0: the
+                                                   BIOS's own) */
 } d;
 
 /* The VGA's memory as the desktop leaves it: hidden behind a spare frame, or not there (a console job's). */
@@ -126,6 +133,227 @@ static int describe(u32 mode, u8 *info)
     return ok;
 }
 
+/* VBE 3.0's calls (4F0Bh, 4F02h with CRTC timings, 4F15h) get a block of DOS's memory for the call: their stack
+   (the stub's spare 256 bytes, which the older calls fit in, are too few for these: 86Box's G400 BIOS ran past
+   them into the stub's code below, and GLOS's way out printed half a line and hung) and their buffers (the CRTC
+   block at 0, the EDID at 100h); given back after it. BIG_PARAS 4 KB, the stack's top at its end. */
+#define BIG_PARAS 0x100
+
+static u32 big_get(void)                        /* its segment, or 0 */
+{
+    struct rmregs r;
+    memset(&r, 0, sizeof r);
+    r.eax = 0x4800;
+    r.ebx = BIG_PARAS;
+    r.ss = vm.loader_cs;
+    r.sp = (u16)vm.bi->kill_sp;
+    r.flags = 2;
+    if (rm_call(0, &r, RM_INT, 0x21, 0, 0) != 0 || (r.flags & FL_CF))
+        return 0;
+    return r.eax & 0xFFFF;
+}
+
+static void big_put(u32 seg)
+{
+    struct rmregs r;
+    memset(&r, 0, sizeof r);
+    r.eax = 0x4900;
+    r.es = (u16)seg;
+    r.ss = vm.loader_cs;
+    r.sp = (u16)vm.bi->kill_sp;
+    r.flags = 2;
+    rm_call(0, &r, RM_INT, 0x21, 0, 0);
+}
+
+static int vbe_big(struct rmregs *r, u32 seg)   /* INT 10h on the block's stack: 1 if the BIOS answers 004Fh */
+{
+    int ok;
+    r->ss = (u16)seg;
+    r->sp = BIG_PARAS * 16 - 2;
+    r->flags = 2;
+    mm_vga_hide(0);
+    ok = rm_call(0, r, RM_INT, 0x10, 0, 0) == 0 && (r->eax & 0xFFFF) == 0x004F;
+    mm_vga_hide(hidden());
+    return ok;
+}
+
+/* The monitor's EDID (VBE/DDC, 4F15h BL=01h: block 0) into the block at 100h (1 KB filled with A5h first: how far
+   the BIOS wrote is logged if past the 128 bytes). Asked once (a monitor plugged in later is seen at GLOS's next
+   start). */
+static void edid_read(u32 seg)
+{
+    struct rmregs r;
+    u8 e[128], *b = vm_ptr((seg << 4) + 0x100);
+    u32 i, wrote = 0;
+    int ok;
+    if (d.edid_asked)
+        return;
+    d.edid_asked = 1;
+    memset(b, 0xA5, 1024);
+    memset(&r, 0, sizeof r);
+    r.eax = 0x4F15;
+    r.ebx = 0x01;
+    r.es = (u16)seg;
+    r.edi = 0x100;
+    vm.bios_slow = 1;                           /* (the BIOS's I2C keeps interrupts off: 86Box's G400, over 50 ms) */
+    ok = vbe_big(&r, seg);
+    vm.bios_slow = 0;
+    if (ok)
+        memcpy(e, b, 128);
+    for (i = 1024; i > 128; i--)
+        if (b[i - 1] != 0xA5) {
+            wrote = i;
+            break;
+        }
+    if (wrote)
+        kprintf("GLOS-DISPLAY edid bios-wrote=%u\n", wrote);
+    if (!ok || edid_parse(e, 128, &d.edid) != 0) {
+        kprintf("GLOS-DISPLAY edid none%s\n", ok ? " (not a good block)" : "");
+        return;
+    }
+    if (d.edid.range)
+        kprintf("GLOS-DISPLAY edid name=\"%s\" %s v=%u-%u h=%u-%u pclk=%u\n", d.edid.name,
+                d.edid.digital ? "digital" : "analogue", d.edid.vmin, d.edid.vmax, d.edid.hmin, d.edid.hmax,
+                d.edid.pclk_max);
+    else
+        kprintf("GLOS-DISPLAY edid name=\"%s\" %s no-range\n", d.edid.name, d.edid.digital ? "digital" : "analogue");
+}
+
+/* [display] refresh: the rate asked for in Hz, 0 for the BIOS's own (auto). */
+static u32 refresh_wanted(void)
+{
+    char v[8];
+    u32 hz = 0, i;
+    if (kcfg_get("display", "refresh", v, sizeof v) < 0)
+        return 0;
+    for (i = 0; v[i] >= '0' && v[i] <= '9'; i++)
+        hz = hz * 10 + (u32)(v[i] - '0');
+    return v[i] ? 0 : hz;
+}
+
+/* 4F02h (r: its EAX and EBX as the caller has them), at the refresh asked for where VBE 3.0 and the monitor allow:
+   the GTF timings for w x h at that rate, the clock made the card's nearest (4F0Bh), checked against the EDID's
+   limits, given as a CRTCInfoBlock (BX bit 11, ES:DI: the block's start), all on the block's stack. Else, or if
+   the BIOS refuses them, the BIOS's own timings, said why. 1 if the BIOS answers 004Fh. */
+static int vbe_set(struct rmregs *r, u32 w, u32 h)
+{
+    u32 hz = refresh_wanted(), mode = r->ebx & 0x1FF, bx = r->ebx, seg = 0;
+    const char *why = 0;
+    struct timing t;
+    struct rmregs c;
+    int ok;
+    d.hz = 0;
+    if (!hz)
+        return vbe(r);
+    if (d.vbe_ver < 0x300)
+        why = "the card's BIOS is not VBE 3.0";
+    else if (timing_gtf(w, h, hz, &t) != 0)
+        why = "no timing for that size and rate";
+    else if (!(seg = big_get()))
+        why = "no DOS memory for the BIOS's stack";
+    else {
+        edid_read(seg);
+        memset(&c, 0, sizeof c);
+        c.eax = 0x4F0B;
+        c.ecx = t.pclk;
+        c.edx = mode;
+        if (vbe_big(&c, seg) && c.ecx >= t.pclk / 2 && c.ecx <= t.pclk * 2)
+            timing_clock(&t, c.ecx);            /* (the clock the card can make) */
+        why = timing_check(&t, &d.edid);
+    }
+    if (why) {
+        if (seg)
+            big_put(seg);
+        kprintf("GLOS-DISPLAY refresh=bios want=%u reason=\"%s\"\n", hz, why);
+        return vbe(r);
+    }
+    timing_block(&t, vm_ptr(seg << 4));
+    r->ebx = bx | 0x0800;
+    r->es = (u16)seg;
+    r->edi = 0;
+    ok = vbe_big(r, seg);
+    big_put(seg);
+    if (ok) {
+        d.hz = t.refresh;
+        kprintf("GLOS-DISPLAY refresh=%u.%02u want=%u total=%ux%u pclk=%u h=%ukHz\n", t.refresh / 100u,
+                t.refresh % 100u, hz, t.htotal, t.vtotal, t.pclk, (t.pclk / t.htotal + 500) / 1000);
+        return 1;
+    }
+    kprintf("GLOS-DISPLAY refresh=bios want=%u reason=\"the BIOS refused the timings\" ax=%04x\n", hz, r->eax & 0xFFFF);
+    memset(r, 0, sizeof *r);
+    r->eax = 0x4F02;
+    r->ebx = bx;
+    return vbe(r);
+}
+
+/* n / d by the CPU's own divide, for a quotient that fits in 32 bits (0 if it wouldn't). */
+static u32 div64_32(u64 n, u32 d)
+{
+    u32 q, r;
+    if (!d || (u32)(n >> 32) >= d)
+        return 0;
+    __asm__("divl %4" : "=a"(q), "=d"(r) : "a"((u32)n), "d"((u32)(n >> 32)), "rm"(d));
+    return q;
+}
+
+/* The start of the next vertical retrace (the VGA's input status, 3DAh bit 3, set), waited for at most `limit`
+   of the TSC's cycles: its TSC, or 0. */
+static u64 retrace(u64 limit)
+{
+    u64 t0 = rdtsc(), t;
+    u32 was = inb(0x3DA) & 8, now;
+    while ((t = rdtsc()) - t0 < limit) {
+        now = inb(0x3DA) & 8;
+        if (now && !was)
+            return t;
+        was = now;
+    }
+    return 0;
+}
+
+/* The refresh the card makes, measured (glos display hz): the TSC's rate against the PIT (channel 2's count of
+   FFFFh, 54.925 ms, with interrupts off: the kernel's tick count was no good for it, its interrupts held up
+   around a mode change and the rate read 86 Hz for 70), then five frames, each from one retrace's start to the
+   next's with interrupts off (a retrace's pulse is a few lines long: a thread switched out meanwhile would miss
+   it), the middle one taken. Hundredths of a Hz, or 0 (no TSC: a 486; no retrace seen). Interrupts are off for
+   up to 60 ms at a time. (A read of 3DAh also resets the attribute controller's flip-flop: a diagnostic, not for
+   while a session programs the VGA.) */
+u32 display_measure_hz(void)
+{
+    u32 f, i, k, c, p[5];
+    u64 a, b;
+    if (!(vm.bi->cpuid_edx & (1u << 4)))
+        return 0;
+    f = irq_save();
+    a = rdtsc();
+    pit2_wait();
+    c = (u32)(rdtsc() - a);                     /* (the TSC's cycles in 65535 / 1193182 s) */
+    irq_restore(f);
+    for (i = 0; i < 5; i++) {
+        f = irq_save();
+        a = retrace(c);                         /* (55 ms: a frame at 18 Hz) */
+        b = a ? retrace(c) : 0;
+        irq_restore(f);
+        if (!a || !b)
+            return 0;
+        p[i] = (u32)(b - a);
+        for (k = i; k && p[k - 1] > p[k]; k--) {
+            u32 t = p[k];
+            p[k] = p[k - 1], p[k - 1] = t;
+        }
+    }
+    /* 100 x 1193182 / 65535 = 1820.6943: in ten-thousandths, then the hundredths of a Hz */
+    return div64_32((u64)c * 18206943u, p[2]) / 10000u;
+}
+
+/* [display] refresh changed (config.c): the desktop's mode set again at the new rate, if the desktop has the
+   screen (a session's: at its end). */
+void display_refresh_changed(void)
+{
+    if (d.on && !d.held)
+        display_ask(DISPLAY_ON, 0, 0, 0);
+}
+
 /* How well a mode's description fits what is wanted: 0 not at all, 2 as
    asked, 1 the 5-5-5 mode for 16 bits. */
 static u16 fit_w, fit_h;                        /* (0: the desktop's size) */
@@ -168,6 +396,7 @@ static u32 bios_modes(u16 *list, u32 max)
         r.es = (u16)seg;
         if (vbe(&r)) {
             u32 p = vm_lin(le16(vm_ptr(lin + 0x10)), le16(vm_ptr(lin + 0x0E)));
+            d.vbe_ver = (u16)le16(vm_ptr(lin + 4));
             for (; n < max && p < 0x10FFFE && vm_rd16(p) != 0xFFFF; p += 2)
                 list[n++] = vm_rd16(p);
         }
@@ -322,7 +551,8 @@ static int radeon_settle(int surfaces)
 }
 
 /* Before a mode set the BIOS makes for GLOS outside this file (a session's end puts its first mode back:
-   vm/session.c), which on a PC with no desktop is the only one: the P3's freeze at a kill was there. */
+   vm/session.c), which on a PC with no desktop is the only one: the P3's freeze at a kill was there. 0, or -1:
+   the card is stuck past two resets, and no mode set may be made. */
 int display_card_settle(void) { return radeon_settle(0) == RADEON_DEAD ? -1 : 0; }
 
 /* The desktop's mode set: 0, or -1 with why in the log. */
@@ -348,7 +578,7 @@ static int mode_set(void)
     memset(&r, 0, sizeof r);
     r.eax = 0x4F02;
     r.ebx = d.mode | 0x4000u;                   /* with its linear framebuffer */
-    if (!vbe(&r)) {
+    if (!vbe_set(&r, d.w, d.h)) {
         kprintf("GLOS-DISPLAY error=mode-set mode=%x ax=%04x\n", d.mode, r.eax & 0xFFFF);
         return -1;
     }
@@ -494,7 +724,7 @@ static void app_turn(void)                      /* (the VM thread) */
             memset(&r, 0, sizeof r);
             r.eax = 0x4F02;
             r.ebx = mode | 0x4000u | 0x8000u;   /* its linear framebuffer; the card's memory kept */
-            if (dead || !vbe(&r)) {
+            if (dead || !vbe_set(&r, w ? w : d.w, w ? h : d.h)) {
                 if (dead)
                     kprintf("GLOS-DISPLAY app error=card-stuck mode=%x\n", mode);
                 else
@@ -853,12 +1083,17 @@ u32 display_stat(char *buf, u32 max)
     u32 n;
     if (d.ask || d.turning)
         return (u32)ksnprintf(buf, max, "display changing\n");
+    char hz[16];
+    if (d.hz)
+        ksnprintf(hz, sizeof hz, "%u.%02u", d.hz / 100u, d.hz % 100u);
+    else
+        ksnprintf(hz, sizeof hz, "bios");
     if (!d.on)
         n = (u32)ksnprintf(buf, max, "display off%s\n", d.w ? "" : " (no mode given)");
     else
-        n = (u32)ksnprintf(buf, max, "display %s mode=%x %ux%ux%u pitch=%u lfb=%08x rgb=%u.%u.%u dac=%u\n",
+        n = (u32)ksnprintf(buf, max, "display %s mode=%x %ux%ux%u pitch=%u lfb=%08x rgb=%u.%u.%u dac=%u refresh=%s\n",
                            d.held ? "held" : "on", d.mode, d.w, d.h, d.bpp, d.fb.pitch, d.phys, d.fb.fmt.rsize,
-                           d.fb.fmt.gsize, d.fb.fmt.bsize, d.fb.fmt.bpp == 8 ? d.dac : 0);
+                           d.fb.fmt.gsize, d.fb.fmt.bsize, d.fb.fmt.bpp == 8 ? d.dac : 0, hz);
     if (d.on && d.app_w && n < max)             /* (a full-screen window's own mode is what the card is in) */
         n += (u32)ksnprintf(buf + n, max - n, "app mode %ux%u\n", d.app_w, d.app_h);
     if (n < max)

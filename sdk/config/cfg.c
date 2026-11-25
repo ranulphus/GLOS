@@ -24,6 +24,9 @@ const struct cfg_key cfg_schema[] = {
     { "display", "write_combining", CFG_CHOICE, CFG_RESTART, 0, 0, "auto|on|off", "auto", "Fast &framebuffer writes",
       "Write-combining for the video card's linear framebuffer, which software renderers write several times "
       "faster with: auto for the cards it has been checked on, on for any card, off" },
+    { "display", "refresh", CFG_CHOICE, CFG_NOW, 0, 0, "auto|60|70|75|85", "auto", "&Refresh rate (Hz)",
+      "The screen's refresh rate, where the card's BIOS can set one (VBE 3.0) and the monitor says it takes it "
+      "(its EDID): auto keeps the BIOS's own" },
     { "display", "gpu_watchdog", CFG_NUMBER, CFG_NOW, 50, 60000, "off", "500", "Engine &watchdog (ms)",
       "How long the desktop waits for an app's turn with the engine before ending the app" },
     { "display", "font_smoothing", CFG_CHOICE, CFG_PROGRAM, 0, 0, "on|off", "off", "Smooth &text",
