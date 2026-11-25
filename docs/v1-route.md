@@ -482,23 +482,102 @@ before that.
     Their full details are still owed.
 - **Its plan:** written after the audit, and approved by the owner like phase A's documents.
 
-### G. The release
+### G. The release (re-planned 2026-11-25: native, no FreeDOS; a DRAFT for the owner)
 
-- **The distribution (D32):** the bootable FreeDOS + GLOS image, and the installer onto an existing DOS.
-- **Bench re-verification:**
-  - G400: bench-g400 again;
-  - G450: bench #2, the Pentium 4, once its details are in;
-  - P1: DOSBench within 3% under GLOS.
-- **The open problems:**
-  - shell mode on MS-DOS 7.1;
-  - `glos ver` (done 2026-11-23: "GLOS 1.0 preview (API 2.13, built DATE)", GLOS_RELEASE in api.h, its
-    "preview" to go at the release);
-  - the intermittent direct-mode session failure on the 486;
-  - T19 windowed on the G200;
-  - the rare SSH channel message;
-  - the Xbox 360 pad.
-- **The docs:** the user guide (the Help app's), the PRD, release notes.
-- **API 2.0 frozen as GLOS's v1 API:** v1.0.
+**The owner (2026-11-25):** "we are shipping without FreeDOS and are going native". The release is native GLOS:
+GLOS's own boot sector and loader (`GLOSLDR.SYS`), its own DOS answering INT 21h, beside the PC's MS-DOS or
+Windows 9x through its start-up menu, or alone. Hosted GLOS (`GLOS.EXE` from a DOS's AUTOEXEC.BAT) goes on the
+owner's conditions of 2026-11-20 ([native-dos.md](v1/native-dos.md)): the acceptance set, the conformance program
+and the gate on native boots, the benches native beside their DOS, and native GLOS's own CD-ROM, EMS and USB mass
+storage first. Nothing of FreeDOS's is shipped or needed.
+
+Where the native work stands (the native-dos session, 2026-11-25): the boot sector, the loader and the start-up
+menu built (N3); the native 1.44 MB floppy and `install.py --native` built (N5); native-DOS machines built (N6's
+first half); the harness boots native (N7's), most suites pass natively. Not started: N4's mouse, keyboard layout,
+EMS and CD-ROM; USB mass storage partly (a stick boots through the BIOS).
+
+**G1. Native first: what hosted mode's end needs** (the native-dos session builds most of it)
+
+- **N4:**
+  - INT 33h for DOS programs in a machine (from the PS/2, serial or USB mouse GLOS reads): no CuteMouse;
+  - the keyboard layout in the machine's INT 16h and INT 09h: no KEYB;
+  - CD-ROM: ATAPI on GLOS's IDE driver, ISO 9660, MSCDEX's INT 2Fh 15xxh with its device requests, CD audio read
+    digitally into GLOS's mixer (the drive's analog output where it can't), ISO and CUE/BIN images as drives
+    (GLQuake, GTA and Half-Life ask for MSCDEX);
+  - EMS (LIM 4.0 per machine) and USB mass storage (OHCI and EHCI storage, Bulk-Only): **the owner's choice**
+    (below) whether these come before v1 or after it.
+- **N5:**
+  - an installer that runs on the PC itself (today `install.py` needs another computer), from the floppy or the
+    stick: a new disk, or GLOS in the free space beside MS-DOS or Windows, with the menu;
+  - the one command that turns a hosted install into a native one on the same volume (GLOS's boot records, DOS's
+    sector kept, `C:\GLOS` kept);
+  - XCOPY, MORE and DELTREE as built-ins of GLOS's shell (ATTRIB is in);
+  - `--free` proven end to end onto a disk with MS-DOS and onto one with Windows 98.
+- **N3:** the start-up menu's settings (`[boot]` default, timeout, names: in the schema; the loader reading
+  them, checked, with nboot cases: in progress); MS-DOS 7.1 beside GLOS on the same volume on a real bench; Windows 98 started from the menu on bench G.
+- **N7:** the gate boots native by default; the desktop suites run natively (`desk` hasn't yet); the smoke tier's
+  native profiles its default ones; hosted-only cases converted or retired; the size check moves to the native
+  floppy (below).
+- **Then hosted mode is removed**: `GLOS.EXE`'s DOS start, the DOS server, the FreeDOS floppy, FreeDOS in Loop A
+  (MS-DOS 7.1 stays there as the conformance program's reference, the owner's private image).
+
+**G2. What the release adds** (the owner's choices)
+
+- The refresh rate (2026-11-25): `[display] refresh` (auto, 60, 70, 75, 85 Hz) through VBE 3.0's CRTC timings
+  where the card's BIOS has them, limited by the monitor's EDID (DDC); elsewhere the BIOS's rate, said so.
+
+**G3. The media**
+
+- **The setup floppy**, 1.44 MB (and 1.2 MB for a 5.25-inch PC): the packed kernel, the shell, the network; the
+  apps come over the network (PKG) or from the stick. 720 KB is no longer a target: native, it leaves the kernel
+  42 KB of room; 1.44 MB leaves 774 KB, 1.2 MB 530 KB (the native-dos session's figures, kernel at 604 KB). The
+  floppy suite's size check moves to the 1.2 MB disk's room, which becomes the kernel's ceiling once the FreeDOS
+  floppy goes: a kernel growing past about 1.1 MB packed is then a decision of G's (what the floppy carries), not
+  an accident.
+- **The USB stick image** (`make usb-stick`): the whole install with the apps.
+- **A CD** (El Torito) once N4's ATAPI is in: **the owner's choice** whether v1 has one.
+
+**G4. The benches, native**
+
+Every bench boots native GLOS beside its own system and passes its checks there:
+
+- bench A: Rage 128, MS-DOS 7.1 / Windows 98 on the same volume;
+- bench B (the P3): Radeon 7500, Windows 98 SE;
+- bench C: the 486, from the setup floppy;
+- bench D: Pentium MMX, ES1887;
+- bench E;
+- bench F: P4, Radeon X550, Ubuntu beside;
+- bench G: P4, G550, already native.
+
+DOSBench within 3% under native GLOS of plain DOS (the P1 target, kept). Phase H's bench proofs still owed
+(listening on B, F and G; the ES1887; the ALS100) are done there.
+
+**G5. Must fix before v1**
+
+- The 486 with a PCI G450 stopping at its end, natively (first: whether it is 86Box's alone);
+- `thr`'s interrupts on a no-VME 486, natively;
+- the GUI scripts' races under load (`term-run`'s MODE done, `studio-step`'s chord, the Terminal's first keys);
+- the Games Library's overwritten output, and any `GLOS-WARN pmm-` line (the loose kernel frame);
+- Crystal's automatic look taking another maker's WSS codec at 534h;
+- from the old list: the intermittent direct-mode session failure on the 486, T19 windowed on the G200, the rare
+  SSH channel message, the Xbox 360 pad.
+
+Gone with hosted mode: shell mode on MS-DOS 7.1.
+
+**G6. The docs:** the Help app's guide for a native PC (installing, the start-up menu, living beside DOS or
+Windows), the PRD (D32 becomes the native distribution), the release notes, the hardware list (from phase H's
+audit).
+
+**G7. The version:** API 2.x frozen as GLOS's v1 API; `glos ver`'s "preview" removed; the packages signed with the
+release key (its private half offline).
+
+**The owner's choices for this plan:**
+
+1. EMS and USB mass storage: before v1 (hosted mode gone at v1), or after v1 (v1 native-first, hosted mode kept as
+   a documented fallback until they land)?
+2. A CD in v1, or the floppy and the stick only?
+3. The on-PC installer: a GLOS app with windows (from the stick, or the floppy's network), or text in GLOS's shell
+   (from the floppy alone)?
 
 ## Designed for the IDE (a follow-up)
 
