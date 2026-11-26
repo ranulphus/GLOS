@@ -685,13 +685,27 @@ static void more_interfaces(struct hc *h, int owner, const u8 *c, u32 len)
    through these calls; its bulk transfers go on the controller's bulk QH, after the control one, a piece of up to
    BULK_BUF at a time from the block's buffer, polled a tick at a time as control transfers are. */
 
-#define MAX_STORE 4
+#define MAX_STORE 8                     /* (taken in turn: a slot whose letters GLOS's DOS may still hold, a stick
+                                           pulled with a file open on it, is not given straight to the next one) */
 struct store {
     u8 used, dev_i;                     /* dev_i: its device's index in dev[] */
+    u8 letters;                         /* GLOS's DOS gave its volumes letters (U2) */
+    struct dhandle *handle;             /* ... under this handle */
     struct hc *h;
     struct msc m;
+    char where[32];                     /* its letters, as vdos_disk_attach said them ("D: E:") */
 };
 static struct store stores[MAX_STORE];
+static u32 store_next;
+
+/* What GLOS's DOS is given as a disk's ctx: a handle of the attach's own, never one a later stick gets (64 in a
+   ring): letters still held after a stick was pulled (a file open there) then reach nothing, never the next
+   stick in the same slot. */
+struct dhandle {
+    struct store *s;                    /* 0 once its stick has gone */
+};
+static struct dhandle handles[64];
+static u32 nhandles;
 
 /* The controller's bulk block made, its QH after the control one: 0, or -1 (no memory). */
 static int bulk_ready(struct hc *h)
@@ -709,7 +723,15 @@ static int bulk_ready(struct hc *h)
     return 0;
 }
 
-static void nap(void) { thread_sleep_until(timer_ticks() + 1); }
+/* A tick's wait in a transfer: on the VM's thread (GLOS's DOS reading the stick for a program) through
+   vdos_disk_breathe, which lets the VM's own interrupts run first; on any other thread a sleep. */
+static void nap(void)
+{
+    if (current == vm.thread)
+        vdos_disk_breathe();
+    else
+        thread_sleep_until(timer_ticks() + 1);
+}
 
 /* One piece, n bytes (at most BULK_BUF) from or into the block's buffer: 0 (got: the bytes moved; a short IN
    packet ends it early), MSC_STALL, or -1 (another error, or nothing for five seconds). The endpoint's toggle
@@ -815,6 +837,19 @@ static void st_sleep(void *ctx, u32 ms)
 
 static const struct msc_ops st_ops = { st_bulk, st_clear_halt, st_reset, st_sleep };
 
+/* GLOS's DOS's calls for the disk (vdos_disk_attach's): 512-byte sectors from the disk's own LBA. 0, or not 0. */
+static int st_read(void *ctx, unsigned long lba, unsigned char *buf, unsigned count)
+{
+    struct store *s = ((struct dhandle *)ctx)->s;
+    return !s || !s->used || msc_read(&s->m, (u32)lba, buf, count) != 0;
+}
+
+static int st_write(void *ctx, unsigned long lba, const unsigned char *buf, unsigned count)
+{
+    struct store *s = ((struct dhandle *)ctx)->s;
+    return !s || !s->used || msc_write(&s->m, (u32)lba, buf, count) != 0;
+}
+
 /* A mass-storage interface (08h, SCSI, Bulk-Only): its disk found out. */
 static void storage_start(struct hc *h, int i)
 {
@@ -823,7 +858,11 @@ static void storage_start(struct hc *h, int i)
     const char *why = "slots";
     char b[16];
     int k;
-    for (k = 0; k < MAX_STORE && stores[k].used; k++) ;
+    for (k = 0; k < MAX_STORE; k++)             /* (in turn from the last given: see MAX_STORE) */
+        if (!stores[(store_next + (u32)k) % MAX_STORE].used)
+            break;
+    if (k < MAX_STORE)
+        k = (int)((store_next + (u32)k) % MAX_STORE), store_next = (u32)k + 1;
     if (k == MAX_STORE || !d->ep_bin || !d->ep_bout || !d->ep_bin_maxp || !d->ep_bout_maxp || bulk_ready(h) != 0) {
         kprintf("GLOS-MSC port=%s refused why=%s\n", loc(d, b), k == MAX_STORE ? why : h->bulk ? "endpoints" : "memory");
         return;
@@ -843,6 +882,20 @@ static void storage_start(struct hc *h, int i)
     }
     kprintf("GLOS-MSC port=%s ready vendor=\"%s\" product=\"%s\" rev=\"%s\" blocks=%u size=%u removable=%u\n",
             loc(d, b), s->m.vendor, s->m.product, s->m.rev, s->m.blocks, s->m.block_size, s->m.removable);
+    {                                           /* (U2) its FAT volumes as drives in GLOS's own DOS */
+        char msg[64];
+        int n;
+        msg[0] = 0;
+        s->handle = &handles[nhandles++ % 64];
+        s->handle->s = s;
+        n = vdos_disk_attach(st_read, st_write, s->handle, s->m.blocks, msg, sizeof msg);
+        if (n > 0) {
+            s->letters = 1;
+            ksnprintf(s->where, sizeof s->where, "%s", msg);
+        }
+        kprintf("GLOS-MSC port=%s %s %s\n", loc(d, b), n > 0 ? "drives" : n == 0 ? "no-volume" : "no-drives",
+                msg[0] ? msg : "-");
+    }
 }
 
 static int enumerate(struct hc *h, int root, int parent, int hport, int low)
@@ -950,8 +1003,15 @@ static void detach_dev(struct hc *h, int i)
             vkbc_key(ev[k].code, 0);
         rep_code = 0;
     }
-    if (d->store) {                             /* (U2: its letters "not ready" from here on: vdos_disk_gone) */
-        stores[d->store - 1].used = 0;
+    if (d->store) {                             /* pulled out: its letters answer "not ready" from here on, and
+                                                   come free once nothing has a file open there (vdos_disk_gone) */
+        struct store *s = &stores[d->store - 1];
+        s->used = 0;
+        if (s->handle)
+            s->handle->s = 0;                   /* (its letters reach nothing from here on) */
+        if (s->letters)
+            vdos_disk_gone(s->handle);
+        s->letters = 0;
         d->store = 0;
         kprintf("GLOS-MSC port=%s gone\n", loc(d, b));
     }
@@ -1284,9 +1344,10 @@ u32 usb_dev_lines(char *b, u32 room)
                                 dev[i].low ? "low" : "full", dev[i].reports, dev[i].errors);
             if (dev[i].store && n + 120 < room) {       /* (a disk: what it says it is, and its size) */
                 const struct msc *m = &stores[dev[i].store - 1].m;
-                n += (u32)ksnprintf(b + n, room - n, "  disk %s %s, %u blocks of %u (%u MB), %u commands, %u resets\n",
+                n += (u32)ksnprintf(b + n, room - n, "  disk %s %s, %u blocks of %u (%u MB), %u commands, %u resets%s%s\n",
                                     m->vendor, m->product, m->blocks, m->block_size, m->blocks / 2048, m->commands,
-                                    m->resets);
+                                    m->resets, stores[dev[i].store - 1].letters ? ", drives " : "",
+                                    stores[dev[i].store - 1].letters ? stores[dev[i].store - 1].where : "");
             }
         }
     return n;
