@@ -39,3 +39,30 @@ u32 uhci_control_tds(struct uhci_td *td, u32 max, u32 td_phys, const u8 setup[8]
         td[i].link = i + 1 < n ? (td_phys + (i + 1) * (u32)sizeof *td) | UHCI_LP_VF : UHCI_LP_T;
     return n;
 }
+
+/* (2026-11-26, USB mass storage's U1: docs/v1/usb-storage.md) A bulk transfer's TDs: len bytes at data_phys in
+   packets of maxp, each with the endpoint's next data toggle (from *toggle, which is left at the one after the last
+   packet built: the caller puts back what the packets that were not done would have used), IN ones with short
+   packet detect, all linked depth first, the last with IOC. How many, or 0 (too many for max, or no packets). */
+u32 uhci_bulk_tds(struct uhci_td *td, u32 max, u32 td_phys, int in, u32 data_phys, u32 len, u32 addr, u32 ep,
+                  u32 maxp, u32 *toggle)
+{
+    u32 n = 0, done = 0, i, t = *toggle & 1;
+    if (!maxp || !len || max < (len + maxp - 1) / maxp)
+        return 0;
+    while (done < len) {
+        u32 now = len - done < maxp ? len - done : maxp;
+        td[n].ctrl = UHCI_TD_ACTIVE | UHCI_TD_CERR3 | (in ? UHCI_TD_SPD : 0);
+        td[n].token = token(in ? USB_PID_IN : USB_PID_OUT, addr, ep, t, now);
+        td[n].buf = data_phys + done;
+        t ^= 1;
+        done += now;
+        n++;
+    }
+    td[n - 1].ctrl |= UHCI_TD_IOC;
+    for (i = 0; i < n; i++)
+        td[i].link = i + 1 < n ? (td_phys + (i + 1) * (u32)sizeof *td) | UHCI_LP_VF : UHCI_LP_T;
+    *toggle = t;
+    return n;
+}
+

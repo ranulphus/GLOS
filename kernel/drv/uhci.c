@@ -33,6 +33,7 @@
 #include "kcfg.h"
 #include "kprintf.h"
 #include "mm.h"
+#include "msc.h"
 #include "pci.h"
 #include "sched.h"
 #include "timer.h"
@@ -88,7 +89,20 @@ struct hc {
     u8 ports, slow_reset;
     u8 port_dev[2];                     /* the device on each root port: its index + 1, 0 none */
     u8 tries[2];                        /* attempts at the device there since it connected (3 at most) */
+    /* (U1) control transfers from more than one thread (the usb thread's, a disk's reader's): one at a time */
+    volatile u8 ctrl_busy, bulk_busy;
+    struct waitq ctrl_q, bulk_q;
+    /* bulk transfers (a mass-storage device's), a block of their own: the QH after the control one, BULK_TDS TDs
+       and a BULK_BUF buffer; one transfer at a time (bulk_busy) */
+    u8 *bulk;
+    u32 bulk_phys;
+    struct uhci_qh *qh_bulk;
+    struct uhci_td *td_bulk;
+    u8 *bulk_buf;
 };
+#define BULK_TDS 256
+#define BULK_BUF 16384                  /* (256 packets of 64) */
+#define BPHYS(h, p) ((h)->bulk_phys + (u32)((const u8 *)(p) - (h)->bulk))
 
 static struct hc hc[MAX_HC];
 static int nhc;
@@ -165,7 +179,44 @@ static void reset(struct hc *h)
 
 /* One control transfer to a device: 0, or -1 (the step's TD status logged by the caller in *status). data: in, the
    buffer filled (up to setup's length; *got the bytes that came); out, its bytes sent. */
+static void take_lock(volatile u8 *busy, struct waitq *q)
+{
+    for (;;) {
+        u32 f = irq_save();
+        if (!*busy) {
+            *busy = 1;
+            irq_restore(f);
+            return;
+        }
+        irq_restore(f);
+        thread_wait(q, timer_ticks() + 2);
+    }
+}
+
+static void give_lock(volatile u8 *busy, struct waitq *q)
+{
+    u32 f = irq_save();
+    *busy = 0;
+    thread_wake(q);
+    irq_restore(f);
+}
+
+static int control_raw(struct hc *h, u32 addr, u32 maxp, int low, const u8 setup[8], void *data, u32 *got,
+                       u32 *status);
+
 static int control(struct hc *h, u32 addr, u32 maxp, int low, const u8 setup[8], void *data, u32 *got, u32 *status)
+{
+    int r;
+    if (leaving)
+        return control_raw(h, addr, maxp, low, setup, data, got, status);
+    take_lock(&h->ctrl_busy, &h->ctrl_q);
+    r = control_raw(h, addr, maxp, low, setup, data, got, status);
+    give_lock(&h->ctrl_busy, &h->ctrl_q);
+    return r;
+}
+
+static int control_raw(struct hc *h, u32 addr, u32 maxp, int low, const u8 setup[8], void *data, u32 *got,
+                       u32 *status)
 {
     u32 len = setup[6] | (u32)setup[7] << 8, n, i, t0 = timer_ticks(), moved = 0;
     int in = setup[0] & 0x80;
@@ -243,6 +294,10 @@ static const char *what(const struct usb_dev *d)
         return "xbox360";
     if (c == 0xFF && s == 0x47 && p == 0xD0)
         return "xbox-gip";
+    if (c == 0x08 && s == 0x06 && p == 0x50)
+        return "storage";
+    if (c == 0x08)
+        return "storage-other";             /* (UFI floppies, SFF-8070i, CBI: not done) */
     return "other";
 }
 
@@ -267,6 +322,13 @@ static void parse_config(struct usb_dev *d, const u8 *c, u32 len, u32 want)
             }
         } else if (c[at + 1] == 0x21 && c[at] >= 9 && mine && c[at + 6] == 0x22) {   /* HID: its report */
             d->hid_rlen = (u16)(c[at + 7] | c[at + 8] << 8);
+        } else if (c[at + 1] == 5 && c[at] >= 7 && mine && (c[at + 3] & 3) == 2) {     /* endpoint: bulk */
+            if (c[at + 2] & 0x80) {
+                if (!d->ep_bin)
+                    d->ep_bin = c[at + 2], d->ep_bin_maxp = (u16)((c[at + 4] | c[at + 5] << 8) & 0x7FF);
+            } else if (!d->ep_bout) {
+                d->ep_bout = c[at + 2], d->ep_bout_maxp = (u16)((c[at + 4] | c[at + 5] << 8) & 0x7FF);
+            }
         } else if (c[at + 1] == 5 && c[at] >= 7 && mine && (c[at + 3] & 3) == 3) {     /* endpoint: interrupt */
             if (c[at + 2] & 0x80) {
                 if (!d->ep_in)
@@ -619,6 +681,170 @@ static void more_interfaces(struct hc *h, int owner, const u8 *c, u32 len)
 
 /* A device just reset on a port (a root port, or port hport of the hub parent - 1): its address, descriptors and
    configuration; then what it is gets started. Its index, or -1. */
+/* ---- bulk transfers and mass-storage devices (U1: docs/v1/usb-storage.md). A device's disk is msc.c's, reached
+   through these calls; its bulk transfers go on the controller's bulk QH, after the control one, a piece of up to
+   BULK_BUF at a time from the block's buffer, polled a tick at a time as control transfers are. */
+
+#define MAX_STORE 4
+struct store {
+    u8 used, dev_i;                     /* dev_i: its device's index in dev[] */
+    struct hc *h;
+    struct msc m;
+};
+static struct store stores[MAX_STORE];
+
+/* The controller's bulk block made, its QH after the control one: 0, or -1 (no memory). */
+static int bulk_ready(struct hc *h)
+{
+    if (h->bulk)
+        return 0;
+    if (!(h->bulk = dma_alloc((32 + BULK_TDS * 32 + BULK_BUF + 4095) / 4096, &h->bulk_phys)))
+        return -1;
+    h->qh_bulk = (struct uhci_qh *)h->bulk;     /* the QH at 0, the TDs at 32, the buffer after them */
+    h->td_bulk = (struct uhci_td *)(h->bulk + 32);
+    h->bulk_buf = h->bulk + 32 + BULK_TDS * 32;
+    h->qh_bulk->head = UHCI_LP_T;
+    h->qh_bulk->elem = UHCI_LP_T;
+    h->qh_ctrl->head = BPHYS(h, h->qh_bulk) | UHCI_LP_Q;
+    return 0;
+}
+
+static void nap(void) { thread_sleep_until(timer_ticks() + 1); }
+
+/* One piece, n bytes (at most BULK_BUF) from or into the block's buffer: 0 (got: the bytes moved; a short IN
+   packet ends it early), MSC_STALL, or -1 (another error, or nothing for five seconds). The endpoint's toggle
+   moves on by the packets done. */
+static int bulk_piece(struct hc *h, struct usb_dev *d, int in, u32 n, u32 *got)
+{
+    u32 maxp = in ? d->ep_bin_maxp : d->ep_bout_maxp, ep = (u32)(in ? d->ep_bin : d->ep_bout) & 0xF;
+    u8 *tog = in ? &d->tog_bin : &d->tog_bout;
+    u32 t = *tog, cnt, i, moved = 0, done = 0, t0 = timer_ticks();
+    int r = 0, end = 0;
+    cnt = uhci_bulk_tds(h->td_bulk, BULK_TDS, BPHYS(h, h->td_bulk), in, BPHYS(h, h->bulk_buf), n, d->addr, ep, maxp,
+                        &t);
+    if (!cnt)
+        return -1;
+    h->qh_bulk->elem = BPHYS(h, h->td_bulk);    /* (the controller takes it from the next frame on) */
+    while (!end) {
+        for (i = done; i < cnt; i++) {
+            u32 c = h->td_bulk[i].ctrl;
+            if (c & UHCI_TD_ACTIVE)
+                break;
+            if (c & UHCI_TD_ERRORS) {
+                r = c & UHCI_TD_STALLED ? MSC_STALL : -1;
+                end = 1;
+                break;
+            }
+            moved += UHCI_TD_ACTLEN(c);
+            done = i + 1;
+            if (in && UHCI_TD_ACTLEN(c) < (((h->td_bulk[i].token >> 21) + 1) & 0x7FFu)) {
+                end = 1;                        /* a short packet: the device has no more */
+                break;
+            }
+        }
+        if (end || done == cnt)
+            break;
+        if (timer_ticks() - t0 > 5 * 1024) {
+            r = -1;
+            break;
+        }
+        nap();
+    }
+    h->qh_bulk->elem = UHCI_LP_T;
+    *tog = (u8)((*tog + done) & 1);
+    *got = moved;
+    return r;
+}
+
+static int st_bulk(void *ctx, int in, void *buf, u32 len, u32 *got)
+{
+    struct store *s = ctx;
+    struct hc *h = s->h;
+    struct usb_dev *d = &dev[s->dev_i];
+    u32 done = 0;
+    int r = 0;
+    *got = 0;
+    if (!s->used || !d->used || d->store != (u8)(s - stores + 1))
+        return -1;                              /* (it has gone) */
+    take_lock(&h->bulk_busy, &h->bulk_q);
+    while (done < len) {
+        u32 n = len - done < BULK_BUF ? len - done : BULK_BUF, g = 0;
+        if (!in)
+            memcpy(h->bulk_buf, (u8 *)buf + done, n);
+        r = bulk_piece(h, d, in, n, &g);
+        if (in)
+            memcpy((u8 *)buf + done, h->bulk_buf, g);
+        done += g;
+        if (r != 0 || g < n)
+            break;                              /* (an error, a stall or a short packet ends the transfer) */
+    }
+    give_lock(&h->bulk_busy, &h->bulk_q);
+    *got = done;
+    return r;
+}
+
+static int st_clear_halt(void *ctx, int in)
+{
+    struct store *s = ctx;
+    struct usb_dev *d = &dev[s->dev_i];
+    u8 setup[8] = { 0x02, 0x01, 0, 0, 0, 0, 0, 0 };     /* CLEAR_FEATURE(ENDPOINT_HALT) to the endpoint */
+    u32 status = 0;
+    setup[4] = in ? d->ep_bin : d->ep_bout;
+    if (in)
+        d->tog_bin = 0;
+    else
+        d->tog_bout = 0;
+    return control(s->h, d->addr, d->maxp0, d->low, setup, 0, 0, &status);
+}
+
+static int st_reset(void *ctx)
+{
+    struct store *s = ctx;
+    struct usb_dev *d = &dev[s->dev_i];
+    u8 setup[8] = { 0x21, 0xFF, 0, 0, 0, 0, 0, 0 };     /* Bulk-Only Mass Storage Reset, to the interface */
+    u32 status = 0;
+    setup[4] = d->ifnum;
+    return control(s->h, d->addr, d->maxp0, d->low, setup, 0, 0, &status);
+}
+
+static void st_sleep(void *ctx, u32 ms)
+{
+    (void)ctx;
+    wait_ms(ms);
+}
+
+static const struct msc_ops st_ops = { st_bulk, st_clear_halt, st_reset, st_sleep };
+
+/* A mass-storage interface (08h, SCSI, Bulk-Only): its disk found out. */
+static void storage_start(struct hc *h, int i)
+{
+    struct usb_dev *d = &dev[i];
+    struct store *s;
+    const char *why = "slots";
+    char b[16];
+    int k;
+    for (k = 0; k < MAX_STORE && stores[k].used; k++) ;
+    if (k == MAX_STORE || !d->ep_bin || !d->ep_bout || !d->ep_bin_maxp || !d->ep_bout_maxp || bulk_ready(h) != 0) {
+        kprintf("GLOS-MSC port=%s refused why=%s\n", loc(d, b), k == MAX_STORE ? why : h->bulk ? "endpoints" : "memory");
+        return;
+    }
+    s = &stores[k];
+    memset(s, 0, sizeof *s);
+    s->used = 1, s->h = h, s->dev_i = (u8)i;
+    s->m.ops = &st_ops, s->m.ctx = s;
+    d->store = (u8)(k + 1);
+    d->tog_bin = d->tog_bout = 0;
+    if (msc_start(&s->m, &why) != 0) {
+        kprintf("GLOS-MSC port=%s refused why=%s sense=%x/%02x/%02x commands=%u resets=%u\n", loc(d, b), why,
+                s->m.sense_key, s->m.asc, s->m.ascq, s->m.commands, s->m.resets);
+        s->used = 0;
+        d->store = 0;
+        return;
+    }
+    kprintf("GLOS-MSC port=%s ready vendor=\"%s\" product=\"%s\" rev=\"%s\" blocks=%u size=%u removable=%u\n",
+            loc(d, b), s->m.vendor, s->m.product, s->m.rev, s->m.blocks, s->m.block_size, s->m.removable);
+}
+
 static int enumerate(struct hc *h, int root, int parent, int hport, int low)
 {
     struct usb_dev *d;
@@ -699,6 +925,8 @@ static int enumerate(struct hc *h, int root, int parent, int hport, int low)
                 d->iproto, d->is);
     if (d->nif > 1 && !d->nports)               /* a combined keyboard and mouse's other interfaces: an entry each */
         more_interfaces(h, i, buf, got);
+    if (d->is && !strcmp(d->is, "storage"))     /* (after its line: the disk's own come next) */
+        storage_start(h, i);
     return i;
 }
 
@@ -721,6 +949,11 @@ static void detach_dev(struct hc *h, int i)
         for (k = 0; k < n; k++)
             vkbc_key(ev[k].code, 0);
         rep_code = 0;
+    }
+    if (d->store) {                             /* (U2: its letters "not ready" from here on: vdos_disk_gone) */
+        stores[d->store - 1].used = 0;
+        d->store = 0;
+        kprintf("GLOS-MSC port=%s gone\n", loc(d, b));
     }
     kprintf("GLOS-USB port=%s gone\n", loc(d, b));
     if (d->parent && !d->owner && d->hport >= 1 && d->hport <= 8)
@@ -1049,6 +1282,12 @@ u32 usb_dev_lines(char *b, u32 room)
                                 dev[i].vendor, dev[i].product, dev[i].dclass ? dev[i].dclass : dev[i].iclass,
                                 dev[i].dclass ? dev[i].dsub : dev[i].isub, dev[i].dclass ? dev[i].dproto : dev[i].iproto,
                                 dev[i].low ? "low" : "full", dev[i].reports, dev[i].errors);
+            if (dev[i].store && n + 120 < room) {       /* (a disk: what it says it is, and its size) */
+                const struct msc *m = &stores[dev[i].store - 1].m;
+                n += (u32)ksnprintf(b + n, room - n, "  disk %s %s, %u blocks of %u (%u MB), %u commands, %u resets\n",
+                                    m->vendor, m->product, m->blocks, m->block_size, m->blocks / 2048, m->commands,
+                                    m->resets);
+            }
         }
     return n;
 }

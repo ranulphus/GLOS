@@ -50,6 +50,24 @@ int main(void)
     CHECK(n == 3 && addr(&td[1]) == 5 && maxlen(&td[1]) == 64 && pid(&td[2]) == USB_PID_OUT);
     CHECK(uhci_control_tds(td, 4, 0x1000, get_dev, 0x2000, 0x3000, 0, 8, 0) == 0);
 
+    /* (U1) a bulk IN of 150 bytes on endpoint 2 with 64-byte packets from DATA1: 64, 64, 22, toggles 1 0 1, short
+       packet detect on each, IOC on the last; the toggle left at 0. A bulk OUT of 64 from DATA0: one packet. */
+    {
+        u32 tg = 1;
+        memset(td, 0, sizeof td);
+        n = uhci_bulk_tds(td, 16, 0x4000, 1, 0x5000, 150, 9, 2, 64, &tg);
+        CHECK(n == 3 && tg == 0);
+        CHECK(pid(&td[0]) == USB_PID_IN && addr(&td[0]) == 9 && (td[0].token >> 15 & 0xF) == 2);
+        CHECK(toggle(&td[0]) == 1 && toggle(&td[1]) == 0 && toggle(&td[2]) == 1);
+        CHECK(maxlen(&td[0]) == 64 && maxlen(&td[2]) == 22 && td[2].buf == 0x5080);
+        CHECK((td[0].ctrl & UHCI_TD_SPD) && (td[2].ctrl & UHCI_TD_IOC) && !(td[0].ctrl & UHCI_TD_IOC));
+        CHECK(td[0].link == (0x4020 | UHCI_LP_VF) && td[2].link == UHCI_LP_T);
+        tg = 0;
+        n = uhci_bulk_tds(td, 16, 0x4000, 0, 0x5000, 64, 9, 1, 64, &tg);
+        CHECK(n == 1 && tg == 1 && pid(&td[0]) == USB_PID_OUT && !(td[0].ctrl & UHCI_TD_SPD));
+        tg = 0;
+        CHECK(uhci_bulk_tds(td, 2, 0x4000, 1, 0x5000, 200, 9, 2, 64, &tg) == 0 && tg == 0);    /* (too many) */
+    }
     printf("uhci_test: %d failures\n", fails);
     return fails != 0;
 }

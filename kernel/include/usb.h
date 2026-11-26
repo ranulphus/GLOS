@@ -44,6 +44,12 @@ struct uhci_qh {
 u32 uhci_control_tds(struct uhci_td *td, u32 max, u32 td_phys, const u8 setup[8], u32 setup_phys, u32 data_phys,
                      u32 addr, u32 maxp, int low);
 
+/* (USB mass storage, U1) A bulk transfer's TDs: len bytes in packets of maxp to or from data_phys on endpoint ep,
+   the toggles from *toggle on (left at the next one); IN with short packet detect; the last with IOC. How many, or
+   0. (No I/O: host tested.) */
+u32 uhci_bulk_tds(struct uhci_td *td, u32 max, u32 td_phys, int in, u32 data_phys, u32 len, u32 addr, u32 ep,
+                  u32 maxp, u32 *toggle);
+
 struct usb_dev {
     u8 used, addr, port, low;
     u8 maxp0, config, nif;
@@ -67,6 +73,10 @@ struct usb_dev {
     u8 nports, hub_dirty;               /* its ports (8 at most); a change came on its status pipe */
     u8 child[8], ctries[8];             /* the device on each of its ports (index + 1), attempts at it */
     u32 reports, errors;
+    /* a mass-storage interface's (U1: docs/v1/usb-storage.md): its bulk endpoints, their toggles, its disk */
+    u8 ep_bin, ep_bout, tog_bin, tog_bout;
+    u16 ep_bin_maxp, ep_bout_maxp;
+    u8 store;                           /* its disk: the storage slot + 1 (0 none) */
 };
 
 #define USB_KIND_KBD    3               /* a boot keyboard: its keys as PS/2 ones (usbkbd.c) */
