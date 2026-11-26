@@ -1125,10 +1125,12 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   (2026-11-26):** ems.c host-tested (ems_test); emsvm.c: the frame the first free 64 KB from C800h below E0000h
   (umapage's rules), up to 8 MB and half the free memory, frames taken when pages are allocated, zeroed;
   INT 67h at an ARPL (V67, the twelfth: DOS_MISC's last room) in a block with EMMXXXX0's header; EMMXXXX0 a
-  DOS device name while EMS is on. On by default natively (an EMS nobody uses costs the window alone); the
-  [memory] ems setting waits for the GLOS session (the Control Panel's goldens). `jobs.py cdrom`'s ems case:
-  EMSTEST's checks, the frame at C800h with 512 pages, on the bf6 and the 486: PASS. Owed: games that want EMS,
-  native machines' own EMS.
+  DOS device name while EMS is on. On by default natively (an EMS nobody uses costs the window alone).
+  [memory] ems = auto (8 MB), off, or the KB (64 to 32768, whole 16 KB pages; half the free memory at most), on
+  the Control Panel's Memory page; EMS starts before the kernel reads GLOS.CFG, so the loader reads the key into
+  bootinfo 16's ems_kb (0 auto, BI_EMS_OFF off). `jobs.py cdrom`'s ems case: EMSTEST's checks, the frame at C800h
+  with 512 pages, then 1024 KB (64 pages) and off (no EMMXXXX0, reason=setting) after a restart each, on the bf6
+  and the 486: PASS. Owed: games that want EMS, native machines' own EMS.
 - **N4, the keyboard's layout (2026-11-25, native-dos; KEYB's work):** the system VM's INT 09h is an ARPL of GLOS's
   in front of the BIOS's handler (kernel/vm/vkeyb.c). A key pressed whose character on [region] layout (keymap.h:
   Shift, Caps Lock, Num Lock, AltGr from the BIOS's flags) differs from the US one, and the 102nd key, GLOS answers:
