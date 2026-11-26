@@ -565,7 +565,8 @@ DOSBench within 3% under native GLOS of plain DOS (the P1 target, kept). Phase H
 
 - The 486 with a PCI G450 stopping at its end, natively (first: whether it is 86Box's alone);
 - `thr`'s interrupts on a no-VME 486, natively;
-- the GUI scripts' races under load (`term-run`'s MODE done, `studio-step`'s chord, the Terminal's first keys);
+- the GUI scripts' races under load (`term-run`'s MODE done, the Terminal's first keys; `studio-step`'s chord
+  mended 2026-11-26);
 - the Games Library's overwritten output, and any `GLOS-WARN pmm-` line (the loose kernel frame);
 - ~~Crystal's automatic look taking another maker's WSS codec at 534h~~ (closed 2026-11-25: its control port must
   answer too);
@@ -718,6 +719,12 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
   own, and the Terminal had not taken it in when the screen came back; 9 of 9 alone pass); `studio-step` on the
   486 lost the chord's third key (`z c b`: note 62 at 960 never said; 5 of 5 alone pass, one in three beside two
   other emulators). Neither is new code's; both are to be chased like the Games Library's: instrument, then fix.
+  **studio-step mended 2026-11-26:** Studio took a key as the chord's if the keys before it were held on the
+  keyboard *now* (glos_keys) when it handled the key's down; on a loaded 486 it handled B's down after the script
+  had let go of Z and C, so B was a new step. The toolkit now gives an app the keys let go of (`on_key_up`), and
+  Studio follows its piano keys' downs and ups in the events' order (held at most two seconds, for an up that
+  went to another window). Three rounds on the 486 beside two other emulators: all pass. term-run's is still open
+  (12 of 12 passed beside two others, 2026-11-25).
 
 - **The AcerMagic S20's MIDI tone missed under load** (2026-11-25, twice: here beside two other emulators, and in
   the native-dos session's gate on 8b46ef0 with eight): `audio-bf6-g200-acermagic_s20`'s recording lacks the

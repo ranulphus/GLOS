@@ -222,6 +222,10 @@ struct gui_window {
     unsigned last_press_time;
     int last_press_x, last_press_y;
     unsigned last_press_button;
+    void (*on_key_up)(struct gui_window *w, struct gui_ev *e);  /* (2026-11-26) a key let go of, in the order of
+                                                   the events (no widget has it): for an app that wants keys held
+                                                   together as the events had them, not as the keyboard is now
+                                                   (MIDI Studio's chords); 0: none */
 };
 
 int gui_init(int argc, char **argv);    /* the app (glos_init): 0, or -1 without GLOS */

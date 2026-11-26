@@ -1216,11 +1216,29 @@ static void chord_reset(void)
     memset(chord_keys, 0, sizeof chord_keys);
 }
 
+/* The PC's piano keys held as the window's key events have them (down, then up: on_key_up), not as the keyboard is
+   now: a chord's third key handled after the first two were let go of on the keyboard, but before their ups came
+   in the events, is still the chord's (the 486 beside two other emulators: one in three, 2026-11-25). */
+static unsigned char pc_held[24];
+static unsigned pc_down_ms[24], pc_now_ms;      /* (when each went down, and the key event being handled: a key
+                                                   whose up went to another window, the focus gone meanwhile,
+                                                   is held for a chord's two seconds at most) */
+
+static void key_up(struct gui_window *w, struct gui_ev *e)
+{
+    int n = pc_key(e->key);
+    (void)w;
+    if (n >= PC_BASE && n < PC_BASE + 24)
+        pc_held[n - PC_BASE] = 0;
+}
+
 static int key_held(unsigned key, const struct glos_keys *k)
 {
+    (void)k;
     if (midi_held[key])
         return 1;
-    return key >= PC_BASE && key < PC_BASE + 24 && GLOS_KEY_DOWN(k, pc_keys[key - PC_BASE]);
+    return key >= PC_BASE && key < PC_BASE + 24 && pc_held[key - PC_BASE]
+        && pc_now_ms - pc_down_ms[key - PC_BASE] < 2000;
 }
 
 static void step_note(unsigned key, unsigned force)
@@ -1927,7 +1945,13 @@ static int key(struct gui_window *w, struct gui_ev *e)
     }
     if (stepping && !recording) {               /* step entry's keys */
         if (!(e->mods & ~GLOS_MOD_SHIFT) && pc_key(e->key) >= 0) {
-            step_note((unsigned)pc_key(e->key), e->mods & GLOS_MOD_SHIFT ? 127 : 100);   /* (Shift: an accent) */
+            int n = pc_key(e->key);
+            pc_now_ms = e->time;
+            step_note((unsigned)n, e->mods & GLOS_MOD_SHIFT ? 127 : 100);   /* (Shift: an accent) */
+            if (n >= PC_BASE && n < PC_BASE + 24) {
+                pc_held[n - PC_BASE] = 1;       /* (after: a key's own down is not a chord with itself) */
+                pc_down_ms[n - PC_BASE] = e->time;
+            }
             return 1;
         }
         if (!e->mods && e->key == 0x39) {       /* Space: a rest */
@@ -1973,6 +1997,7 @@ static void build(void)
     win->on_command = command;
     win->on_update = update;
     win->on_key = key;
+    win->on_key_up = key_up;
     win->on_close = closing;
     gui_command(win, C_NEW, GUI_T("&New"), "Ctrl+N", gui_glyph("new"), GUI_T("A new song"));
     gui_command(win, C_OPEN, GUI_T("&Open..."), "Ctrl+O", gui_glyph("open"), GUI_T("Open a MIDI file"));

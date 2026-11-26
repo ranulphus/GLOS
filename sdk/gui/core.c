@@ -1283,8 +1283,18 @@ static void dispatch(const struct os_event *ev)
         gui_tip_hide();                         /* (a key, the wheel, a press, the keyboard gone: no tooltip) */
     switch (ev->type) {
     case OS_KEY:
-        if (deaf(w) || !ev->down)
+        if (deaf(w))
             return;
+        if (!ev->down) {                        /* a key let go of: to the window that asked for them */
+            if (w->on_key_up) {
+                struct gui_ev e;
+                memset(&e, 0, sizeof e);
+                e.type = GUI_EV_KEY;
+                e.key = ev->key, e.mods = ev->mods, e.time = ev->time;
+                w->on_key_up(w, &e);
+            }
+            return;
+        }
         key(w, ev);
         break;
     case OS_MOUSE:
