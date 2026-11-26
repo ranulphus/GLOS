@@ -87,6 +87,48 @@ u32 ohci_bulk_tds(struct ohci_td *td, u32 max, u32 td_phys, int in, u32 data_phy
 /* The bytes a retired TD moved. */
 u32 ohci_td_moved(const struct ohci_td *td);
 
+/* EHCI's queue head and queue element transfer descriptor (the EHCI specification 1.0, §3.6 and §3.5): a qTD is 32
+   bytes, 32-byte aligned, five buffer pages (20 KB at most, less the first page's offset); a QH is 48 bytes for the
+   controller (its overlay the qTD under way), 64 here so that an array keeps them 32-byte aligned. */
+struct ehci_qtd {
+    volatile u32 next;                  /* the next qTD, | T (1: none) */
+    volatile u32 alt;                   /* where a short packet goes on to (T: the queue stops) */
+    volatile u32 token;                 /* status, PID, errors, the page under way, bytes left, the toggle */
+    volatile u32 buf[5];
+};
+struct ehci_qh {
+    volatile u32 link;                  /* the next QH, | type QH (2) | T */
+    volatile u32 ep1;                   /* address, endpoint, speed, DTC, H (the list's head), max packet, NAK reload */
+    volatile u32 ep2;                   /* (interrupt and split fields) Mult */
+    volatile u32 cur;                   /* the controller's: the qTD under way */
+    volatile u32 next, alt, token;      /* the overlay: the qTD under way, as the controller has it */
+    volatile u32 buf[5];
+    u32 sw[4];
+};
+
+#define EHCI_T          0x1u
+#define EHCI_LINK_QH    0x2u
+#define EHCI_TOK_ACTIVE (1u << 7)
+#define EHCI_TOK_HALTED (1u << 6)
+#define EHCI_TOK_ERRORS 0x7Cu           /* halted, buffer error, babble, transaction error, missed micro-frame */
+#define EHCI_TOK_LEFT(t) (((t) >> 16) & 0x7FFF)
+
+/* A high-speed endpoint's QH words: ep1 (head: the asynchronous list's head, H) and ep2. The toggles come from
+   the qTDs (DTC), so one QH serves every endpoint in turn. */
+u32 ehci_qh_ep1(u32 addr, u32 ep, u32 maxp, int head);
+u32 ehci_qh_ep2(void);
+/* A control transfer's qTDs: SETUP (DATA0), the data stage in one qTD (DATA1; up to 16 KB), the status stage the
+   other way (DATA1, its interrupt-on-complete set); linked, the last's next T. How many, or 0. (No I/O.) */
+u32 ehci_control_qtds(struct ehci_qtd *q, u32 max, u32 q_phys, const u8 setup[8], u32 setup_phys, u32 data_phys);
+/* A bulk transfer's qTDs, 16 KB each at most (a multiple of every high-speed max packet size, so that only the
+   last can end short), each from the toggle its packets before it leave, *toggle the endpoint's; an IN one that
+   ends short stops the queue (alt T). How many, or 0. */
+u32 ehci_bulk_qtds(struct ehci_qtd *q, u32 max, u32 q_phys, int in, u32 data_phys, u32 len, u32 maxp, u32 toggle);
+/* The bytes a qTD moved (asked: what it was given), and an endpoint's toggle after a transfer that moved `moved`
+   bytes of `asked` from `toggle` (each packet flips it; a zero-length one too). */
+u32 ehci_qtd_moved(const struct ehci_qtd *q, u32 asked);
+u32 ehci_toggle_after(u32 toggle, u32 moved, u32 asked, u32 maxp);
+
 struct usb_dev {
     u8 used, addr, port, low;
     u8 maxp0, config, nif;
