@@ -13729,7 +13729,7 @@ def main():
     ap.add_argument("--native", action="store_true", help="the native variant: every case's PC starts GLOS from a "
                     "disk with no DOS on it (docs/v1/native-dos.md); cases that need a DOS under GLOS are skipped")
     a = ap.parse_args()
-    if a.native:
+    if a.native or a.suite == "cdrom":         # (cdrom: GLOS's own CD-ROM driver and MSCDEX are a native boot's)
         global NATIVE
         NATIVE = True
     if a.suite == "refuse":

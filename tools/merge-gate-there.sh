@@ -16,7 +16,9 @@ t0=$(date +%s)
 bad=0
 
 line() {
-    echo "$1 exit=$2 $(( $3 / 60 )) min pass=$(grep -c ' PASS' "$4") fail=$(grep -c ' FAIL' "$4")"
+    local skip
+    skip=$(grep -c ' SKIP' "$4" || true)        # (said where there are any)
+    echo "$1 exit=$2 $(( $3 / 60 )) min pass=$(grep -c ' PASS' "$4") fail=$(grep -c ' FAIL' "$4")$([ "$skip" -gt 0 ] && echo " skip=$skip")"
 }
 
 # Built first, one thing at a time: RetroGPU's DOS tools, GLOS, and what each suite wants built (its make

@@ -49,7 +49,8 @@ cat out/gate/summary.txt
 for s in $HERE; do
     s0=$(date +%s) rc=0
     make -s JOBS=3 "$s" > "out/gate/$s.log" 2>&1 || rc=$?
-    l="$s (here) exit=$rc $(( ($(date +%s) - s0) / 60 )) min pass=$(grep -c ' PASS' "out/gate/$s.log") fail=$(grep -c ' FAIL' "out/gate/$s.log")"
+    k=$(grep -c ' SKIP' "out/gate/$s.log")      # (skips said where there are any)
+    l="$s (here) exit=$rc $(( ($(date +%s) - s0) / 60 )) min pass=$(grep -c ' PASS' "out/gate/$s.log") fail=$(grep -c ' FAIL' "out/gate/$s.log")$([ "$k" -gt 0 ] && echo " skip=$k")"
     echo "$l" | tee -a out/gate/here.txt
     if [ $rc -ne 0 ]; then
         bad=1

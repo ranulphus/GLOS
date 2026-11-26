@@ -39,7 +39,7 @@ HOST_SUITES="host-test gui-goldens"
 LOOPA_SUITES="loopa-sess loopa-api loopa-ssh loopa-desk loopa-win loopa-display loopa-games loopa-glwin
     loopa-audio loopa-m1 loopa-apps loopa-gpu loopa-gui loopa-native loopa-control loopa-config loopa-console
     loopa-input loopa-time loopa-m5exit loopa-thr loopa-vnc loopa-sdlwin loopa-netapp loopa-gdbprog loopa-pkg
-    loopa-joy loopa-cache loopa-https loopa-sshc loopa-floppy loopa-ndos loopa-nboot loopa-dpmi"
+    loopa-joy loopa-cache loopa-https loopa-sshc loopa-floppy loopa-ndos loopa-nboot loopa-dpmi loopa-cdrom"
 HERE_SUITES="loopa-pkg loopa-https loopa-vnc loopa-sshc"
 if [ -n "${ONLY:-}" ]; then
     HOST_SUITES=$(for s in $HOST_SUITES; do case " $ONLY " in *" $s "*) echo "$s";; esac; done)
@@ -48,7 +48,9 @@ fi
 jobs=${JOBS:-3}
 
 line() {    # SUITE RC SECONDS LOG: the summary's line for a suite
-    echo "$1 exit=$2 $(( $3 / 60 )) min pass=$(grep -c ' PASS' "$4" || true) fail=$(grep -c ' FAIL' "$4" || true)"
+    local skip
+    skip=$(grep -c ' SKIP' "$4" || true)        # (said where there are any: a gate that runs fewer cases shows it)
+    echo "$1 exit=$2 $(( $3 / 60 )) min pass=$(grep -c ' PASS' "$4" || true) fail=$(grep -c ' FAIL' "$4" || true)$([ "$skip" -gt 0 ] && echo " skip=$skip")"
 }
 
 # ---- here ---------------------------------------------------------------------

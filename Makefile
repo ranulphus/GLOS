@@ -773,6 +773,10 @@ loopa-ndos: all dos-tests check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py ndos -j $(JOBS)
 loopa-nboot: all native-loader dos-tests build/dj/DOSCALLS.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py nboot -j $(JOBS)
+# N4's CD-ROM (docs/v1/native-dos.md, C1-C7), native: a disc in 86Box's drive (RetroGPU's run.py --cdrom), its
+# audio, and images as drives (glos cdrom mount); CDTEST's MSCDEX checks, DISKRD's DJGPP read.
+loopa-cdrom: all native-loader dos-tests build/dj/DISKRD.EXE check-deps
+	$(Q)$(DEV) python3 tests/loopa/jobs.py cdrom -j $(JOBS)
 loopa-thr: all dos-tests build/dj/THRTEST.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py thr -j $(JOBS)
 loopa-mem-page: all dos-tests build/dj/UMAPROBE.EXE build/dj/NESTRM.EXE check-deps
