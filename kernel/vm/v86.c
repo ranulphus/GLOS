@@ -668,6 +668,27 @@ void vm_return(struct trapframe *tf)
 
 /* ---- GLOS.EXE's calls and leaving */
 
+/* The stub's spare stack (loader/stub.asm: 320 words under _glos_kill_top, bootinfo's kill_sp), which the kernel's
+   real-mode calls run on: filled once the stub is resident, and at GLOS's way out how deep anything went said (a
+   video BIOS took more than its 256 bytes then: the PCI G450's on the 486, 2026-11-26). */
+#define KILL_STACK 640u
+#define KILL_FILL  0x5Au
+
+static void kill_stack_fill(void)
+{
+    memset(vm_ptr(vm_lin(vm.loader_cs, vm.bi->kill_sp - KILL_STACK)), KILL_FILL, KILL_STACK);
+}
+
+static void kill_stack_say(void)
+{
+    const u8 *p = vm_ptr(vm_lin(vm.loader_cs, vm.bi->kill_sp - KILL_STACK));
+    u32 untouched = 0;
+    while (untouched < KILL_STACK && p[untouched] == KILL_FILL)
+        untouched++;
+    kprintf("%s kill-stack deepest=%u of %u\n", KILL_STACK - untouched > KILL_STACK - 128 ? "GLOS-WARN" : "GLOS-VM",
+            KILL_STACK - untouched, KILL_STACK);
+}
+
 static void int2f_hook(void);
 static void int2f_unhook(void);
 static void vm_leave(u32 code) __attribute__((noreturn));
@@ -703,6 +724,7 @@ static void vm_leave(u32 code)
     cache_end();
     if (vm.bi->flags & BI_F_SELFTEST)
         selftest_report();
+    kill_stack_say();
     kprintf("GLOS-VM leave code=%u ticks=%u gp=%u int=%u irq=%u spurious=%u\n", code, timer_ticks(), vm.n_gp,
             vm.n_int, vm.n_irq, timer_spurious());
     vm.bi->result = code;
@@ -801,6 +823,7 @@ static u32 vm_resident(u16 seg)
             (end - psp - keep - vm.bi->cache_paras - 0x10) * 16, at, vm.bi->cache_paras ? " buffer=4112" : "");
     if (vm.bi->cache_paras)                     /* the disk cache's block buffer, kept after the stub (or PSP) */
         cache_resident(lo);
+    kill_stack_fill();
     return page;
 }
 

@@ -563,7 +563,11 @@ DOSBench within 3% under native GLOS of plain DOS (the P1 target, kept). Phase H
 
 **G5. Must fix before v1**
 
-- The 486 with a PCI G450 stopping at its end, natively (first: whether it is 86Box's alone);
+- ~~The 486 with a PCI G450 stopping at its end, natively~~ (found 2026-11-26: the stub's spare stack, 256 bytes,
+  was too small for 86Box's PCI G450 BIOS at GLOS's way out (302 bytes deep: putdec, just below, overwritten, so
+  "GLOS-EXIT code=" and nothing more); now 640 (GLOS's 8 KB own memory allows no more), filled at the start and its depth said at the end, GLOS-VM
+  kill-stack deepest=N, a GLOS-WARN within 128 bytes of its end. Not 86Box's fault: a real card's BIOS may be as
+  deep);
 - `thr`'s interrupts on a no-VME 486, natively;
 - the GUI scripts' races under load (`term-run`'s MODE done, the Terminal's first keys; `studio-step`'s chord
   mended 2026-11-26);

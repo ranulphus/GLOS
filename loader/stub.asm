@@ -777,7 +777,13 @@ ones:   mov     al, ah
 putdec endp
 
         align   2
-        dw      128 dup (0)
+; The spare stack (bootinfo's kill_sp): the kernel's real-mode calls run on it, the video BIOS's among them.
+; 640 bytes (2026-11-26; 256 before): 86Box's PCI G450 BIOS on the 486 went 302 deep at GLOS's way out and
+; overwrote putdec just below, so a native end printed "GLOS-EXIT code=" and stopped. The kernel fills it and
+; says how deep it went (GLOS-VM kill-stack, kernel/vm/v86.c: KILL_STACK). The resident stub, this included,
+; must stay within a 4 KB page of upper memory ([memory] stub_page), and GLOS's own conventional memory with
+; the disk cache's buffer within 8 KB (the mem suite): 768 bytes here was 64 too many.
+        dw      320 dup (0)
 _glos_kill_top label word
         dw      256 dup (0)
 stub_stack_top label word
