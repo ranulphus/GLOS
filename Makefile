@@ -118,7 +118,7 @@ HOST_TESTS := pmm_test:kernel/mm/pmm.c heap_test:kernel/mm/heap.c v86dec_test:ke
               regex_test:sdk/gui/regex.c piece_test:sdk/gui/piece.c popmenu_test:kernel/wm/popmenu.c \
               vdma_test:kernel/vm/vdma.c radeon_test:kernel/gfx/radeon.c \
               timing_test:kernel/gfx/timing.c iso_test:kernel/fs/iso.c msc_test:kernel/drv/msc.c \
-              ohci_test:kernel/drv/ohcitd.c ehci_test:kernel/drv/ehcitd.c
+              ohci_test:kernel/drv/ohcitd.c ehci_test:kernel/drv/ehcitd.c ems_test:kernel/vm/ems.c
 host-test:
 	$(Q)$(DEV) $(MAKE) -s host-test-run
 # N1a's FAT reader against mkfs.fat's, mtools' and fat_format's volumes (docs/v1/native-dos.md): fat-test alone.
