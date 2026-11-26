@@ -1200,13 +1200,16 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   it (a prefetchable BAR in the prefetchable window); a plain C allocator, host-tested; `GLOS-PCI place` lines.
   D2 which card is GLOS's display (the owner, 2026-11-26): [display] card = auto, the card the BIOS started, as
   now, or a card's PCI address (01:00.0); the Control Panel's Display page lists the cards. Nothing changes on a
-  PC unless it is set. D3 the named card started: its ROM read through its ROM BAR; the VGA ranges
+  PC unless it is set; an address naming the card the BIOS started (its I/O decode on, the image at C0000h its own
+  by its PCI header) leaves it as it is, its BIOS not run twice. D3 the named card started: its ROM read through its ROM BAR; the VGA ranges
   switched to it (the old primary's I/O and memory decode off, the card's bridges' VGA Enable on, its own decode
   on); its image mapped at C0000h for the system VM by GLOS's page tables (no chipset shadowing); its entry
   (C000:0003, AX its bus and device) called as a nested real-mode call with a time limit; then INT 10h, VBE and the
   desktop are the card's (the loader's and the kernel's first lines stay on the old primary). Native only. D4 Loop
-  A: a second display card in 86Box's 486 profile (if our 86Box takes one), its ranges cleared before GLOS starts to
-  take D1's path, the desktop's shot from it. D5 bench C: the G450 as GLOS's display; then DOS-GL's Glide and GL
+  A: a second display card in 86Box's 486 profile, its ranges cleared before GLOS starts to take D1's path, the
+  desktop's shot from it (2026-11-26: our 86Box drops gfxcard_2 for its Matrox PCI models, rewriting the config
+  without it: a patch of 86Box's first, for two VGA cards' legacy decode by their command registers; until
+  then the real 486 is D3's test). D5 bench C: the G450 as GLOS's display; then DOS-GL's Glide and GL
   there (asked). Unknowns: what the card's BIOS asks of a 1995 BIOS at its start (a POST memory manager it may not
   find), and whether every board lets the VGA ranges move.
   **First try on the real PC (2026-11-26, the owner's "why don't we just try it on the real hardware"):**

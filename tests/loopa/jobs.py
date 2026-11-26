@@ -8729,6 +8729,56 @@ def ems_case(profile, card):
         not bad
 
 
+def card_case(profile, card):
+    """N4's display card the BIOS couldn't start (docs/v1/native-dos.md, D1-D3), its setting's ways that need no
+    second card: [display] card through the loader's bootinfo 17 to kernel/drv/pcicard.c at the next start, natively.
+    A host bridge's address (00:00.0) refused as not a display, an address with nothing there refused as none, the
+    display card the BIOS started (by glos pci) placed by the BIOS and its BIOS not run again, auto nothing at all:
+    each start's desktop and network up as before. (A second card in Loop A waits for an 86Box that keeps
+    gfxcard_2 with a Matrox PCI model; bench C's G450 is the start's own test.)"""
+    tag = "card-" + profile
+    agent = Agent(tag + "-" + card, profile, card, ["--cmd", "C:\\TEST\\GLOS.EXE"], timeout=1200)
+    checks, info = {}, ""
+
+    def start(value, want, none=False):
+        """[display] card = value, a restart, and the start's GLOS-CARD lines: want's in them (none: no line)."""
+        exec_line = 'GLOS-SSH exec="glos config set display card %s"' % value
+        ok = agent.ssh("glos config set display card %s" % value)[0] == 0
+        agent.ssh("glos reboot --force", timeout=30)
+        up = agent.listening(limit=400, after=exec_line)
+        log = agent.log()
+        lines = [l for l in log[log.index(exec_line):].split("\n") if "GLOS-CARD" in l] if exec_line in log else []
+        good = ok and up and (not lines if none else all(re.search(w, "\n".join(lines)) for w in want))
+        return good, lines
+
+    try:
+        checks["listen"] = agent.listening()
+        if checks["listen"]:
+            pci = agent.ssh("glos pci")[1].replace("\r", "").split("\n")
+            vga = [l.split()[0] for l in pci if " class=03" in l]
+            checks["found"] = bool(vga)
+            info += " display=%s" % (vga[0] if vga else "?")
+            for key, value, want, none in (
+                    ("host-bridge", "00:00.0", [r"GLOS-CARD refused card=00:00\.0 why=not-display"], False),
+                    ("absent", "00:1e.7", [r"GLOS-CARD refused card=00:1e\.7 why=none"], False),
+                    ("bios-card", vga[0] if vga else "00:00.0",
+                     [r"GLOS-CARD placed card=%s by=bios" % re.escape(vga[0] if vga else "?"),
+                      r"GLOS-CARD start-skipped card=%s why=the-bios-display" % re.escape(vga[0] if vga else "?")],
+                     False),
+                    ("auto", "auto", [], True)):
+                checks[key], lines = start(value, want, none)
+                if not checks[key]:
+                    info += " %s=%r" % (key, lines[:4])
+            agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    log = agent.wait()
+    checks["clean"] = "GLOS-PANIC" not in log and "GLOS-WARN" not in log
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % (tag, "PASS" if not bad else "FAIL", info if not bad else " failed: " + " ".join(bad) + info), \
+        not bad
+
+
 def cdboot_case(profile, card, free=False):
     """N4's boot CD (C8: `make cd-image`, tools/ndos/cdimage.py): a PC with a blank hard disk and the CD in its
     drive, its BIOS set to start from a CD first (tests/loopa/nvr/cdboot, by run.py --nvr). The BIOS starts the
@@ -13880,7 +13930,7 @@ CONTROL_NUMBERS = {"gpu_watchdog": "1000", "repeat_rate": "20", "double_click": 
                    "memory": "8192", "interval": "12", "size": "16", "range": "2000", "wait": "240", "power": "240",
                    "volume": "70", "timeout": "12"}
 CONTROL_TEXTS = {"hostname": "cptest", "start": "NOTEPAD.EXE", "console": "C:\\KIOSK.BAT", "options": "/NOVME",
-                 "ems": "4096",
+                 "ems": "4096", "card": "00:00.0",     # (a host bridge: GLOS refuses it, not-display)
                  "title": "CP Test", "args": "-a -b", "comspec": "C:\\COMMAND.COM",
                  "autoexec": "C:\\AUTOEXEC.BAT", "dir": "C:\\CP", "blaster": "A220 I7 D1 H5",
                  "env": "CPA=1\nPATH=C:\\A;C:\\B", "server": "time.example.org:1230",
@@ -14489,6 +14539,7 @@ def main():
         res += matrix(cdimage_case, cases, a.jobs)              # (images as drives: no CD-ROM drive needed)
         res += matrix(xdisk_case, cases, a.jobs)                # (disks that come and go: USB storage's way in)
         res += matrix(ems_case, cases, a.jobs)                  # (EMS: GLOS's own LIM 4.0 manager)
+        res += matrix(card_case, [c for c in cases if c[0] == "bf6"], a.jobs)    # ([display] card's setting)
         res += matrix(cdrom_audio_case, [c for c in cases if c[0] == "bf6"], a.jobs)    # (the 486's board: no sound)
         res += matrix(cdimage_audio_case, [c for c in cases if c[0] == "bf6"], a.jobs)   # (an image's audio)
         res += matrix(cdboot_case, [c + (f,) for c in cases for f in (False, True) if c[0] == "bf6" or not f],

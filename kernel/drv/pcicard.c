@@ -257,6 +257,16 @@ int pcicard_start(u32 stack_seg, u32 stack_bytes)
 
     if (!on)
         return -1;
+    /* the card the BIOS started already (its I/O decode on, the image at C0000h its own by its PCI header): left
+       as it is, its BIOS not run twice */
+    if ((cfg(cb, cd, cf, 4) & 1) && vm_rd16(0xC0000) == 0xAA55) {
+        u32 pcir = 0xC0000u + vm_rd16(0xC0018);
+        if (vm_rd16(pcir) == 0x4350 && vm_rd16(pcir + 2) == 0x5249
+            && ((u32)vm_rd16(pcir + 6) << 16 | vm_rd16(pcir + 4)) == cfg(cb, cd, cf, 0)) {
+            kprintf("GLOS-CARD start-skipped card=%02x:%02x.%u why=the-bios-display\n", cb, cd, cf);
+            return 0;
+        }
+    }
     if (!rom_size) {
         kprintf("GLOS-CARD start-refused why=no-rom\n");
         return -1;
