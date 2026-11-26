@@ -206,6 +206,8 @@ static u32 clock_right(void)
 void session_kill(u8 mode, u8 leds)
 {
     int remode;
+    vmouse_session_end();                       /* (GLOS's INT 33h: the killed program's routine forgotten now, not at
+                                                   the session's end a moment later: a move meanwhile would call it) */
     display_card_settle();                      /* (as at a session's end) */
     remode = remode_to(mode);
     vm_wr8(0x417, (u8)((vm_rd8(0x417) & ~0x70) | leds));
