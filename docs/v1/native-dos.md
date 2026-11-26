@@ -1216,8 +1216,20 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   the image's entry called in real mode (DPMI 0301h, a stack of its own): it returned, INT 10h is the card's
   (2999:0B60, was C000:1EF8), mode 3 set, VBE 3.0 "Matrox Graphics Inc." with 16 MB. Then `glos display on
   640x480x8`: mode 101h with its LFB at FA000000, GLOS's Matrox driver on the G450 ("accel idle MGA-G450"), the
-  desktop's screenshot read back from it. All first time. What GLOS's own D1-D3 add: done natively at the start,
-  the image at C0000h (not a DOS block), the setting, the PC left as the BIOS had it when the setting is auto.
+  desktop's screenshot read back from it. What GLOS's own D1-D3 add: done natively at the start, the image at
+  C0000h (not a DOS block), the setting, the PC left as the BIOS had it when the setting is auto.
+  **But the monitor had no signal** (the owner, the same evening; the screenshot is a read of the frame buffer,
+  not of the card's output). tests/dos/g450out.c (G450OUT) read why: the CRTC ran with garbage timing and CRTC 17h's
+  syncs off; the PLL's sets A and B (programmed by the BIOS's start) locked, the DAC powered, its output routed,
+  CRTC2 off. The card's BIOS's own mode 3 (INT 10h AH=0, its handler at 0B70h through INT 6Dh) wrote nothing to the
+  CRTC; INT 42h was the system BIOS's (F000:F065), no chaining, no segment C000h in its code. Port writes reach the
+  card (3D5h seen at its mirror, 1FD5h). Text mode 3 written by its registers (G450OUT vga3) gave a picture (the
+  font not loaded: coloured cells); then the BIOS's VBE 4F02h (101h, LFB) returned 004Fh, programmed the CRTC
+  (17h C3h) and bars drawn into its LFB showed, with GLOS's /VERBOSE lines drawn by the BIOS scrolling at the top.
+  `glos display on` (VBE through the stub's 256-byte spare stack in that build: the PCI G450's BIOS needs about 302)
+  hung the 486, and GLOS's Matrox driver held the card's ranges as they were at the start (0). pcicard.c takes from
+  this: placing before display_init, the start's stack a 4 KB DOS block, and mode 3 by registers where the syncs
+  stay off after the card's BIOS's own.
 - **N4, the keyboard's layout (2026-11-25, native-dos; KEYB's work):** the system VM's INT 09h is an ARPL of GLOS's
   in front of the BIOS's handler (kernel/vm/vkeyb.c). A key pressed whose character on [region] layout (keymap.h:
   Shift, Caps Lock, Num Lock, AltGr from the BIOS's flags) differs from the US one, and the 102nd key, GLOS answers:
