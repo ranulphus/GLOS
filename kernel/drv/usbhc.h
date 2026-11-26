@@ -7,7 +7,7 @@
 #include "sched.h"
 #include "usb.h"
 
-#define MAX_HC          4
+#define MAX_HC          8               /* (an ICH9's six UHCIs and two EHCIs; an ICH5's four and one) */
 #define MAX_DEV         16
 #define MAX_PORTS       16              /* a root hub's ports (UHCI has 2; OHCI up to 15) */
 #define NTD             40
@@ -34,7 +34,15 @@ struct hcd_ops {
     void (*leave)(struct hc *h);                                /* glos exit: as the BIOS had it */
     u32 (*stat)(struct hc *h, char *b, u32 room);              /* glos usb's line for it */
     u32 (*detail)(struct hc *h, char *b, u32 room);            /* the Devices list's */
+    /* (U4, EHCI's alone: NULL and 0 for the others) Whether it keeps a device its port's reset found (its
+       configuration read, not yet set): 0 gives it away, the port back to its companion controller, where the
+       device is found again at full speed. And its speed's name in the log. */
+    int (*keeps)(struct hc *h, const struct usb_dev *d);
+    void (*give_away)(struct hc *h, int p);
+    int high;
 };
+int ehci_drive(struct hc *h, int i);    /* (ehci.c) the i-th EHCI handed over, driven: 0, -1 not ([usb] ehci off,
+                                           none, no memory) */
 
 struct hc {
     const struct hcd_ops *ops;

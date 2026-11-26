@@ -950,6 +950,12 @@ static int enumerate(struct hc *h, int root, int parent, int hport, int low)
         return -1;
     }
     parse_config(d, buf, got, 0);
+    if (h->ops->keeps && !h->ops->keeps(h, d)) {        /* (EHCI: anything but a high-speed disk to its companion) */
+        kprintf("GLOS-USB port=%d speed=high id=%04x:%04x class=%02x/%02x/%02x if=%02x/%02x/%02x: to its companion\n",
+                root + 1, d->vendor, d->product, d->dclass, d->dsub, d->dproto, d->iclass, d->isub, d->iproto);
+        h->ops->give_away(h, root);
+        return -1;
+    }
     s_conf[2] = d->config;
     if (control(h, d->addr, d->maxp0, low, s_conf, 0, 0, &status) != 0) {
         fail(d, "configure", status);
@@ -964,15 +970,15 @@ static int enumerate(struct hc *h, int root, int parent, int hport, int low)
     else if (d->iclass == 0xFF && ((d->isub == 0x47 && d->iproto == 0xD0) || (d->isub == 0x5D && d->iproto == 0x01)))
         xbox_start(h, d);
     if (d->nports)
-        kprintf("GLOS-USB port=%s speed=%s id=%04x:%04x is=hub ports=%u\n", loc(d, b), low ? "low" : "full",
+        kprintf("GLOS-USB port=%s speed=%s id=%04x:%04x is=hub ports=%u\n", loc(d, b), low ? "low" : h->ops->high ? "high" : "full",
                 d->vendor, d->product, d->nports);
     else if (d->ep_in)
         kprintf("GLOS-USB port=%s speed=%s id=%04x:%04x class=%02x/%02x/%02x if=%02x/%02x/%02x in=%02x/%u/%u%s is=%s\n",
-                loc(d, b), low ? "low" : "full", d->vendor, d->product, d->dclass, d->dsub, d->dproto, d->iclass,
+                loc(d, b), low ? "low" : h->ops->high ? "high" : "full", d->vendor, d->product, d->dclass, d->dsub, d->dproto, d->iclass,
                 d->isub, d->iproto, d->ep_in, d->ep_in_maxp, d->ep_in_ival, d->ep_out ? " out=yes" : "", d->is);
     else
         kprintf("GLOS-USB port=%s speed=%s id=%04x:%04x class=%02x/%02x/%02x if=%02x/%02x/%02x is=%s\n", loc(d, b),
-                low ? "low" : "full", d->vendor, d->product, d->dclass, d->dsub, d->dproto, d->iclass, d->isub,
+                low ? "low" : h->ops->high ? "high" : "full", d->vendor, d->product, d->dclass, d->dsub, d->dproto, d->iclass, d->isub,
                 d->iproto, d->is);
     if (d->nif > 1 && !d->nports)               /* a combined keyboard and mouse's other interfaces: an entry each */
         more_interfaces(h, i, buf, got);
@@ -1245,7 +1251,7 @@ static u32 uhci_detail(struct hc *h, char *b, u32 room)
 
 static const struct hcd_ops uhci_ops = {
     "uhci", uhci_control, uhci_intr_arm, uhci_intr_done, uhci_intr_off, uhci_intr_out, uhci_bulk_ready, uhci_bulk,
-    uhci_port_changed, uhci_port_connected, uhci_port_reset, uhci_leave, uhci_stat, uhci_detail,
+    uhci_port_changed, uhci_port_connected, uhci_port_reset, uhci_leave, uhci_stat, uhci_detail, 0, 0, 0,
 };
 
 static int take(struct pci_dev *pd)
@@ -1344,6 +1350,9 @@ void usb_late(void)
             dev_note(pci_where(pd, w), "ohci", e ? DEVS_REFUSED : DEVS_ON, e ? (e == -2 ? "no-memory" : "no-registers") : "",
                      0);
         }
+    for (i = 0; i < MAX_HC && nhc < MAX_HC; i++)              /* (U4) EHCI's, after their companions: [usb] ehci on */
+        if (ehci_drive(&hc[nhc], i) == 0)
+            nhc++;
     if (nhc)
         thread_create("usb", PRIO_NORMAL, usb_thread, 0);
 }
@@ -1386,7 +1395,7 @@ u32 usb_dev_lines(char *b, u32 room)
                                 !strcmp(is, "other") ? "none" : "on", is, pci_where(hc[dev[i].hc_i].pci, p),
                                 dev[i].vendor, dev[i].product, dev[i].dclass ? dev[i].dclass : dev[i].iclass,
                                 dev[i].dclass ? dev[i].dsub : dev[i].isub, dev[i].dclass ? dev[i].dproto : dev[i].iproto,
-                                dev[i].low ? "low" : "full", dev[i].reports, dev[i].errors);
+                                dev[i].low ? "low" : hc[dev[i].hc_i].ops->high ? "high" : "full", dev[i].reports, dev[i].errors);
             if (dev[i].store && n + 120 < room) {       /* (a disk: what it says it is, and its size) */
                 const struct msc *m = &stores[dev[i].store - 1].m;
                 n += (u32)ksnprintf(b + n, room - n, "  disk %s %s, %u blocks of %u (%u MB), %u commands, %u resets%s%s\n",
@@ -1410,7 +1419,7 @@ int usb_stat(char *b, u32 room)
         if (dev[i].used) {
             char w[16];
             n += (u32)ksnprintf(b + n, room - n, "port=%s addr=%u speed=%s id=%04x:%04x is=%s%s reports=%u errors=%u\n",
-                                loc(&dev[i], w), dev[i].addr, dev[i].low ? "low" : "full", dev[i].vendor,
+                                loc(&dev[i], w), dev[i].addr, dev[i].low ? "low" : hc[dev[i].hc_i].ops->high ? "high" : "full", dev[i].vendor,
                                 dev[i].product, dev[i].is, dev[i].pad ? (dev[i].pad == 1 ? " pad=1" : " pad=2") : "",
                                 dev[i].reports, dev[i].errors);
         }

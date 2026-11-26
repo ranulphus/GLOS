@@ -117,8 +117,9 @@ struct ehci_qh {
    the qTDs (DTC), so one QH serves every endpoint in turn. */
 u32 ehci_qh_ep1(u32 addr, u32 ep, u32 maxp, int head);
 u32 ehci_qh_ep2(void);
-/* A control transfer's qTDs: SETUP (DATA0), the data stage in one qTD (DATA1; up to 16 KB), the status stage the
-   other way (DATA1, its interrupt-on-complete set); linked, the last's next T. How many, or 0. (No I/O.) */
+/* A control transfer's qTDs: SETUP (DATA0), the data stage in one qTD (DATA1; up to 16 KB; short, it goes on to the
+   status stage), the status stage the other way (DATA1, its interrupt-on-complete set); linked, the last's next T.
+   How many, or 0. (No I/O.) */
 u32 ehci_control_qtds(struct ehci_qtd *q, u32 max, u32 q_phys, const u8 setup[8], u32 setup_phys, u32 data_phys);
 /* A bulk transfer's qTDs, 16 KB each at most (a multiple of every high-speed max packet size, so that only the
    last can end short), each from the toggle its packets before it leave, *toggle the endpoint's; an IN one that

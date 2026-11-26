@@ -48,6 +48,7 @@ u32 ehci_control_qtds(struct ehci_qtd *q, u32 max, u32 q_phys, const u8 setup[8]
     n++;
     if (len) {
         qtd_set(&q[n], in ? TOK_IN : TOK_OUT, 1, data_phys, len, 0, q_phys + (n + 1) * (u32)sizeof *q);
+        q[n].alt = q[n].next;           /* (a data stage that comes in short goes on to the status stage all the same) */
         n++;
     }
     /* the status stage: the other way (IN when nothing came in), DATA1, zero bytes; the queue's end */

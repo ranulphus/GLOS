@@ -34,6 +34,7 @@ theme = slate
 | desktop wallpaper | a picture's path | The picture behind the icons |
 | desktop colour | theme, or RRGGBB (as 204060) | The desktop's colour where no picture covers it: the quickest on slow PCs |
 | desktop bar | bottom, top | Where the task bar is |
+| usb ehci | off, on | A USB 2.0 disk at high speed (on); off: USB 1.1's speed for every device |
 | region layout | us, uk | The keyboard |
 | region codepage | dos, 437, 850, 852, 866, 737 | DOS's letters beyond English |
 | region date | yyyy-mm-dd, dd/mm/yyyy, dd.mm.yyyy, mm/dd/yyyy | How dates are written |

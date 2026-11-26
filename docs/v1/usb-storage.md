@@ -52,6 +52,17 @@ other system's code is looked at.
    (it walks no schedule), so the P3 is its first real test (a keyboard or mouse, then a stick).
 4. **U4, EHCI:** high speed (480 Mbit/s) for USB 2.0 sticks on a root port or a high-speed hub; full- and low-speed
    devices stay on the companion controllers as now (no split transactions).
+   *Built 2026-11-26, behind `[usb] ehci = on` (off by default until a real PC has shown it):* `ehcitd.c` builds
+   the QHs and qTDs (host tested: `ehci_test`); `ehci.c`, after the hand-over, drives the controller when the
+   setting is on: reset, an asynchronous schedule of a head QH and a QH for each endpoint used (linked in, never
+   changed; the toggles from the qTDs), CONFIGFLAG set, the ports powered. It keeps a device only if it is a
+   high-speed disk on a root port: low speed (the line's K state) and full speed (not enabled after the reset)
+   go to the companion at once, and a high-speed device that isn't mass storage, a USB 2.0 hub included, once
+   its configuration is read (the core asks `keeps`); so keyboards behind a USB 2.0 hub still work, at full
+   speed, as before. (A stick behind a high-speed hub stays at full speed: the hub is given away.) Polled, one
+   transfer at a time, a 16 KB piece each; a transfer given up on stops the asynchronous schedule while its QH is
+   emptied. MAX_HC is 8 (an ICH5's four UHCIs and one EHCI). 86Box has no EHCI on Loop A's machines: the benches
+   with one (F and G) are its first test.
 
 ## Tests
 

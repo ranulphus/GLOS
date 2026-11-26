@@ -331,7 +331,7 @@ static u32 ohci_detail(struct hc *h, char *b, u32 room)
 
 static const struct hcd_ops ohci_ops = {
     "ohci", ohci_control, ohci_intr_arm, ohci_intr_done, ohci_intr_off, ohci_intr_out, ohci_bulk_ready, ohci_bulk,
-    ohci_port_changed, ohci_port_connected, ohci_port_reset, ohci_leave, ohci_stat, ohci_detail,
+    ohci_port_changed, ohci_port_connected, ohci_port_reset, ohci_leave, ohci_stat, ohci_detail, 0, 0, 0,
 };
 
 int ohci_take(struct hc *h, struct pci_dev *pd)

@@ -36,7 +36,8 @@ int main(void)
     CHECK(!IOC(q[0].token) && !IOC(q[1].token) && IOC(q[2].token));
     CHECK(q[0].next == base + 32 && q[1].next == base + 64 && q[2].next == EHCI_T);
     for (i = 0; i < 3; i++)
-        CHECK((q[i].token & EHCI_TOK_ACTIVE) && CERR(q[i].token) == 3 && q[i].alt == EHCI_T);
+        CHECK((q[i].token & EHCI_TOK_ACTIVE) && CERR(q[i].token) == 3);
+    CHECK(q[0].alt == EHCI_T && q[1].alt == base + 64 && q[2].alt == EHCI_T);  /* (a short data stage: to status) */
 
     n = ehci_control_qtds(q, 8, base, set_addr, 0x200000, 0x201000);    /* no data: status IN */
     CHECK(n == 2 && PID(q[1].token) == 1 && DT(q[1].token) == 1 && IOC(q[1].token) && q[1].next == EHCI_T);

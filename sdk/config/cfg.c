@@ -51,8 +51,11 @@ const struct cfg_key cfg_schema[] = {
       "then for the buttons A1 A2 B1 B2 the pad's button's number (1 to 16; none)" },
     /* [usb]: GLOS's own USB stack (docs/gamepad.md) */
     { "usb", "enabled", CFG_CHOICE, CFG_RESTART, 0, 0, "on|off", "on", "&USB",
-      "GLOS drives the PC's USB controllers itself (UHCI) and finds what is plugged in; off: they are left to the "
-      "BIOS and DOS" },
+      "GLOS drives the PC's USB controllers itself (UHCI and OHCI) and finds what is plugged in; off: they are left to "
+      "the BIOS and DOS" },
+    { "usb", "ehci", CFG_CHOICE, CFG_RESTART, 0, 0, "off|on", "off", "USB &2.0 speed for disks",
+      "A USB 2.0 disk at high speed (EHCI); everything else stays at USB 1.1's speed. Off: every device at USB 1.1's "
+      "speed (not yet tried on a real PC)" },
     /* [sound] (M8) */
     { "sound", "mixer", CFG_CHOICE, CFG_NOW, 0, 0, "on|off", "on", "&Mixer",
       "GLOS plays the Sound Blaster 16 and mixes the apps' sound (off: programs have the card)" },
