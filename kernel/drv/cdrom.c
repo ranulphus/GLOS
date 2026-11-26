@@ -26,6 +26,7 @@
 #include "io.h"
 #include "cdda.h"
 #include "cue.h"
+#include "kcfg.h"
 
 #define CD_MAX 4
 
@@ -279,6 +280,16 @@ static u32 cda_fails;
 static volatile int cda_busy = -1;      /* the unit the reader is reading now (-1: none) */
 
 /* An image's audio sectors from its tracks' files (silence where the disc has none: gaps, a data track). */
+/* A FILE of the sheet's as a path on its volume: its folder, then its name with '/' as GLOS's '\\'. */
+static void cue_path(char *out, unsigned room, const char *dir, const char *name)
+{
+    unsigned n;
+    ksnprintf(out, room, "%s%s", dir, name);
+    for (n = 0; out[n]; n++)
+        if (out[n] == '/')
+            out[n] = '\\';
+}
+
 static int img_cdda(struct cd *c, unsigned long lba, unsigned long n, unsigned char *buf)
 {
     unsigned long k;
@@ -294,7 +305,7 @@ static int img_cdda(struct cd *c, unsigned long lba, unsigned long n, unsigned c
             if (c->afile_no >= 0)
                 fsv_close(c->afile);
             c->afile_no = -1;
-            ksnprintf(path, sizeof path, "%s%s", c->dir, c->cue->file[c->cue->t[tr].file]);
+            cue_path(path, sizeof path, c->dir, c->cue->file[c->cue->t[tr].file]);
             if (fsv_open(c->vol, path, FSV_READ, FSV_DENY_WRITE, c->afile) != 0)
                 return -1;
             c->afile_no = c->cue->t[tr].file;
@@ -381,8 +392,11 @@ static void cda_reader(void *arg)
 
 static int digital(int i)
 {
+    char v[8] = "";
     if (i < 0 || i >= ncd || !mixer_found() || session_direct())
         return 0;
+    if (!cds[i].img && kcfg_get("sound", "cdaudio", v, sizeof v) >= 0 && !strcmp(v, "analog"))
+        return 0;                               /* ([sound] cdaudio = analog: the drive's own output; an image has none) */
     if (cds[i].img ? !cds[i].cue || !cds[i].afile : !cds[i].d || !reads_cdda(i))
         return 0;
     if (!cda_ring) {
@@ -544,7 +558,7 @@ static long cue_size(void *ctx, const char *name)
     struct fsv_file f;
     char path[192];
     long n;
-    ksnprintf(path, sizeof path, "%s%s", x->dir, name);
+    cue_path(path, sizeof path, x->dir, name);
     if (fsv_open(x->v, path, FSV_READ, FSV_DENY_WRITE, &f) != 0)
         return -1;
     n = (long)fsv_size(&f);
@@ -580,7 +594,6 @@ int cdrom_mount_image(struct fsv_vol *v, const char *path, const char *shown)
         const char *why = "memory";
         struct cue_ctx x;
         long got;
-        int k;
         if (dl >= sizeof dir || !text || !(cu = kmalloc(sizeof *cu)) || !(af = kmalloc(sizeof *af))) {
             got = -1;
         } else {
@@ -591,9 +604,6 @@ int cdrom_mount_image(struct fsv_vol *v, const char *path, const char *shown)
         fsv_close(f);
         if (got > 0) {
             text[got] = 0;
-            for (k = 0; k < got; k++)           /* (its FILEs' folders as GLOS's paths have them) */
-                if (text[k] == '/')
-                    text[k] = '\\';
             x.v = v, x.dir = dir;
             got = cue_parse(text, cue_size, &x, cu, &why) == 0 ? 1 : -1;
         }
@@ -603,7 +613,7 @@ int cdrom_mount_image(struct fsv_vol *v, const char *path, const char *shown)
             char data[192];
             bps = cu->t[0].type == CUE_AUDIO ? 2352 : cu->t[0].bps;
             off = cu->t[0].type == CUE_AUDIO ? 0 : cu->t[0].off * bps;
-            ksnprintf(data, sizeof data, "%s%s", dir, cu->file[cu->t[0].file]);
+            cue_path(data, sizeof data, dir, cu->file[cu->t[0].file]);
             if (fsv_open(v, data, FSV_READ, FSV_DENY_WRITE, f) != 0)
                 got = -3;
         }

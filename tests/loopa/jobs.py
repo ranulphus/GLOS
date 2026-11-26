@@ -8590,7 +8590,13 @@ def cdimage_audio_case(profile, card):
         if checks["listen"]:
             out = lambda c: (lambda r: (r[0], (r[1] + r[2]).replace("\r", "")))(agent.ssh(c))
             rc, o = out("glos cdrom mount C:\\TEST\\TONES.CUE")
+            for _ in range(20):                 # (the serial line can come after the command's answer)
+                if "TONES.CUE bps=2048 tracks=3" in agent.log():
+                    break
+                time.sleep(0.5)
             checks["mount"] = rc == 0 and "D: is C:\\TEST\\TONES.CUE" in o and "tracks=3" in agent.log()
+            if not checks["mount"]:
+                info += " rc=%d" % rc
             if not checks["mount"]:
                 info += " mount=%r" % o[-200:]
             rc, o = out("type D:\\README.TXT")
@@ -8897,6 +8903,17 @@ def cdrom_audio_case(profile, card):
             o = (o + e).replace("\r", "")
             checks["audio"] = rc == 0 and "CDTEST done failures=0" in o
             info += " " + " ".join(l.split(" ", 1)[1] for l in o.split("\n") if l.startswith("CDTEST ") and "PASS" not in l)
+            # [sound] cdaudio = analog (at once): the same checks with the drive's own output, no play of GLOS's
+            set_line = 'GLOS-SSH exec="glos config set sound cdaudio analog"'
+            checks["set-analog"] = agent.ssh("glos config set sound cdaudio analog")[0] == 0
+            rc, o, e = agent.ssh("C:\\TEST\\CDTEST.EXE audio")
+            o = (o + e).replace("\r", "")
+            after = agent.log()
+            after = after[after.index(set_line):] if set_line in after else ""
+            checks["analog"] = rc == 0 and "CDTEST done failures=0" in o and bool(after) \
+                and "GLOS-CDAUDIO play digital" not in after
+            if not checks["analog"]:
+                info += " analog=%r" % [l for l in o.split("\n") if "FAIL" in l or "done" in l][:4]
             agent.ssh("glos exit")
     except subprocess.TimeoutExpired:
         checks["timeout"] = False

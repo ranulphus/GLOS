@@ -1104,25 +1104,28 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   drive's own output):** mkiso.py --cue --tone makes a mixed-mode disc (the image, then tone tracks as CUE/BIN);
   `jobs.py cdrom`'s cdaudio case (bf6, an SB16 beside the drive) with CDTEST audio: the TOC's tracks (IOCTL input
   10, 11), PLAY AUDIO busy, the Q channel's time moving, STOP pausing with the time held, RESUME, STOP twice:
-  PASS. Owed: the digital way (READ CD's audio frames into GLOS's mixer), the default where a drive gives them.
-  **C6's digital way, planned (2026-11-26):** cdrom.c answers cdrom_play, stop, pause and subq for a drive (or an
-  image) played digitally from a reader of its own, so mscdex.c is as it is. kernel/drv/cdaudio.c: a kernel thread
-  reads the audio frames (READ CD, BEh, CD-DA sectors of 2,352 bytes) a few at a time into a ring of about a
-  second (75 frames, 176,400 bytes); the mixer's interrupt mixes from the ring as it does the virtual Sound
-  Blaster (vsbdev_mix's way: 44.1 kHz to the mixer's rate) and keeps the card playing meanwhile (card_want, as for
-  vsbdev_on). The Q channel's position is what has been played, not read; PAUSE holds the reader and the mixing,
-  RESUME goes on, STOP ends. The IDE channel: the reader is the first user of the drive that isn't the VM's DOS
-  call (the DOS server waits for no program to run, so dos_call can't serve it), and ata.c's one call at a time
-  across threads (struct ata_io's hold, ide.c's k_hold, "Interrupts during a call" above) already keeps its
-  packets and the VM's calls apart: the VM's call waits at most for the reader's packet of a few frames, which
-  the reader keeps short for that. Images: a CUE sheet's audio
-  tracks in the image's TOC (today one data track) and their frames from the BIN through fsv the same way, so a
-  game's CUE/BIN plays its music with no drive. Digital where MODE SENSE's page 2Ah says the drive reads CD-DA
-  (an image always) and the mixer has a card; else the drive's own output, as now. [cdrom] audio = auto, digital
-  or analog. MSCDEX's audio channel control (IOCTL output 3): the drive's own volume (page 0Eh) the analog way, a
-  gain the digital. Test: `jobs.py cdrom`'s cdaudio case digitally (the stream in glos audio, the Q channel
-  moving with what's played, --wav's recording with track 1's 220 Hz then track 2's 440 Hz), and an image's
-  audio tracks. **C7 built:** `glos cdrom` (the shell's CDROM): the drives listed; `mount PATH`: an ISO 9660 image or a CUE
+  PASS. Then the digital way (READ CD's audio frames into GLOS's mixer), the default where a drive gives them:
+  **C6's digital way, built (2026-11-26):** cdrom.c answers cdrom_play, stop, pause and subq for a drive (or an
+  image) played digitally from a reader of its own, so mscdex.c is as it was. kernel/drv/cdda.c (host-tested,
+  tests/host/cdda_test.c): the ring between a kernel thread ("cdaudio", cdrom.c's reader) and the mixer's
+  interrupt, 76 sectors of 2,352 bytes (about a second); the reader asks where the next run goes (4 sectors a READ
+  CD, BEh, never across the ring's end) and commits it with the play's generation, so a read for a play since
+  changed is dropped; the mixer takes the 44.1 kHz frames to its rate by linear interpolation beside vsbdev_mix
+  (cdaudio_mix in mixer.c's fill) and keeps the card on while it plays (card_want). The Q channel's position is
+  what has been played, not read; a late reader means silence with the position held. PAUSE holds the reader and
+  the mixing, RESUME goes on, STOP ends. The IDE channel: ata.c's hold (k_hold) keeps the reader's packets and the
+  VM's calls apart; the VM's call waits at most for one packet of 4 sectors. Images: kernel/drv/cue.c
+  (host-tested, tests/host/cue_test.c) lays a CUE sheet's disc out (FILE, TRACK, INDEX 00/01, PREGAP, POSTGAP:
+  each track's start, its stretch of its file, the gaps silent); the image's TOC has every track, the audio read
+  from its files through a handle of the reader's own (an eject waits for the reader). Digital where MODE SENSE's
+  page 2Ah says the drive reads CD-DA (an image always) and the mixer has a card; else the drive's own output.
+  [sound] cdaudio = auto | analog (at once; the Sound page's CD audio): analog leaves a drive to its own output
+  (an image has none: still the mixer's). MSCDEX's audio channel control (IOCTL output 3, input 4): a gain on the
+  digital way. Tests in `jobs.py cdrom`: cdaudio (bf6, an SB16): CDTEST audio digitally (GLOS-CDAUDIO play
+  digital, the drive's own output silent) and --wav's recording with track 2's 440 Hz, then with cdaudio =
+  analog the same checks with no digital play; cdimgaud: an image's CUE with a data track and two tone tracks
+  in BINs of their own after a PREGAP, the same checks with no drive at all. PASS.
+  **C7 built:** `glos cdrom` (the shell's CDROM): the drives listed; `mount PATH`: an ISO 9660 image or a CUE
   sheet's first data track (MODE1/2048, or MODE1/2352's user data) on one of GLOS's FAT volumes as the next
   drive letter, read through fsv (its lock shares the file with the VM's calls), MSCDEX's units following
   (mscdex_units), a TOC of one data track made for it; `eject X:`: an image taken away (refused while a program
