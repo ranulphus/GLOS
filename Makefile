@@ -654,7 +654,7 @@ KCFLAGS := -m32 -march=i486 -ffreestanding -fno-pic -fno-pie -fno-stack-protecto
            -Ithird_party/lwip/src/include -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint -Ikernel/ssh \
            -I$(RETROGPU)/hal/include
 KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/arch/mtrr.c kernel/arch/pmc.c kernel/core/main.c kernel/core/timer.c \
-         kernel/core/sched.c kernel/drv/pci.c kernel/drv/dev.c kernel/drv/devlist.c kernel/drv/cstore.c kernel/drv/cache.c kernel/drv/ata.c kernel/drv/ide.c kernel/drv/cdrom.c kernel/drv/cdda.c kernel/drv/cue.c kernel/vm/ndm.c kernel/vm/ndcmd.c kernel/vm/vdos.c kernel/ndos/exe.c kernel/ndos/dtime.c kernel/fs/fat.c kernel/fs/fsv.c kernel/fs/iso.c kernel/ndos/psp.c kernel/ndos/dos21.c kernel/ndos/files.c kernel/ndos/share.c kernel/ndos/mcb.c kernel/ndos/path.c kernel/ndos/find.c kernel/ndos/names.c kernel/ndos/fucase.c kernel/drv/nic.c kernel/drv/ne2k.c kernel/drv/rtl8139.c kernel/drv/e100.c \
+         kernel/core/sched.c kernel/drv/pci.c kernel/drv/dev.c kernel/drv/devlist.c kernel/drv/cstore.c kernel/drv/cache.c kernel/drv/ata.c kernel/drv/ide.c kernel/drv/cdrom.c kernel/drv/cdda.c kernel/drv/cue.c kernel/drv/pcialloc.c kernel/drv/pcicard.c kernel/vm/ndm.c kernel/vm/ndcmd.c kernel/vm/vdos.c kernel/ndos/exe.c kernel/ndos/dtime.c kernel/fs/fat.c kernel/fs/fsv.c kernel/fs/iso.c kernel/ndos/psp.c kernel/ndos/dos21.c kernel/ndos/files.c kernel/ndos/share.c kernel/ndos/mcb.c kernel/ndos/path.c kernel/ndos/find.c kernel/ndos/names.c kernel/ndos/fucase.c kernel/drv/nic.c kernel/drv/ne2k.c kernel/drv/rtl8139.c kernel/drv/e100.c \
          kernel/net/net.c kernel/net/sock.c kernel/lib/libc.c \
          kernel/core/random.c kernel/core/kat.c kernel/ssh/ssh.c kernel/ssh/sshbuf.c kernel/ssh/sshkeys.c \
          kernel/ssh/sshd.c \
@@ -1458,6 +1458,11 @@ build/dj/CARD2.EXE: tests/dos/card2.c kernel/drv/pcialloc.c kernel/drv/pcialloc.
 	@mkdir -p $(dir $@)
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O2 -Wall -Werror -o $@ $< kernel/drv/pcialloc.c
+# ... and why such a card sends no picture: its CRTC and DAC read (bench C's G450, 2026-11-26).
+build/dj/G450OUT.EXE: tests/dos/g450out.c
+	@mkdir -p $(dir $@)
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O2 -Wall -Werror -o $@ $<
 build/dj/PCIPLACE.EXE: tests/dos/pciplace.c
 	@mkdir -p $(dir $@)
 	$(Q)echo "  DJCC    $<"

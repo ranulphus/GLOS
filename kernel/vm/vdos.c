@@ -32,6 +32,7 @@
 #include "vdos.h"
 #include "cdrom.h"
 #include "ems.h"
+#include "../drv/pcicard.h"
 #include "../disk/letters.h"
 
 static struct dos_m vd;
@@ -244,6 +245,7 @@ static int fat_first(const unsigned char *s);
 
 static void cd_entry_points(unsigned seg);     /* (below the ARPLs' table) */
 static void ems_entry(void);
+static void card_entry(void);
 static void set_vec(u32 n, u32 v);
 
 /* GLOS's own DOS asks which disc is in CD drive `drive` (dos21.h: cdmedia; N4's CD-ROM): cdrom.c's volume. */
@@ -497,6 +499,8 @@ static void mount_c(void)
                 cd_entry_points(seg);
             }
         }
+        card_entry();                           /* ([display] card's BIOS: pcicard.c; before EMS's window, so the
+                                                   card's ROM image at C0000h keeps EMS off its pages) */
         ems_entry();                            /* (EMS: emsvm.c) */
     }
     if (!cbios && !needs_bios && xseg) {        /* (GLOS's own driver for all: the BIOS's calls' block back to DOS) */
@@ -594,6 +598,15 @@ static void cd_entry_points(unsigned seg)
 
 /* EMS's (emsvm.c): INT 67h at an ARPL in a block whose segment holds an EMM's device header, EMMXXXX0 at 0Ah, as
    programs look for one there; and DOS's device name. mount_c's, after vdos_init. */
+static void card_entry(void)
+{
+    unsigned seg, largest;
+    if (!pcicard_named() || dos_mem_alloc(&vd.mcb, 0x100, 8, &seg, &largest) != 0)
+        return;
+    pcicard_start(seg, 4096);                   /* (its start's stack: 4 KB of DOS's memory, given back after) */
+    dos_mem_free(&vd.mcb, seg);
+}
+
 static void ems_entry(void)
 {
     unsigned seg, largest;

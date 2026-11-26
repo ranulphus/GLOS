@@ -1082,6 +1082,15 @@ static void read_cfg(const char *argv0, int shell_keys)
                                                       : bi.display_flags & ~BI_DISPLAY_NOACCEL;
             } else if (!stricmp(k, "gpu_watchdog") && (!stricmp(v, "off") || (atol(v) >= 50 && atol(v) <= 60000))) {
                 bi.gpu_watchdog_ms = !stricmp(v, "off") ? 0xFFFFFFFFul : (unsigned long)atol(v);   /* (M8) */
+            } else if (!stricmp(k, "card")) {   /* card = auto | BB:DD.F: the card GLOS starts (N4; the kernel's
+                                                   pcicard.c places its ranges before any driver looks at it) */
+                unsigned pb, pd, pf;
+                if (!stricmp(v, "auto"))
+                    bi.display_card = 0;
+                else if (strlen(v) == 7 && sscanf(v, "%2x:%2x.%1x", &pb, &pd, &pf) == 3 && pd < 32 && pf < 8)
+                    bi.display_card = BI_CARD_SET | (unsigned long)pb << 8 | pd << 3 | pf;
+                else
+                    say("GLOS-WARN cfg-key section=display key=card");
             } else if (!stricmp(k, "mode") || !stricmp(k, "accel") || !stricmp(k, "gpu_watchdog")) {
                 say("GLOS-WARN cfg-key section=display key=%s", k);
             }                                   /* (font_smoothing, M10: the programs', checked above) */

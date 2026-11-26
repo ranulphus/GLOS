@@ -41,6 +41,7 @@
 #include "vm.h"
 #include "vdos.h"
 #include "vsbdev.h"
+#include "../drv/pcicard.h"
 
 /* The kernel's lines: keyboard, cascade, clock, AUX, and any it claims later
    (the network card); kernel_masked holds those a driver has masked. */
@@ -823,6 +824,21 @@ static u32 vm_resident(u16 seg)
             (end - psp - keep - vm.bi->cache_paras - 0x10) * 16, at, vm.bi->cache_paras ? " buffer=4112" : "");
     if (vm.bi->cache_paras)                     /* the disk cache's block buffer, kept after the stub (or PSP) */
         cache_resident(lo);
+    if (!(vm.bi->flags & BI_F_NATIVE) && pcicard_named()) {    /* ([display] card's BIOS, hosted: pcicard.c; natively
+                                                   vdos.c's mount_c starts it, before EMS) */
+        struct rmregs r;
+        memset(&r, 0, sizeof r);
+        r.eax = 0x4800, r.ebx = 0x100;          /* (its start's stack: 4 KB of DOS's, given back after) */
+        r.ss = vm.loader_cs, r.sp = (u16)vm.bi->kill_sp, r.flags = 2;
+        if (rm_call(0, &r, RM_INT, 0x21, 0, 0) == 0 && !(r.flags & FL_CF)) {
+            u32 seg2 = r.eax & 0xFFFF;
+            pcicard_start(seg2, 4096);
+            memset(&r, 0, sizeof r);
+            r.eax = 0x4900, r.es = (u16)seg2;
+            r.ss = vm.loader_cs, r.sp = (u16)vm.bi->kill_sp, r.flags = 2;
+            rm_call(0, &r, RM_INT, 0x21, 0, 0);
+        }
+    }
     kill_stack_fill();
     return page;
 }
