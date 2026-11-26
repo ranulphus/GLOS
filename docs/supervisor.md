@@ -1284,12 +1284,18 @@ exception depth, the real-mode stack. They aren't made per thread. So:
 - **Real-mode callbacks, and the handlers DPMI calls** (Ctrl-C, critical errors), run on the first thread.
 - **The GPU** (DRAW's GPU calls, the card's registers and VRAM touched): the first thread's alone. Another
   thread's call is refused (`GLOS_E_REFUSED`), and its touch of the card's memory is a fault like any other.
-- **Handlers and another thread's DOS call don't overlap** (as built). While the VM thread makes a DOS or BIOS
-  call for a thread the app made, the call's callbacks may use the context's one stack for handlers. So for
-  that long the first thread is given no interrupt (they wait, pending) and an exception of its waits; and such
-  a call waits while a handler of the first thread's runs. While the first thread waits so, no other thread's
-  call is begun (for a sixteenth of a second at most), so two threads busy in DOS can't keep it out. A handler
-  that never returns (a `longjmp` out of an interrupt handler) keeps the other threads out of DOS.
+- **The context's one stack for handlers is one thread's at a time** (the owner's choice of 2026-11-26, in
+  place of "handlers and another thread's DOS call don't overlap", as first built). While the VM thread makes a
+  DOS or BIOS call for a thread the app made, the call's callbacks (Ctrl-C, a critical error, a real-mode
+  callback) may use the context's one stack for handlers, as the first thread's interrupt and exception
+  handlers do. So that stack's entries (`dctx->pe`) are one thread's at a time (`hs_owner`, kernel/dpmi/
+  deliver.c's `hs_turn`): an entry by another thread waits until the owner's have all returned. The first
+  thread's interrupts now come during another thread's call, held back only while a callback of that call is
+  on the stack; such a callback waits while a first-thread handler runs. A handler that itself waits for that
+  call (its own DOS call) says so (`hs_owner_dos_wait`), and the call's callback is then refused rather than
+  wait for ever; so is one that has waited two seconds (`GLOS-WARN dpmi-handler-stack`). Before, the first
+  thread had no interrupt for the whole of another thread's call: natively, where a call on the 486 may take
+  300 ms, THRTEST's timer case counted 10 of its 27 signals.
 
 **An exception in another thread ends the app**
 

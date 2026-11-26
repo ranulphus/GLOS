@@ -132,6 +132,8 @@ struct dpmi_ctx {
     u32 lstack_use;                     /* entries that moved onto it */
     struct pmentry pe[NENTRY];
     u32 npe, exc_depth;
+    struct thread *hs_owner;            /* whose entries pe[] holds (while npe): one thread's at a time (deliver.c) */
+    u8 hs_owner_dos_wait;               /* that thread waits for another's DOS call (app.c): no entry waits for it */
     u32 cr2;                            /* the last page fault's address */
     struct { u8 level, rw, hit; u32 lin; } wp[4];       /* 0B00h watchpoints: DR0-DR3 */
     u32 db_rf;                          /* an execute watchpoint fired here: resume past it (RF) */
@@ -151,6 +153,8 @@ struct dpmi_ctx {
 
 struct app;
 struct thread;
+/* (deliver.c) The handler entries' owner gone: npe back to 0 (wakes an entry that waited for the stack). */
+void dpmi_hs_freed(void);
 extern struct dpmi_ctx *dctx;           /* the context loaded: the running thread's own (VM and app threads), or 0 */
 void dpmi_ctx_load(struct dpmi_ctx *c); /* another one (or none) loaded: page directory, LDT, watchpoints */
 void dpmi_user_init(struct thread *vm); /* the switch hook, and the FPU as the VM thread's */

@@ -226,12 +226,19 @@ int app_thread_start(struct app *a, struct app_thr *r, const struct trapframe *f
     return 0;
 }
 
+/* The context's one stack for handlers is another thread's now (a callback of a DOS call the VM thread makes for
+   another of the app's threads is on it): the first thread stays out of handlers until it is free. */
+static int hs_other(const struct app *a)
+{
+    return a->ctx && a->ctx->npe && a->ctx->hs_owner && a->ctx->hs_owner != current;
+}
+
 /* A thread's wait for another's doing (api2thr.c): on the app's queue, which every change wakes. */
 int app_thread_wait(struct app *a, u32 until)
 {
     if (a->kill)
         return 2;
-    if (current == a->thread && current->vif && vpic_pending(&a->pic) && !(a->dos_owner && a->dos_owner != current))
+    if (current == a->thread && current->vif && vpic_pending(&a->pic) && !hs_other(a))
         return 3;
     if (until && (s32)(until - timer_ticks()) <= 0)
         return 1;
@@ -261,15 +268,21 @@ void app_api_unlock(struct app *a)
     }
 }
 
-/* The app's DOS and BIOS calls one at a time: the VM thread serves one call an app. Not while a handler of the
-   first thread's runs (the context's one stack for handlers may be wanted by the call's callbacks; a handler's
-   return wakes nobody, so that is looked at again every other tick). -1: the app is ending. */
+/* The app's DOS and BIOS calls one at a time: the VM thread serves one call an app. (Until 2026-11-26 not while
+   a handler of the first thread's ran either, and the first thread's handlers not during another thread's call,
+   for the context's one stack for handlers: now that stack alone is kept one thread's at a time, by its entries,
+   deliver.c's hs_turn, so a call's callback waits for a handler and not the other way round.) A handler of the
+   first thread's that waits here for another thread's call says so: that call's callbacks don't wait for it
+   (hs_owner_dos_wait), which would wait for ever. -1: the app is ending. */
 static int dos_lock(struct app *a)
 {
-    int first = current == a->thread;
-    while (!a->kill && (a->dos_owner || (!first && a->ctx && (a->ctx->npe || (a->first_wants
-           && timer_ticks() - a->first_wants < 64)))))
+    int first = current == a->thread, mark = first && a->ctx && a->ctx->npe && a->ctx->hs_owner == current;
+    if (mark && a->dos_owner)
+        a->ctx->hs_owner_dos_wait = 1;
+    while (!a->kill && a->dos_owner)
         thread_wait(&a->tq, timer_ticks() + 2);
+    if (mark && a->ctx)
+        a->ctx->hs_owner_dos_wait = 0;
     if (a->dos_owner || !a->ctx || (a->kill && !first))
         return -1;
     a->dos_owner = current;
@@ -284,24 +297,6 @@ static void dos_unlock(struct app *a)
         thread_wake(&a->wq);                    /* (the first thread's interrupts waited for the call) */
 }
 
-/* Another thread's DOS call is under way: the first thread stays out of handlers. */
-static int dos_busy(const struct app *a) { return a->dos_owner && a->dos_owner != current; }
-
-/* The first thread is kept from a handler by another thread's DOS call: no other is begun until it has had its
-   turn (for a sixteenth of a second at most: a first thread that never comes for it holds nobody up). */
-static void first_waits(struct app *a)
-{
-    if (!a->first_wants)
-        a->first_wants = timer_ticks() | 1;
-}
-
-static void first_goes(struct app *a)
-{
-    if (a->first_wants) {
-        a->first_wants = 0;
-        thread_wake(&a->tq);
-    }
-}
 
 /* An exception in an app's code, with a handler of the app's to go to (deliver.c): 1 to give it. In a thread the
    app made it is the app's end (a crash report: no return). In the first, not while another thread's DOS call
@@ -313,11 +308,8 @@ int app_exception(struct trapframe *tf)
         crash_report(tf, "thread-exception");
         return 0;
     }
-    while (!a->kill && dos_busy(a)) {
-        first_waits(a);
+    while (!a->kill && hs_other(a))
         thread_wait(&a->tq, timer_ticks() + 2);
-    }
-    first_goes(a);
     return !a->kill;
 }
 
@@ -784,12 +776,8 @@ void app_return(struct app *a, struct trapframe *tf)
     }
     if (!first)
         return;                                 /* (interrupts are the first thread's) */
-    if (dos_busy(a)) {                          /* ... and wait for another thread's call to end */
-        if (current->vif && vpic_pending(&a->pic))
-            first_waits(a);
+    if (hs_other(a))                            /* ... and wait while another's callback has the handlers' stack */
         return;
-    }
-    first_goes(a);
     while (current->vif && vpic_pending(&a->pic)) {     /* its own interrupts: to its handlers */
         int vec = vpic_ack(&a->pic);
         if (vec < 0)
@@ -827,7 +815,7 @@ void app_end_from_thread(struct app *a, u8 code, int killed)
 /* An interrupt of its own that could be given to it now. */
 static int irq_due(const struct app *a)
 {
-    return current == a->thread && current->vif && vpic_pending(&a->pic) && !dos_busy(a);
+    return current == a->thread && current->vif && vpic_pending(&a->pic) && !hs_other(a);
 }
 
 /* Sleeps `ticks`, or until something is there for it: an interrupt of its

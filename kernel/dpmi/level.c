@@ -96,6 +96,8 @@ void level_pop(int psp)
         if (x->kind == PE_EXC)
             dctx->exc_depth--;
     }
+    if (!dctx->npe)
+        dpmi_hs_freed();
     lin_free_level(lev);
     wp_clear_level(lev);
     for (pp = &dctx->dosblks; *pp;) {           /* DOS frees the memory with the program */

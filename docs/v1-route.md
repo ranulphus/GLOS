@@ -568,7 +568,9 @@ DOSBench within 3% under native GLOS of plain DOS (the P1 target, kept). Phase H
   "GLOS-EXIT code=" and nothing more); now 640 (GLOS's 8 KB own memory allows no more), filled at the start and its depth said at the end, GLOS-VM
   kill-stack deepest=N, a GLOS-WARN within 128 bytes of its end. Not 86Box's fault: a real card's BIOS may be as
   deep);
-- `thr`'s interrupts on a no-VME 486, natively;
+- ~~`thr`'s interrupts on a no-VME 486, natively~~ (found 2026-11-26: the first thread had no interrupt for the
+  whole of another thread's DOS call, ~300 ms natively on the 486, so a call's ticks came as one; now only the
+  context's one stack for handlers is kept one thread's at a time, the owner's choice: supervisor.md §12.7);
 - the GUI scripts' races under load (`term-run`'s MODE done, the Terminal's first keys; `studio-step`'s chord
   mended 2026-11-26);
 - ~~the Games Library's overwritten output~~ (found 2026-11-26: putchar, unwrapped; see Open faults), and any
@@ -753,6 +755,10 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
   went to another window). Three rounds on the 486 beside two other emulators: all pass. term-run's is still open
   (12 of 12 passed beside two others, 2026-11-25).
 
+- (2026-11-26) **Likely explained:** run.py's --wav recording has gaps when 86Box runs slower than the wall clock
+  (Fifth Wheel's finding: with 3D drawn, about 35 ms of sound kept in every 200, in 20 ms pieces; a held note's
+  pieces read as fresh attacks), so a tone can be missing from a loaded run's recording though the card played
+  it. Judge such tones from unloaded runs, or by the card's own log.
 - **The AcerMagic S20's MIDI tone missed under load** (2026-11-25, twice: here beside two other emulators, and in
   the native-dos session's gate on 8b46ef0 with eight): `audio-bf6-g200-acermagic_s20`'s recording lacks the
   Player's MIDI file's 370 Hz (every other tone there), and the case passes alone. The OPTi card alone so far (its

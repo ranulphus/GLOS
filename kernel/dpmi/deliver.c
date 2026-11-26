@@ -27,6 +27,8 @@
 #include "io.h"
 #include "kprintf.h"
 #include "mm.h"
+#include "sched.h"
+#include "timer.h"
 #include "vm.h"
 
 /* The locked stack's selector of a bitness: the other one is made when a
@@ -86,10 +88,42 @@ static u32 flags_image(const struct trapframe *tf, u32 vif)
     return (tf->eflags & (FL_ARITH | FL_TF)) | (vif ? FL_IF : 0) | 2;
 }
 
+/* The context's one stack for handlers (supervisor.md §12.7, as changed 2026-11-26): its entries are one
+   thread's at a time (hs_owner, while npe), so that each thread's handlers return in their own order. An entry by
+   another thread waits until the owner's have all returned: so an app's first thread's interrupt handler and a
+   callback of a DOS call the VM thread makes for another of the app's threads are kept apart, not that thread's
+   whole call, which kept the first thread's timer from it for as long (THRTEST's interrupts natively on the 486:
+   10 signals of 27). Not if the owner waits for this very call (app.c's dos_lock), nor past two seconds: then
+   no entry (0), said. */
+static struct waitq hsq;
+
+static int hs_turn(void)
+{
+    u32 t0 = timer_ticks();
+    while (dctx->npe && dctx->hs_owner && dctx->hs_owner != current) {
+        if (dctx->ending || dctx->hs_owner_dos_wait || timer_ticks() - t0 > 2048) {
+            kprintf("GLOS-WARN dpmi-handler-stack owner=%s refused=%s%s\n", dctx->hs_owner->name, current->name,
+                    dctx->hs_owner_dos_wait ? " (the owner waits for this call)" : "");
+            return 0;
+        }
+        thread_wait(&hsq, timer_ticks() + 2);
+    }
+    return 1;
+}
+
+void dpmi_hs_freed(void)
+{
+    dctx->hs_owner = 0;
+    if (hsq.head)
+        thread_wake(&hsq);
+}
+
 static struct pmentry *entry_new(struct trapframe *tf, int kind, int b32, u16 *ss, u32 *sp)
 {
     struct pmentry *e;
     int sw;
+    if (!hs_turn())
+        return 0;
     if (dctx->ending || dctx->npe >= NENTRY || (sw = pick_stack(tf, b32, ss, sp)) < 0)
         return 0;
     e = &dctx->pe[dctx->npe];
@@ -109,6 +143,8 @@ static u32 ret_off(const struct pmentry *e) { return TR_RET + (u32)(e - dctx->pe
    virtual IF and TF off. */
 static void entry_go(struct trapframe *tf, struct pmentry *e, u16 cs, u32 eip, u16 ss, u32 sp)
 {
+    if (!dctx->npe)
+        dctx->hs_owner = current;
     dctx->npe++;
     if (e->switched)
         dctx->lstack_use++;
@@ -445,6 +481,8 @@ void dpmi_entry_return(struct trapframe *tf, u32 i, int via10)
         if (x->kind == PE_EXC)
             dctx->exc_depth--;
     }
+    if (!dctx->npe)
+        dpmi_hs_freed();
     e = &dctx->pe[i];
     switch (e->kind) {
     case PE_IRQ:

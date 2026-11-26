@@ -87,8 +87,6 @@ struct app {
     u8 end_asked, end_killed;                   /* another thread asked for the app's end (its exit, its crash) ... */
     u8 end_code;                                /* ... with this code */
     struct thread *dos_owner;                   /* the thread whose DOS or BIOS call is under way (the DOS lock) */
-    u32 first_wants;                            /* the first thread waits for such a call's end (an interrupt of its
-                                                   own, an exception): since this tick, 0 not. No other is begun */
     struct thread *api_owner;                   /* the thread making a GLOS call (the API lock) */
     struct waitq tq;                            /* its threads' waits for one another: the locks, a thread's end */
     u32 t0, ncalls;
