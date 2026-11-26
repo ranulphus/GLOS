@@ -4,6 +4,7 @@
 
 #include "fm.h"
 #include "../../kernel/drv/fmbank.c"
+#include "../../kernel/drv/fmtab.c"
 
 static int fails;
 #define CHECK(c) do { if (!(c)) { printf("fm_test: line %d: %s\n", __LINE__, #c); fails++; } } while (0)

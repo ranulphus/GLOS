@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """kernel/drv/fmbank.c: what GLOS's FM driver (kernel/drv/fm.c) plays General MIDI with.
 
-  mkfmbank.py FREEDOOM.ZIP OUT.c
+  mkfmbank.py FREEDOOM.ZIP BANK.c TABLES.c       (kernel/drv/fmbank.c, kernel/drv/fmtab.c)
 
 The instruments are Freedoom's GENMIDI lump (175 two-operator OPL patches: 128 melodic, 47 percussion; the Freedoom
 project's own, BSD-3-Clause: THIRD_PARTY.md), read from a release's freedoom1.wad as it is. The two tables beside
@@ -47,7 +47,8 @@ def main():
            " *",
            " * fm_bank: Freedoom's GENMIDI lump (freedoom 0.13.0, sha256 %s...)," % LUMP_SHA256[:16],
            " * Copyright (c) 2001-2024 Contributors to the Freedoom project, BSD-3-Clause (THIRD_PARTY.md).",
-           " * fm_fnum, fm_atten: computed (tools/mkfmbank.py says how). */",
+           " * (The driver's two computed tables, fm_fnum and fm_atten, are kernel/drv/fmtab.c: a bank file is fm_bank",
+           " * alone, in GENMIDI's layout, so another bank can take its place: fm.h, FM_PATCH_BYTES.) */",
            '#include "fm.h"',
            "",
            "const u8 fm_bank[FM_PATCHES][FM_PATCH_BYTES] = {"]
@@ -56,7 +57,13 @@ def main():
         name = g[8 + 175 * 36 + 32 * i:][:32].split(b"\0")[0].decode("ascii")
         out.append("    { %s },  /* %d %s */" % (",".join("%d" % b for b in r), i, name.replace("*/", "")))
     out.append("};")
-    out.append("")
+    open(sys.argv[2], "w").write("\n".join(out) + "\n")
+    out = ["/* Made by tools/mkfmbank.py (make fmbank): don't edit.",
+           " *",
+           " * fm_fnum, fm_atten: the FM driver's computed tables (tools/mkfmbank.py says how), apart from the instruments",
+           " * (kernel/drv/fmbank.c), which another bank may replace. */",
+           '#include "fm.h"',
+           ""]
     out.append("const u16 fm_fnum[384] = {")
     f = [round(440.0 * 2 ** ((i - 96) / 384.0) * 65536 / 49716) for i in range(384)]
     assert f[96] == 580 and max(f) < 1024
@@ -69,7 +76,7 @@ def main():
     for i in range(0, 128, 16):
         out.append("    " + ",".join("%d" % v for v in a[i:i + 16]) + ",")
     out.append("};")
-    open(sys.argv[2], "w").write("\n".join(out) + "\n")
+    open(sys.argv[3], "w").write("\n".join(out) + "\n")
 
 
 main()

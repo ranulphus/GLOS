@@ -18,8 +18,9 @@
  *   }
  *
  * Building it into another project (no copies: the sources are GLOS's, compiled where they are; DJGPP):
- *   the driver's half, freestanding with the kernel's headers: kernel/drv/fm.c kernel/drv/fmbank.c
- *     kernel/drv/midiq.c sdk/fm/fmq.c, each with
+ *   the driver's half, freestanding with the kernel's headers: kernel/drv/fm.c kernel/drv/fmbank.c (the
+ *     instruments: another bank in GENMIDI's layout may take its place) kernel/drv/fmtab.c kernel/drv/midiq.c
+ *     sdk/fm/fmq.c, each with
  *     -ffreestanding -IGLOS/include -IGLOS/kernel/include -IGLOS/kernel/include/libc
  *   the program's half, as any DJGPP file: sdk/fm/fmsynth.c with -IGLOS/include
  * (GLOS's Makefile does it: make build/sdk/libfmsynth.a.) */
