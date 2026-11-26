@@ -26,6 +26,8 @@
 # LOOPA_MIN_FREE_MB (8192: an emulator starts only while that machine has this much memory available; the owner's
 # choice of 2026-11-17, after a gate's 5 GB helped the kernel's OOM killer end another project's job there). There
 # the gate's processes are also the first the OOM killer ends (LOOPA_OOM_FIRST, tests/loopa/jobs.py).
+# LOOPA_NATIVE=1: every suite's cases on native boots (jobs.py --native: those that need a DOS under GLOS
+# skipped), here and there (docs/v1/native-dos.md, N7).
 set -euo pipefail
 # (The whole of it is read before any of it runs, in these braces: a script changed on disk while it waits,
 # by an edit or a checkout, would go on from the wrong place.)
@@ -167,6 +169,7 @@ ssh -o BatchMode=yes "$host" "set -e
     ln -sfn ../../86box/bin/86Box-$key \$HOME/.cache/mga-glide/86box-glosgate/bin/86Box
     ln -sfn ../86box/roms \$HOME/.cache/mga-glide/86box-glosgate/roms
     MGA_NICE=$niceness LOOPA_MAX_VMS=$vms LOOPA_MIN_FREE_MB=$minfree LOOPA_OOM_FIRST=1 GATE_LANES=$lanes JOBS=$tjobs \
+        LOOPA_NATIVE='${LOOPA_NATIVE:-}' \
         HOST_SUITES='$(echo $HOST_SUITES)' \
         LOOPA_SUITES='$(echo $there)' \
         setsid nohup bash tools/merge-gate-there.sh > out/gate-run.log 2>&1 < /dev/null &"
