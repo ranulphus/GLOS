@@ -533,6 +533,9 @@ EMS and CD-ROM; USB mass storage partly (a stick boots through the BIOS).
   refresh case on 86Box's G400 (60, 70, 75, 85 within 1%) and S3 (not VBE 3.0: the BIOS's own, said why). Owed:
   real monitors on the benches (a CRT for 85 Hz).
 
+- A display card the BIOS couldn't start (2026-11-26, before v1): GLOS places its ranges and runs its BIOS so that
+  it is GLOS's display (bench C's PCI G450 beside its ViRGE); plan in [v1/native-dos.md](v1/native-dos.md), N4.
+
 **G3. The media**
 
 - **The setup floppy**, 1.44 MB (and 1.2 MB for a 5.25-inch PC): the packed kernel, the shell, the network; the

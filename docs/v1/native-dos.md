@@ -1186,6 +1186,28 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   bootinfo 16's ems_kb (0 auto, BI_EMS_OFF off). `jobs.py cdrom`'s ems case: EMSTEST's checks, the frame at C800h
   with 512 pages, then 1024 KB (64 pages) and off (no EMMXXXX0, reason=setting) after a restart each, on the bf6
   and the 486: PASS. Owed: games that want EMS, native machines' own EMS.
+- **N4, a display card the BIOS couldn't start (planned 2026-11-26; before v1, the owner's choice).** Bench C's
+  486 (UMC 8881 board) with a PCI G450 (a G450 behind its own HiNT HB6 PCI-to-PCI bridge): as the only card, a
+  black screen from power-on; beside the ViRGE/DX, the BIOS configures the bridge (bus 1; windows FD000000-FE8FFFFF
+  and, prefetchable, FC000000-FC8FFFFF) but leaves the G450's 32 MB frame buffer (BAR 0), its 8 MB ILOAD range
+  (BAR 2) and its 128 KB ROM at 0: only the 16 KB registers (BAR 1) have an address, so the card's BIOS never ran.
+  tests/dos/pciplace.c (PCIPLACE) there: the ROM placed in the bridge's window reads 55AA and its PCIR block (102B:
+  0525, 34 KB of image), and placed at F4000000 with the bridge's prefetchable window widened to it reads the same:
+  the UMC chipset passes that range to the PCI bus and the bridge passes it on; everything put back. The steps:
+  D1 GLOS places what the BIOS left unplaced: a display card's (class 03) memory BARs and ROM that read 0, sized
+  with its decode off, each in free space (every function's BARs, every bridge's windows, the E820 map's RAM and
+  reserved ranges and the top 20 MB kept clear), aligned to its size, its parent bridges' windows widened to take
+  it (a prefetchable BAR in the prefetchable window); a plain C allocator, host-tested; `GLOS-PCI place` lines.
+  D2 which card is GLOS's display: the BIOS's primary, as now, unless [display] card names another by its PCI
+  address (the owner's to confirm). D3 the named card started: its ROM read through its ROM BAR; the VGA ranges
+  switched to it (the old primary's I/O and memory decode off, the card's bridges' VGA Enable on, its own decode
+  on); its image mapped at C0000h for the system VM by GLOS's page tables (no chipset shadowing); its entry
+  (C000:0003, AX its bus and device) called as a nested real-mode call with a time limit; then INT 10h, VBE and the
+  desktop are the card's (the loader's and the kernel's first lines stay on the old primary). Native only. D4 Loop
+  A: a second display card in 86Box's 486 profile (if our 86Box takes one), its ranges cleared before GLOS starts to
+  take D1's path, the desktop's shot from it. D5 bench C: the G450 as GLOS's display; then DOS-GL's Glide and GL
+  there (asked). Unknowns: what the card's BIOS asks of a 1995 BIOS at its start (a POST memory manager it may not
+  find), and whether every board lets the VGA ranges move.
 - **N4, the keyboard's layout (2026-11-25, native-dos; KEYB's work):** the system VM's INT 09h is an ARPL of GLOS's
   in front of the BIOS's handler (kernel/vm/vkeyb.c). A key pressed whose character on [region] layout (keymap.h:
   Shift, Caps Lock, Num Lock, AltGr from the BIOS's flags) differs from the US one, and the 102nd key, GLOS answers:
