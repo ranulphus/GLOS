@@ -1198,8 +1198,9 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   with its decode off, each in free space (every function's BARs, every bridge's windows, the E820 map's RAM and
   reserved ranges and the top 20 MB kept clear), aligned to its size, its parent bridges' windows widened to take
   it (a prefetchable BAR in the prefetchable window); a plain C allocator, host-tested; `GLOS-PCI place` lines.
-  D2 which card is GLOS's display: the BIOS's primary, as now, unless [display] card names another by its PCI
-  address (the owner's to confirm). D3 the named card started: its ROM read through its ROM BAR; the VGA ranges
+  D2 which card is GLOS's display (the owner, 2026-11-26): [display] card = auto, the card the BIOS started, as
+  now, or a card's PCI address (01:00.0); the Control Panel's Display page lists the cards. Nothing changes on a
+  PC unless it is set. D3 the named card started: its ROM read through its ROM BAR; the VGA ranges
   switched to it (the old primary's I/O and memory decode off, the card's bridges' VGA Enable on, its own decode
   on); its image mapped at C0000h for the system VM by GLOS's page tables (no chipset shadowing); its entry
   (C000:0003, AX its bus and device) called as a nested real-mode call with a time limit; then INT 10h, VBE and the
