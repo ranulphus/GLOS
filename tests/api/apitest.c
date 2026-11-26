@@ -1334,7 +1334,8 @@ static int setting_mode(void)
                        rg.clock12, rg.decimal, rg.thousands, rg.first_day, rg.codepage);
         } else if (e->kind == GLOS_EV_THEME) {
             if (glos_theme(&th) == 0)
-                printf("EV theme %s flags=%u face=%06x\n", th.name, th.flags, th.colour[GLOS_ROLE_FACE]);
+                printf("EV theme %s flags=%u face=%06x desk=%06x\n", th.name, th.flags, th.colour[GLOS_ROLE_FACE],
+                       th.colour[GLOS_ROLE_DESK]);
         } else if (e->kind == GLOS_EV_SAVER) {
             printf("EV saver %u\n", ((struct glos_ev_saver *)ev)->on);
         }

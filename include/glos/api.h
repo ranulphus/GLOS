@@ -1626,7 +1626,7 @@ struct glos_setting_watch {
 #define GLOS_ROLE_CHOSEN          10    /* what is selected: its ground ... */
 #define GLOS_ROLE_CHOSEN_TEXT     11
 #define GLOS_ROLE_LINK            12    /* a link's text, on a field */
-#define GLOS_ROLE_DESK            13    /* the desktop */
+#define GLOS_ROLE_DESK            13    /* the desktop ([desktop] colour's, where that isn't "theme") */
 #define GLOS_ROLE_FRAME           14    /* a window's border */
 #define GLOS_ROLE_TITLE           15    /* the title bar of the window with the focus ... */
 #define GLOS_ROLE_TITLE_TEXT      16

@@ -62,6 +62,7 @@ void services_changed(void) { snprintf(applied, sizeof applied, "services"); }
 void desk_quiet(int on) { snprintf(applied, sizeof applied, "quiet %d", on); }
 void desk_bar_place(int top, int hide) { snprintf(applied, sizeof applied, "bar %d %d", top, hide); }
 int desk_theme_set(const char *name) { snprintf(applied, sizeof applied, "theme %s", name); return 0; }
+void desk_colour_set(u32 rgb) { snprintf(applied, sizeof applied, "colour %08x", rgb); }
 void desk_kick(void) { }
 void idle_config(void) { snprintf(applied, sizeof applied, "saver"); }
 void clock_zone(const char *tz) { snprintf(applied, sizeof applied, "zone %s", tz); }
@@ -260,6 +261,19 @@ int main(void)
                   r >= 0 ? out : "", T[i].want);
         }
         CHECK(cfg_text_set("[net]\r\n", 7, "net", "name", "abcdefgh", out, 12) == -1, "cfg_text_set: no room");
+    }
+    {                                           /* [desktop] colour (2026-11-26): RRGGBB or theme, and what's applied */
+        unsigned rgb = 0;
+        CHECK(cfg_colour("204060", &rgb) == 0 && rgb == 0x204060, "cfg_colour 204060: %06x", rgb);
+        CHECK(cfg_colour("aBcDeF", &rgb) == 0 && rgb == 0xABCDEF, "cfg_colour aBcDeF: %06x", rgb);
+        CHECK(cfg_colour("theme", &rgb) == 1, "cfg_colour theme");
+        CHECK(cfg_colour("20406", &rgb) < 0 && cfg_colour("2040600", &rgb) < 0 && cfg_colour("20406g", &rgb) < 0
+              && cfg_colour("", &rgb) < 0, "cfg_colour: not colours");
+        CHECK(kcfg_set("desktop", "colour", "20406g", why, sizeof why) < 0 && why[0], "a wrong colour refused");
+        r = kcfg_set("desktop", "colour", "204060", why, sizeof why);
+        CHECK(r == CFG_NOW && !strcmp(applied, "colour 00204060"), "set colour: %d %s", r, applied);
+        r = kcfg_set("desktop", "colour", 0, why, sizeof why);
+        CHECK(r == CFG_NOW && !strcmp(applied, "colour ffffffff"), "unset colour (the theme's): %d %s", r, applied);
     }
     printf("cfg_test: %d failures\n", fails);
     return fails != 0;

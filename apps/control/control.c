@@ -823,7 +823,7 @@ int main(int argc, char **argv)
     static const char *const heads[2] = { GUI_N("Kind"), GUI_N("Opened by") };
     static const int widths[2] = { 70, 200 };
     struct gui_widget *box, *page, *form, *row, *left, *b, *side = NULL;
-    struct ctl *wall = NULL, *style = NULL, *begin = NULL, *saver, *run, *zone, *devoff;
+    struct ctl *wall = NULL, *style = NULL, *begin = NULL, *colour = NULL, *saver, *run, *zone, *devoff;
     int s, i;
     if (gui_init(argc, argv) != 0) {
         printf("CONTROL no GLOS\n");
@@ -900,6 +900,8 @@ int main(int argc, char **argv)
                     style = c;
                 if (!strcmp(sec, "desktop") && !strcmp(c->k->key, "start"))
                     begin = c;
+                if (!strcmp(sec, "desktop") && !strcmp(c->k->key, "colour"))
+                    colour = c;
             }
         if (!strcmp(sec, "net"))
             status_add_net(page);               /* (how the network is now, under its settings: status.c) */
@@ -923,7 +925,8 @@ int main(int argc, char **argv)
             status_add_saver(tabs, s, page, saver->w, saver->choice, argv[0]);  /* (the saver chosen, running small) */
     }
     if (side && wall && style)
-        look_add(side, win, wall->w, style->w, style->choice, begin ? begin->w : NULL, argv[0]);
+        look_add(side, win, wall->w, style->w, style->choice, begin ? begin->w : NULL, colour ? colour->w : NULL,
+                 argv[0]);
     /* A last page that is not one of GLOS.CFG's: the secrets store (status.c). */
     status_add_secrets(gui_tab(tabs, GUI_T("Secrets")));
     help = gui_label(box, "");

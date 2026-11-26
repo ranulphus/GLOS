@@ -156,6 +156,8 @@ const struct cfg_key cfg_schema[] = {
       "A picture for the desktop (PNG, JPEG, BMP, GIF or TGA); empty: the theme's colour" },
     { "desktop", "wallpaper_style", CFG_CHOICE, CFG_NOW, 0, 0, "fill|stretch|centre|tile", "fill", "Wallpaper st&yle",
       "How the picture is put on the desktop: made to cover it, made its size, in its middle, or side by side" },
+    { "desktop", "colour", CFG_TEXT, CFG_NOW, 5, 6, "colour", "theme", "Desktop co&lour",
+      "The desktop's colour where no picture covers it: theme (the theme's), or red, green and blue as six hexadecimal digits (204060)" },
     /* [devices]: the devices GLOS's drivers leave to DOS (phase F, the Devices page; kernel/drv/devlist.c) */
     { "devices", "off", CFG_TEXT, CFG_RESTART, 0, 190, "line", "", "&Left to DOS",
       "Devices GLOS's drivers leave to DOS: a PCI device by its place (00:03.0), sb16, crystal or ne2000, spaces "
@@ -511,6 +513,28 @@ const struct cfg_key *cfg_find(const char *section, const char *key)
     return 0;
 }
 
+int cfg_colour(const char *value, unsigned *rgb)
+{
+    unsigned c = 0;
+    int i;
+    if (same(value, "theme"))
+        return 1;
+    for (i = 0; i < 6; i++) {
+        char d = value[i];
+        c <<= 4;
+        if (d >= '0' && d <= '9')
+            c |= (unsigned)(d - '0');
+        else if ((d | 0x20) >= 'a' && (d | 0x20) <= 'f')
+            c |= (unsigned)((d | 0x20) - 'a' + 10);
+        else
+            return -1;
+    }
+    if (value[6])
+        return -1;
+    *rgb = c;
+    return 0;
+}
+
 static int text_class(const char *cls, const char *v)
 {
     for (; *v; v++) {
@@ -579,6 +603,12 @@ int cfg_check(const struct cfg_key *k, const char *v, char *why, int room)
                     return 0;
             }
             return say(why, room, "glos, dos, or partition 1 to 8", "", "");
+        }
+        if (same(k->choices ? k->choices : "", "colour")) {
+            unsigned rgb;
+            if (cfg_colour(v, &rgb) < 0)
+                return say(why, room, "theme, or six hexadecimal digits: red, green, blue (as 204060)", "", "");
+            return 0;
         }
         if (same(k->choices ? k->choices : "", "tz")) {
             struct tz z;

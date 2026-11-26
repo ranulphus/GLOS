@@ -116,6 +116,7 @@ void deskin_double_click(u32 ms);       /* [input] double_click: the title bar's
 struct theme;
 const struct theme *desk_theme(void);   /* the theme in force (kernel/wm/theme.c) */
 int desk_theme_set(const char *name);   /* [desktop] theme: 0, or -1 no such theme */
+void desk_colour_set(u32 rgb);          /* [desktop] colour: 0x00RRGGBB, or THEME_DESK_THEME (theme.h) */
 void desk_bar_group(int how);           /* [desktop] group: the task bar's buttons by program (WG_) */
 void desk_quiet(int on);
 void desk_notify_own(const char *title, const char *text);     /* one of GLOS's own notifications, from any thread */

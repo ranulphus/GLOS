@@ -249,6 +249,12 @@ Each step is a branch, its tests, the gate, and a merge; the order is the one be
   it on an 8-bit desktop. Made again when either setting changes (the shell watches `[desktop]`:
   `GLOS_EV_SETTING`), when the theme changes, and when the desktop's size does. One that can't be read is no
   wallpaper. It costs the desktop's size in 32-bit pixels of the shell's memory (1.2 MB at 640 by 480).
+- **`[desktop] colour`** (the plan's third key, left out of D4 as first built; added 2026-11-26, the owner's
+  choice: any colour, by a picker): `theme` (the default: the theme's own) or `RRGGBB`. The kernel's theme takes
+  the desktop's colour from it (`theme_desk`, kernel/wm/theme.c), so the window manager's desktop, every app's
+  `GLOS_ROLE_DESK` (the theme call; `GLOS_EV_THEME` when it changes) and so Files' desktop and the colour round a
+  centred picture follow it. The Desktop page's Pick colour... opens the colour dialog; its picture shows the
+  field's colour before it is applied. On an 8-bit desktop it is the palette's nearest colour (gfx_pal_nearest).
 - **The desktop window follows the work area** (a gap of D1's): when the task bar goes to the top or hides,
   the shell's desktop window is moved and sized to the work area, so its icons are never under the bar.
 - **Not done here:** the Control Panel's Appearance page with a file chooser and a preview (D5: the generic

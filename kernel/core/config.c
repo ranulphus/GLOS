@@ -30,6 +30,7 @@
 #include "nic.h"
 #include "vm.h"
 #include "desk.h"
+#include "theme.h"
 #include "dos.h"
 #include "glos/region.h"
 #include "idle.h"
@@ -582,6 +583,9 @@ void kcfg_apply(const char *section, const char *key, const char *v)
         desk_bar_group(same(v, "always") ? WG_ALWAYS : same(v, "never") ? WG_NEVER : WG_AUTO);
     } else if (same(section, "desktop") && same(key, "theme")) {
         desk_theme_set(v);
+    } else if (same(section, "desktop") && same(key, "colour")) {
+        unsigned rgb;
+        desk_colour_set(cfg_colour(v, &rgb) == 0 ? rgb : THEME_DESK_THEME);
     } else if (same(section, "region")) {       /* (the task bar's clock is written again) */
         u32 f = irq_save();
         region_set(&region, key, v);
@@ -619,6 +623,8 @@ static void apply_read(void)
         kcfg_apply("desktop", "bar", "");
         kcfg_get("desktop", "theme", v, sizeof v);
         kcfg_apply("desktop", "theme", v);
+        kcfg_get("desktop", "colour", v, sizeof v);
+        kcfg_apply("desktop", "colour", v);
         for (i = 0; i < ARRAY_SIZE(keys); i++) {
             kcfg_get("region", keys[i], v, sizeof v);
             kcfg_apply("region", keys[i], v);

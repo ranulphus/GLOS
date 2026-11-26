@@ -66,5 +66,8 @@ int cfg_section_ok(const char *section);
 /* [memory] stub_page's value (docs/upper-memory.md): 0 off, 1 auto, the segment of a 4 KB page from C800h to
    EF00h written as four hex digits (D800), or -1. */
 long cfg_page(const char *value);
+/* [desktop] colour: 0 a colour (*rgb 0x00RRGGBB, from six hexadecimal digits RRGGBB), 1 "theme" (the theme's own
+   desktop colour), -1 neither. */
+int cfg_colour(const char *value, unsigned *rgb);
 
 #endif

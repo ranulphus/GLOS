@@ -32,6 +32,7 @@ theme = slate
 | desktop theme | slate, dark, contrast | The colours |
 | desktop text | small, normal, large | The size of text |
 | desktop wallpaper | a picture's path | The picture behind the icons |
+| desktop colour | theme, or RRGGBB (as 204060) | The desktop's colour where no picture covers it: the quickest on slow PCs |
 | desktop bar | bottom, top | Where the task bar is |
 | region layout | us, uk | The keyboard |
 | region codepage | dos, 437, 850, 852, 866, 737 | DOS's letters beyond English |

@@ -265,6 +265,7 @@ static void bar_text(struct wm *m)
 /* ---- the theme ([desktop] theme; kernel/wm/theme.c) */
 
 static const struct theme *theme_now = &themes[0], *theme_shown = &themes[0];
+static u32 desk_shown = THEME_DESK_THEME;       /* the [desktop] colour the frames were last drawn with */
 
 const struct theme *desk_theme(void) { return theme_now; }
 
@@ -290,6 +291,12 @@ void desk_bar_group(int how)
 {
     wm_bar_group(desk_lock(), how);
     desk_unlock();
+    desk_kick();
+}
+
+void desk_colour_set(u32 rgb)
+{
+    theme_desk = rgb;
     desk_kick();
 }
 
@@ -342,10 +349,16 @@ static void desk_thread(void *arg)
         if (!fb && scan_id)                     /* (the screen is a session's: the display is its program's, and the
                                                    desktop's own again when it comes back) */
             scan_id = scan_left = 0;
-        if (theme_shown != theme_now) {         /* a new theme: the frames, the bar and the desktop drawn again */
+        if (theme_shown != theme_now || desk_shown != theme_desk) {     /* a new theme or desktop colour: the
+                                                                           frames, the bar and the desktop again */
+            if (desk_shown != theme_desk && theme_shown == theme_now)
+                kprintf("GLOS-DESK colour=%06x%s\n", theme_desk_of(theme_now) & 0xFFFFFF,
+                        theme_desk == THEME_DESK_THEME ? " (the theme's)" : "");
+            else
+                kprintf("GLOS-DESK theme=%s\n", theme_now->name);
             theme_shown = theme_now;
+            desk_shown = theme_desk;
             theme_show(m, theme_now);
-            kprintf("GLOS-DESK theme=%s\n", theme_now->name);
             wm_bar_again(m);
             repaint = 1;
         }

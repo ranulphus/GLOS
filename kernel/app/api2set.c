@@ -202,6 +202,7 @@ static int theme(struct trapframe *tf)
     q.roles = GLOS_ROLES;
     for (i = 0; i < GLOS_ROLES; i++)
         q.colour[i] = t->colour[i];
+    q.colour[GLOS_ROLE_DESK] = theme_desk_of(t);        /* ([desktop] colour, when it isn't the theme's) */
     q.border = t->border;
     q.title = t->title;
     q.bar = t->bar;
@@ -297,7 +298,8 @@ static void tell(struct app *a, void *arg)
 
 static void changed(const char *section, const char *key, const char *value)
 {
-    struct news n = { section, key, same(section, "desktop") && (same(key, "theme") || same(key, "text")) };
+    struct news n = { section, key, same(section, "desktop") && (same(key, "theme") || same(key, "text")
+                                                                  || same(key, "colour")) };
     (void)value;
     app_each(tell, &n);
     api2_shell_changed(section);                /* (a program's profile: the Start menu's entries, the shell's) */

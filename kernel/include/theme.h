@@ -6,6 +6,7 @@
 #include "types.h"
 
 #define THEME_ROLES 32                  /* (GLOS_ROLES) */
+#define THEME_DESK_THEME 0xFFFFFFFFu    /* theme_desk: the theme's own desktop colour */
 
 struct theme {
     const char *name;
@@ -23,5 +24,10 @@ void theme_look(const struct theme *t, struct theme_look *l);
 extern const struct theme themes[];
 extern const u32 themes_n;
 const struct theme *theme_find(const char *name);       /* 0: no such theme */
+
+/* [desktop] colour (kernel/core/config.c sets it): the desktop's colour in place of every theme's, or
+   THEME_DESK_THEME. theme_desk_of: the desktop's colour now, with t the theme in force. */
+extern u32 theme_desk;
+u32 theme_desk_of(const struct theme *t);
 
 #endif

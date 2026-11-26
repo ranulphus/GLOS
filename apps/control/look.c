@@ -1,6 +1,7 @@
 /* CONTROL: the desktop's look (phase D, docs/v1/phase-d.md D5): beside the Desktop page's settings, a small
- * picture of the desktop as the wallpaper and its style in the page would make it (not yet applied: what the field
- * and the list say), and a button that chooses the picture with the file dialog.
+ * picture of the desktop as the wallpaper, its style and the desktop's colour in the page would make it (not yet
+ * applied: what the fields and the list say), a button that chooses the picture with the file dialog, and one
+ * that picks the colour with the colour dialog.
  *
  * The picture is made as FILES makes the real one (apps/files/wallmake.h), for the screen's own work area, then
  * made small (80 by 60); the task bar and a window are drawn on it in the theme's colours. It follows the field and the list:
@@ -9,6 +10,7 @@
 
 #include <strings.h>
 
+#include <glos/config.h>
 #include "control.h"
 
 #define PW 80                           /* (what the Desktop page has room for beside its settings at 640x480) */
@@ -16,17 +18,24 @@
 
 static struct gui_window *owner;
 static char su_home[100];               /* this program's folder (GLOS's own programs are beside it) */
-static struct gui_widget *field, *choice, *view;
+static struct gui_widget *field, *choice, *view, *colour;
 static const char *const *styles;       /* the choice's values, as the schema has them */
 static unsigned small[PW * PH];
 static int have;                        /* small[] is a wallpaper's (else the desktop's colour) */
-static char seen_path[200], seen_style[16];
+static char seen_path[200], seen_style[16], seen_colour[8];
 static int still;                       /* polls since the field last changed */
 
 static const char *style_now(void)
 {
     int v = gui_value(choice);
     return v >= 0 && styles[v] ? styles[v] : "fill";
+}
+
+/* The desktop's colour as the page says it now: its field's, or (theme, or not a colour yet) the theme's. */
+static unsigned back(void)
+{
+    unsigned rgb;
+    return colour && cfg_colour(gui_get_text(colour), &rgb) == 0 ? rgb : GUI_ROLE(GLOS_ROLE_DESK);
 }
 
 /* The picture again, from what the page says now. */
@@ -40,7 +49,7 @@ static void make(void)
     if (glos_screen(&scr) == 0 && scr.work_w > 0 && scr.work_h > 0)
         w = scr.work_w, h = scr.work_h;
     have = 0;
-    if ((full = wallmake(seen_path, seen_style, w, h, GUI_ROLE(GLOS_ROLE_DESK))) != NULL) {
+    if ((full = wallmake(seen_path, seen_style, w, h, back())) != NULL) {
         for (y = 0; y < PH; y++)                /* (each place the mean of the pixels it stands for) */
             for (x = 0; x < PW; x++) {
                 int x0 = x * w / PW, x1 = (x + 1) * w / PW, y0 = y * h / PH, y1 = (y + 1) * h / PH, i, j;
@@ -64,7 +73,7 @@ static void draw(struct gui_widget *w, struct gfx_surface *s)
     if (have)
         gfx_image(s, x, y, small, PW, PH, PW);
     else
-        gfx_fill(s, x, y, PW, PH, GUI_ROLE(GLOS_ROLE_DESK));
+        gfx_fill(s, x, y, PW, PH, back());
     gfx_fill(s, x + 14, y + 10, 36, 24, GUI_ROLE(GLOS_ROLE_FACE));              /* a window, */
     gfx_fill(s, x + 14, y + 10, 36, 4, GUI_ROLE(GLOS_ROLE_TITLE));
     gfx_frame(s, x + 14, y + 10, 36, 24, GUI_ROLE(GLOS_ROLE_FRAME));
@@ -98,18 +107,34 @@ static void choose(struct gui_widget *b, int what)
     }
 }
 
-/* The picture follows the page: made again once the field has been the same for two looks. */
+/* Pick colour...: the colour dialog, from the field's colour (or the desktop's now); the one picked written in
+   the field as the setting has it (RRGGBB). */
+static void pick(struct gui_widget *b, int what)
+{
+    unsigned rgb = back();
+    char hex[8];
+    (void)b, (void)what;
+    if (gui_colour_dialog(owner, GUI_T("Desktop Colour"), &rgb) == 1) {
+        snprintf(hex, sizeof hex, "%06X", rgb & 0xFFFFFF);
+        gui_set_text(colour, hex);
+        still = 99;                             /* (chosen, not typed: shown at once) */
+        look_poll();
+    }
+}
+
+/* The picture follows the page: made again once the fields have been the same for two looks. */
 void look_poll(void)
 {
-    const char *p, *st;
+    const char *p, *st, *co;
     if (!field)
         return;
-    p = gui_get_text(field), st = style_now();
-    if (!strcmp(p, seen_path) && !strcmp(st, seen_style))
+    p = gui_get_text(field), st = style_now(), co = colour ? gui_get_text(colour) : "";
+    if (!strcmp(p, seen_path) && !strcmp(st, seen_style) && !strncmp(co, seen_colour, sizeof seen_colour - 1))
         return;
     if (strcmp(st, seen_style) || ++still >= 2) {
         snprintf(seen_path, sizeof seen_path, "%s", p);
         snprintf(seen_style, sizeof seen_style, "%s", st);
+        snprintf(seen_colour, sizeof seen_colour, "%s", co);
         still = 0;
         make();
     }
@@ -222,9 +247,10 @@ static void startup(struct gui_widget *b, int what)
 }
 
 /* The picture and its button in `side`, for the wallpaper's field and its style's list (whose values are
-   `values`, NULL-ended); and Startup..., for the field of the programs started with the desktop (`start`). */
+   `values`, NULL-ended); Pick colour..., for the desktop colour's field (`desk_colour`); and Startup..., for the
+   field of the programs started with the desktop (`start`). */
 void look_add(struct gui_widget *side, struct gui_window *win, struct gui_widget *path, struct gui_widget *style,
-              const char *const *values, struct gui_widget *start, const char *argv0)
+              const char *const *values, struct gui_widget *start, struct gui_widget *desk_colour, const char *argv0)
 {
     const char *sl = NULL, *q;
     size_t i;
@@ -240,8 +266,11 @@ void look_add(struct gui_widget *side, struct gui_window *win, struct gui_widget
     field = path;
     choice = style;
     styles = values;
+    colour = desk_colour;
     view = gui_canvas(side, PW + 2, PH + 2, draw, NULL);
     gui_button(side, GUI_T("&Choose..."), choose, 0);
+    if (colour)
+        gui_button(side, GUI_T("&Pick colour..."), pick, 0);
     if (start)
         gui_button(side, GUI_T("Start&up..."), startup, 0);
     seen_path[0] = 1, seen_path[1] = 0;         /* (nothing seen: the first look makes it) */

@@ -6711,7 +6711,14 @@ def api_set_case(profile, vcard, card):
         checks["app-sets"] = said("SET ok=1") and said("SET refused r=10 why=*")
         # A watched section's change, and one of a section it doesn't watch.
         checks["theme-set"] = agent.ssh("glos config set desktop theme dark")[0] == 0
-        checks["theme-told"] = said("EV setting desktop theme") and said("EV theme dark flags=1 face=333333")
+        checks["theme-told"] = said("EV setting desktop theme") and said("EV theme dark flags=1 face=333333 desk=000033")
+        # [desktop] colour (2026-11-26): the theme's desktop colour replaced, told as a theme change; refused if
+        # not a colour; the theme's own again when unset.
+        checks["colour-set"] = agent.ssh("glos config set desktop colour 204060")[0] == 0
+        checks["colour-told"] = said("EV setting desktop colour") and said("EV theme dark flags=1 face=333333 desk=204060")
+        checks["colour-bad"] = agent.ssh("glos config set desktop colour 20406")[0] != 0
+        agent.ssh("glos config unset desktop colour")
+        checks["colour-back"] = said("EV theme dark flags=1 face=333333 desk=000033")
         agent.ssh("glos config set input pointer_speed 2")
         agent.ssh("glos config set desktop snap off")
         checks["snap-told"] = said("EV setting desktop snap")
@@ -6719,7 +6726,7 @@ def api_set_case(profile, vcard, card):
         agent.ssh("glos config unset input pointer_speed")
         agent.ssh("glos config unset desktop snap")
         agent.ssh("glos config unset desktop theme")
-        checks["theme-back"] = said("EV theme slate flags=0 face=cccccc")
+        checks["theme-back"] = said("EV theme slate flags=0 face=cccccc desk=666666")
         checks["theme-bad"] = agent.ssh("glos config set desktop theme pink")[0] != 0
         agent.ssh("glos config set region clock 12")
         agent.ssh("glos config set region date dd/mm/yyyy")
@@ -13511,7 +13518,8 @@ CONTROL_TEXTS = {"hostname": "cptest", "start": "NOTEPAD.EXE", "console": "C:\\K
                  "zone": "CET-1CEST,M3.5.0,M10.5.0/3", "stub_page": "D800", "wallpaper": "C:\\CP\\WALL.PNG",
                  "run": "NOSVC.EXE /Q",     # (a service that isn't there: tried, and tried again later)
                  "map": "rx ry lx -ly 2 1 4 none",
-                 "default": "dos", "glos_name": "CP GLOS", "dos_name": "CP DOS"}     # ([boot], 2026-11-25)
+                 "default": "dos", "glos_name": "CP GLOS", "dos_name": "CP DOS",     # ([boot], 2026-11-25)
+                 "colour": "204060"}        # ([desktop] colour, 2026-11-26)
 
 
 def cfg_pages():
@@ -14025,10 +14033,11 @@ def main():
         if os.environ.get("API_ONLY") == "net":     # (API_ONLY=net: the network's case alone)
             wins = [c for c in [("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k")] if not a.profile or c[0] in a.profile]
             return 0 if all(r[1] for r in matrix(api_net_case, wins, a.jobs)) else 1
-        if os.environ.get("API_ONLY") in ("job", "audio", "midi"):     # (one of the window cases' groups alone)
+        if os.environ.get("API_ONLY") in ("job", "audio", "midi", "set"):  # (one of the window cases' groups alone)
             wins = [c for c in [("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k")] if not a.profile or c[0] in a.profile]
-            fn = {"job": api_job_case, "audio": api_audio_case, "midi": api_midi_case}[os.environ["API_ONLY"]]
-            if os.environ["API_ONLY"] != "job":
+            fn = {"job": api_job_case, "audio": api_audio_case, "midi": api_midi_case,
+                  "set": api_set_case}[os.environ["API_ONLY"]]
+            if os.environ["API_ONLY"] in ("audio", "midi"):
                 wins += [w + ("cs4236b",) for w in wins[:1]]
             return 0 if all(r[1] for r in matrix(fn, wins, a.jobs)) else 1
         cases = combos if (a.profile or a.boot) else [("bf6", "default"), ("486dx2", "himemx")]

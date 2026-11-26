@@ -3,9 +3,9 @@
 #define CONTROL_H
 #include <glos/gui.h>
 
-/* look.c: the desktop's look beside the Desktop page (the wallpaper's picture, and Choose...) */
+/* look.c: the desktop's look beside the Desktop page (the wallpaper's picture, Choose..., Pick colour...) */
 void look_add(struct gui_widget *side, struct gui_window *win, struct gui_widget *path, struct gui_widget *style,
-              const char *const *values, struct gui_widget *start, const char *argv0);
+              const char *const *values, struct gui_widget *start, struct gui_widget *colour, const char *argv0);
 void look_poll(void);                   /* the picture follows the field and the list */
 
 /* status.c: how things are now, under a page's settings */

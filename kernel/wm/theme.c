@@ -80,9 +80,13 @@ const struct theme *theme_find(const char *name)
     return 0;
 }
 
+u32 theme_desk = THEME_DESK_THEME;
+
+u32 theme_desk_of(const struct theme *t) { return theme_desk != THEME_DESK_THEME ? theme_desk : t->colour[GLOS_ROLE_DESK]; }
+
 void theme_look(const struct theme *t, struct theme_look *l)
 {
-    l->desk = t->colour[GLOS_ROLE_DESK];
+    l->desk = theme_desk_of(t);
     l->edge = t->colour[GLOS_ROLE_FRAME];
     l->face = t->colour[GLOS_ROLE_TITLE];
     l->text = t->colour[GLOS_ROLE_TITLE_TEXT];
