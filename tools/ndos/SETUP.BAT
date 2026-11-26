@@ -2,9 +2,14 @@
 REM GLOS Setup (docs/v1/native-dos.md, N5; phase G's on-PC installer): GLOS put on one of this PC's hard disks
 REM from its setup floppy alone, to start with no DOS. Text, in GLOS's own shell. With nobody at a keyboard every
 REM question's answer is the one that changes nothing (CHOICE's /T key): GLOS Setup then stops.
+REM Started from GLOS's boot CD (tools/ndos/cdimage.py: this floppy is the CD's El Torito image), GLOS's whole
+REM system is copied from the CD's \GLOS, which GLOSCD.ID in the CD's root tells from a hard disk's GLOS.
 ECHO.
 ECHO GLOS Setup puts GLOS on one of this PC's hard disks, to start with no DOS.
 ECHO Nothing is written until the last question has been answered.
+SET FROM=
+FOR %%D IN (C D E F G H I J K L M N O P Q R S T U V W X Y Z) DO IF EXIST %%D:\GLOSCD.ID SET FROM=%%D:\GLOS
+IF NOT "%FROM%"=="" ECHO GLOS's files come from the CD in %FROM%.
 ECHO.
 DISK
 ECHO.
@@ -43,11 +48,14 @@ ECHO.
 ECHO Disk %DISKN% %HOW%, the name %PCNAME%, the %LAYOUT% keyboard.
 CHOICE /C:YN /T:N,30 Put GLOS there now
 IF ERRORLEVEL 2 GOTO STOP
-DISK %DISKN% INSTALL %HOW% /SET:net.hostname=%PCNAME% /SET:region.layout=%LAYOUT% /Y
+SET SRC=
+IF NOT "%FROM%"=="" SET SRC=/FROM:%FROM%
+DISK %DISKN% INSTALL %HOW% %SRC% /SET:net.hostname=%PCNAME% /SET:region.layout=%LAYOUT% /Y
 IF ERRORLEVEL 1 GOTO FAILED
 ECHO.
-ECHO GLOS is on disk %DISKN%. Take the floppy out, then press a key: the PC starts again from the disk.
-ECHO GLOS's programs come over the network afterwards (PKG), or from its USB stick or CD.
+IF "%FROM%"=="" ECHO GLOS is on disk %DISKN%. Take the floppy out, then press a key: the PC starts again from the disk.
+IF NOT "%FROM%"=="" ECHO GLOS is on disk %DISKN%. Take the CD out, then press a key: the PC starts again from the disk.
+IF "%FROM%"=="" ECHO GLOS's programs come over the network afterwards (PKG), or from its USB stick or CD.
 PAUSE
 REBOOT
 GOTO END

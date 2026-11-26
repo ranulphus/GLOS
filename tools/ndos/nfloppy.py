@@ -10,7 +10,8 @@ out and formats the disk and copies GLOS there, then the programs go over SFTP).
   tools/ndos/nfloppy.py build/floppy/nglos1440.img --keys build/floppy/keys [--name glos-setup] [--size 1440]
 
 In the dev container, from the repository's root, after `make all native-loader build/kernel/GLOSK.PAK`
-(`make native-floppy` does it). Sizes: 1440 (3.5", the default), 720, 1200 (5.25")."""
+(`make native-floppy` does it). Sizes: 1440 (3.5", the default), 1200 (5.25"); 720 KB is no longer made: the
+packed kernel and GLOSLDR.SYS outgrew it (docs/v1-route.md, G3: not a target since 2026-11-25)."""
 import argparse
 import os
 import subprocess
@@ -31,6 +32,9 @@ def main():
     ap.add_argument("--size", type=int, default=1440, choices=sorted(SHAPES), help="the floppy's size in KB")
     ap.add_argument("--quiet", action="store_true", help="no /VERBOSE: the kernel's log lines not on the screen")
     a = ap.parse_args()
+    if a.size == 720:
+        sys.exit("nfloppy: 720 KB is no longer made: the packed kernel and GLOSLDR.SYS outgrew it "
+                 "(docs/v1-route.md, G3)")
     hostkey = a.hostkey or os.path.join(a.keys, "HOSTKEY")
     authkeys = a.authkeys or os.path.join(a.keys, "AUTHKEYS")
     files = [("build/ow/GLOSLDR.SYS", "GLOSLDR.SYS"), ("build/kernel/GLOSK.PAK", "GLOS/GLOSK.BIN"),

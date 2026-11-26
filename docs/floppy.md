@@ -104,7 +104,7 @@ The same job with nothing of FreeDOS's: the floppy starts GLOS by its own boot s
 native start: [v1/native-dos.md](v1/native-dos.md)), and GLOS's `DISK` lays out the hard disk, formats it, makes
 it start and copies GLOS there.
 
-    make native-floppy                                         build/floppy/nglos1440.img (FLOPPY_SIZE=720, 1200)
+    make native-floppy                                         build/floppy/nglos1440.img (FLOPPY_SIZE=1200)
     tools/floppy/install.py --native glos-setup.local --new-disk                  a disk with nothing on it
     tools/floppy/install.py --native glos-setup.local --new-disk --erase-existing (everything on it is lost)
     tools/floppy/install.py --native glos-setup.local --free                      beside the systems there
@@ -121,6 +121,22 @@ it start and copies GLOS there.
 - **Tested** in Loop A: `loopa-nboot`'s nsetup case (the bf6 with a blank disk: the floppy, `install.py --native
   --new-disk`, then the disk alone).
 
+## From a CD (since 2026-11-26)
+
+The same floppy as a boot CD's El Torito image, the whole system beside it, so that nothing comes over the network:
+
+    make cd-image FLOPPY_AUTHKEYS=~/.ssh/id_ed25519.pub                  build/cd/glos.iso (CD_HOST=glos: the name)
+
+- **On the CD** (`tools/ndos/cdimage.py`): the setup floppy as `BOOT.IMG`, `\GLOS` with the whole system as
+  install.py puts it on a disk (24 MB), a host key of the CD's own (every PC installed from it has it: make a CD
+  per PC where that matters), `GLOSCD.ID` in the root.
+- **Started:** the PC's BIOS set to start from its CD first. GLOS runs from the floppy image as A: (the PC's own
+  floppy drive is B: meanwhile); the CD has the letter after the hard disks'.
+- **The install:** `SETUP` at the PC's prompt, as from the floppy; it finds the CD and copies everything from it
+  (`DISK n INSTALL ... /FROM:X:\GLOS`). Then take the CD out and restart the PC.
+- **Tested** in Loop A: `loopa-cdrom`'s cdboot cases (the bf6 and the 486, a blank disk; the bf6 beside another
+  volume too).
+
 ## Limits
 
 - **The network card** must be one GLOS drives, with DHCP on the network. An ISA NE2000 is found at 300h, 280h,
@@ -129,5 +145,6 @@ it start and copies GLOS there.
   restarted once, after the disk is formatted and before FreeDOS's files are on it (DOS reads a disk's table
   when it starts).
 - **A disk with partitions of any system is never taken for a new one:** GLOS reads the table itself (`DISK 1`).
-- **Tested** in Loop A (`make loopa-floppy`: a 486DX4 with an NE2000 and a blank disk, from the 1.44 MB and the
-  720 KB images; the packed kernel also on the Pentium II and the 486DX2, with and without an XMS driver).
+- **Tested** in Loop A (`make loopa-floppy`: a 486DX4 with an NE2000 and a blank disk, from the 1.44 MB image (the
+  720 KB one is no longer made); the packed kernel also on the Pentium II and the 486DX2, with and without an XMS
+  driver).

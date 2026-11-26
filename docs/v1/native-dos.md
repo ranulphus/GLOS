@@ -1091,13 +1091,52 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   drive's own output):** mkiso.py --cue --tone makes a mixed-mode disc (the image, then tone tracks as CUE/BIN);
   `jobs.py cdrom`'s cdaudio case (bf6, an SB16 beside the drive) with CDTEST audio: the TOC's tracks (IOCTL input
   10, 11), PLAY AUDIO busy, the Q channel's time moving, STOP pausing with the time held, RESUME, STOP twice:
-  PASS. Owed: the digital way (READ CD's audio frames into GLOS's mixer), the default where a drive gives them. **C7 built:** `glos cdrom` (the shell's CDROM): the drives listed; `mount PATH`: an ISO 9660 image or a CUE
+  PASS. Owed: the digital way (READ CD's audio frames into GLOS's mixer), the default where a drive gives them.
+  **C6's digital way, planned (2026-11-26):** cdrom.c answers cdrom_play, stop, pause and subq for a drive (or an
+  image) played digitally from a reader of its own, so mscdex.c is as it is. kernel/drv/cdaudio.c: a kernel thread
+  reads the audio frames (READ CD, BEh, CD-DA sectors of 2,352 bytes) a few at a time into a ring of about a
+  second (75 frames, 176,400 bytes); the mixer's interrupt mixes from the ring as it does the virtual Sound
+  Blaster (vsbdev_mix's way: 44.1 kHz to the mixer's rate) and keeps the card playing meanwhile (card_want, as for
+  vsbdev_on). The Q channel's position is what has been played, not read; PAUSE holds the reader and the mixing,
+  RESUME goes on, STOP ends. The IDE channel: the reader is the first user of the drive that isn't the VM's DOS
+  call (the DOS server waits for no program to run, so dos_call can't serve it), and ata.c's one call at a time
+  across threads (struct ata_io's hold, ide.c's k_hold, "Interrupts during a call" above) already keeps its
+  packets and the VM's calls apart: the VM's call waits at most for the reader's packet of a few frames, which
+  the reader keeps short for that. Images: a CUE sheet's audio
+  tracks in the image's TOC (today one data track) and their frames from the BIN through fsv the same way, so a
+  game's CUE/BIN plays its music with no drive. Digital where MODE SENSE's page 2Ah says the drive reads CD-DA
+  (an image always) and the mixer has a card; else the drive's own output, as now. [cdrom] audio = auto, digital
+  or analog. MSCDEX's audio channel control (IOCTL output 3): the drive's own volume (page 0Eh) the analog way, a
+  gain the digital. Test: `jobs.py cdrom`'s cdaudio case digitally (the stream in glos audio, the Q channel
+  moving with what's played, --wav's recording with track 1's 220 Hz then track 2's 440 Hz), and an image's
+  audio tracks. **C7 built:** `glos cdrom` (the shell's CDROM): the drives listed; `mount PATH`: an ISO 9660 image or a CUE
   sheet's first data track (MODE1/2048, or MODE1/2352's user data) on one of GLOS's FAT volumes as the next
   drive letter, read through fsv (its lock shares the file with the VM's calls), MSCDEX's units following
   (mscdex_units), a TOC of one data track made for it; `eject X:`: an image taken away (refused while a program
   has a file open there), a drive's tray opened. MSCDEX's header is made at the start whether or not a drive is
   there (no DOS memory is taken while programs run). `jobs.py cdrom`'s cdimage case (no CD-ROM drive: RetroGPU's
-  run.py as it is): mount, DIR, a copy the same, CDTEST's checks, eject, the CUE sheet: bf6 and 486 PASS. Planned: C2 kernel/drv/cdrom.c, the drives: found from ide.c's probe, sectors of 2048 bytes with
+  run.py as it is): mount, DIR, a copy the same, CDTEST's checks, eject, the CUE sheet: bf6 and 486 PASS.
+  **C8 built (2026-11-26):** `make cd-image` (tools/ndos/cdimage.py): build/cd/glos.iso, the setup floppy with no
+  DOS (nfloppy.py's, 1.44 MB) as its El Torito image, the whole system in \GLOS as install.py and the USB stick
+  have it (47 files, 24 MB: GLOS.EXE, the kernel, COMMAND.COM, the programs, savers, data files, GLOSLDR.SYS, a
+  GLOS.CFG, KEYS\ with a host key of the CD's own), GLOSCD.ID in its root. The BIOS starts the image by floppy
+  emulation: GLOS runs from it as A: (the PC's floppy drive is then B:), GLOS's CD driver gives the CD the letter
+  after the hard disks'. SETUP (SETUP.BAT) looks for GLOSCD.ID on C: to Z: and, found, installs with `DISK n
+  INSTALL /FROM:X:\GLOS`, DISK's new switch: GLOS's files and GLOSLDR.SYS from that folder instead of the one GLOS
+  runs from, the folder's GLOS.CFG the copy's (with /SET's settings in it). The disk's first sector, kept before a
+  /FREE or partition install, goes to the source's folder, else GLOS's own, else (a boot CD: the CD and the floppy
+  it emulates are both read-only) onto the new volume beside GLOS's files, the first file written there, from a
+  copy taken before the install's writes. Loop A: RetroGPU's run.py `--nvr FILE` (branch loopa-nvr) gives the
+  machine a CMOS with the CD first in its boot order (tests/loopa/nvr/cdboot: the bf6's Award 6.00PG and the 486's
+  HOT-433A Award 4.51PG, each set once in its setup by 86Box's monitor; both BIOSes start El Torito floppy
+  emulation). `jobs.py cdrom`'s cdboot case: a blank disk, the CD started, SETUP at the PC's prompt (disk 1, all of
+  it, the name cdpc), 24 MB copied from the CD in 12 s on the bf6 and 42 s on the 486; the disk alone then starts
+  the installed GLOS with the CD's GLOS.CFG and the name in it, the kernel, NOTEPAD.EXE and HELP.DAT at their
+  sizes: bf6 and 486 PASS. cdbootf (the bf6; a FAT volume on the disk's first 32 MB, the CD D:): SETUP's "beside"
+  (/FREE), D:\GLOS\DISK1.MBR on the new volume the sector as it was before the install (the first run caught the
+  copy being taken after the writes). Owed: a bench that burns the CD and starts it; no emulation (a CD started as
+  itself, no floppy image) not needed while every BIOS of ours does floppy emulation.
+  Planned: C2 kernel/drv/cdrom.c, the drives: found from ide.c's probe, sectors of 2048 bytes with
   a small cache, the disc's change (UNIT ATTENTION) and its absence (NOT READY), the TOC. C3 kernel/fs/iso.c, ISO
   9660 read-only over a sector reader (level 1 names as DOS sees them, path tables not needed: folders walked),
   host-tested on mkiso's images and, where it is, xorriso's. C4 GLOS's DOS: a CD drive as DOS has one under
@@ -1173,7 +1212,7 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
 - The 486 (bench C) is the floppy's test, as for S3.
 - **Built (2026-11-24), beside the FreeDOS floppy for now:** `make native-floppy` (`tools/ndos/nfloppy.py`: GLOS's
   boot sector, `GLOSLDR.SYS`, `\GLOS` with the packed kernel, COMMAND.COM, GLOS.CFG and the keys; 654 KB, room
-  for a 720 KB disk too) and `tools/floppy/install.py --native` (`--new-disk [--erase-existing]` or `--free`:
+  for a 720 KB disk too then; no longer by 2026-11-26, 722 KB: nfloppy.py refuses 720, as G3 has it) and `tools/floppy/install.py --native` (`--new-disk [--erase-existing]` or `--free`:
   `DISK 1 INSTALL`, a restart from the floppy so that the new volume has its letter, the programs by SFTP).
   `loopa-nboot`'s nsetup case on the bf6 and the 486 (the copy: 34 s and 7 minutes). Still owed here: the menu's
   default; the FreeDOS floppy's
