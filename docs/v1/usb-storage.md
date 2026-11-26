@@ -46,6 +46,10 @@ other system's code is looked at.
    program run from the stick); a stick pulled with a file open. Proven on a bench with a real stick.
 3. **U3, OHCI:** a host controller driver for OHCI (control, interrupt and bulk: so HID keyboards, mice and pads
    too) for ALi, SiS, NEC and OPTi chipsets and NEC's add-in cards. The P3 (ALi M5237) is its bench.
+   *Built 2026-11-26:* uhci.c's controller part went behind `kernel/drv/usbhc.h`'s calls (struct hcd_ops: control,
+   interrupt pipes, a report out, bulk, root ports, leave, stat), and `kernel/drv/ohci.c` gives OHCI's; its EDs and
+   TDs are built by `ohcitd.c` (host tested: `ohci_test`). Unproven on silicon: 86Box's OHCI is a register stub
+   (it walks no schedule), so the P3 is its first real test (a keyboard or mouse, then a stick).
 4. **U4, EHCI:** high speed (480 Mbit/s) for USB 2.0 sticks on a root port or a high-speed hub; full- and low-speed
    devices stay on the companion controllers as now (no split transactions).
 

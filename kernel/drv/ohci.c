@@ -12,10 +12,10 @@
  * written there (DI 7). The ports powered (each, or all), their power's settle time waited.
  *
  * The memory (one block, five pages): the HCCA at 0 (its 32 interrupt-table entries all the first interrupt ED:
- * every frame passes the pipes, as uhci.c's schedule does), the EDs at 256 (control, bulk, then NPIPE pipes', in a
- * chain), the TDs at 512 (control three and a dummy; two a pipe, its TD and dummy; the bulk TD and dummy), the setup
- * packet at 1536, a control transfer's data at 2048, the pipes' 64 bytes each at 3072; the bulk buffer (16 KB) in
- * pages 1-4. Each ED's queue is its TDs and a dummy at its tail; the controller stops at the dummy.
+ * every frame passes the pipes, as uhci.c's schedule does), the EDs at 256 (control, bulk, NPIPE pipes' in a
+ * chain, the reports out's after bulk's), the TDs at 512 (control three and a dummy; two a pipe, its TD and dummy;
+ * bulk's TD and dummy; the reports out's), the setup packet at 1536, a control transfer's data at 2048, the pipes'
+ * 64 bytes each at 3072 and the reports out's after them; the bulk buffer (16 KB) in pages 1-4. Each ED's queue is its TDs and a dummy at its tail; the controller stops at the dummy.
  *     GLOS-USB ohci 00:02.0 mem=e0001000 ports=2 rev=10 [owner=bios]
  *
  * A bulk piece goes one TD (4 KB at most) at a time: a short packet ends a TD and the controller would go on to the
@@ -79,9 +79,9 @@ struct ohci {
     u8 *pool;
     u32 pool_phys;
     u32 *hcca;
-    struct ohci_ed *ed_ctrl, *ed_bulk, *ed_int;
-    struct ohci_td *td_ctrl, *td_int, *td_bulk;
-    u8 *setup, *data, *int_buf;
+    struct ohci_ed *ed_ctrl, *ed_bulk, *ed_int, *ed_out;
+    struct ohci_td *td_ctrl, *td_int, *td_bulk, *td_out;
+    u8 *setup, *data, *int_buf, *out_buf;
     u32 rev, bios;                      /* bios: the BIOS had it (IR, or running) */
 };
 static struct ohci ohcis[MAX_HC];
@@ -100,10 +100,14 @@ static void queue(struct ohci_ed *ed, u32 info, u32 first, u32 tail, int carry)
     ed->info = info;
 }
 
-/* The queue emptied (its head the dummy, not halted), the ED skipped. */
-static void unqueue(struct ohci_ed *ed)
+/* The queue emptied (its head the dummy, not halted), the ED skipped. Its head is the controller's while it may
+   be working on the ED: done, halted or empty, it isn't; given up on (busy), the ED is skipped and a frame or two
+   waited first (OpenHCI 1.0a, 5.2.7.1). */
+static void unqueue(struct ohci_ed *ed, int busy)
 {
     ed->info |= OHCI_ED_SKIP;
+    if (busy)
+        usb_wait_ms(2);
     ed->headp = ed->tailp | (ed->headp & OHCI_ED_CARRY);
 }
 
@@ -141,13 +145,13 @@ static int ohci_control(struct hc *h, u32 addr, u32 maxp, int low, const u8 setu
         if (o->ed_ctrl->headp & OHCI_ED_HALTED)
             break;
         if (timer_ticks() - t0 > 512) {
-            unqueue(o->ed_ctrl);
+            unqueue(o->ed_ctrl, 1);
             *status = 0x80000000u | o->td_ctrl[n - 1].info >> 28;   /* (a timeout: bit 31) */
             return -1;
         }
         nap();
     }
-    unqueue(o->ed_ctrl);
+    unqueue(o->ed_ctrl, 0);
     if (r != 0) {
         *status = (u32)(r < 0 ? 0xF : r) | (o->ed_ctrl->headp & OHCI_ED_HALTED) << 8;
         return -1;
@@ -187,7 +191,7 @@ static int ohci_intr_done(struct hc *h, struct usb_dev *d, const u8 **r, u32 *le
         return 0;
     if (cc != OHCI_CC_NONE) {
         *status = cc;
-        unqueue(&o->ed_int[k]);                 /* (the ED halted: emptied, re-armed by the caller) */
+        unqueue(&o->ed_int[k], 0);              /* (the ED halted: emptied, re-armed by the caller) */
         return -1;
     }
     *r = o->int_buf + k * 64;
@@ -195,26 +199,32 @@ static int ohci_intr_done(struct hc *h, struct usb_dev *d, const u8 **r, u32 *le
     return 1;                                   /* (the toggle is the ED's carry: nothing to flip) */
 }
 
-static void ohci_intr_off(struct hc *h, struct usb_dev *d) { unqueue(&((struct ohci *)h->priv)->ed_int[d->pipe - 1]); }
+static void ohci_intr_off(struct hc *h, struct usb_dev *d)
+{
+    struct ohci *o = h->priv;
+    struct ohci_ed *ed = &o->ed_int[d->pipe - 1];
+    unqueue(ed, (ed->headp & ~15u) != ed->tailp);       /* (a report still awaited: the controller's) */
+}
 
-/* One report out on the device's interrupt OUT endpoint (the Xbox One pad's power-on), on the bulk ED (a USB 1.1
-   controller doesn't care what kind of endpoint an ED's TD is for), the toggle the device's: 0, or -1. */
+/* One report out on the device's interrupt OUT endpoint (the Xbox One pad's power-on), on an ED of its own on the
+   bulk list (a USB 1.1 controller doesn't care what kind of endpoint an ED's TD is for: not the disks' ED, which a
+   transfer may be using), from a buffer of its own, the toggle the device's: 0, or -1. */
 static int ohci_intr_out(struct hc *h, struct usb_dev *d, const u8 *data, u32 len, u32 *status)
 {
     struct ohci *o = h->priv;
-    struct ohci_td *t = o->td_bulk;
+    struct ohci_td *t = o->td_out;
     u32 t0 = timer_ticks();
     int r;
     if (!len || len > 64)
         return -1;
-    memcpy(o->int_buf + (d->pipe - 1) * 64, data, len);
-    ohci_bulk_tds(t, 1, P(o, t), 0, P(o, o->int_buf + (d->pipe - 1) * 64), len, P(o, &t[1]));
-    queue(o->ed_bulk, ohci_ed_info(d->addr, d->ep_out & 0xF, 0, d->low, d->ep_out_maxp ? d->ep_out_maxp : 8), P(o, t),
+    memcpy(o->out_buf, data, len);
+    ohci_bulk_tds(t, 1, P(o, t), 0, P(o, o->out_buf), len, P(o, &t[1]));
+    queue(o->ed_out, ohci_ed_info(d->addr, d->ep_out & 0xF, 0, d->low, d->ep_out_maxp ? d->ep_out_maxp : 8), P(o, t),
           P(o, &t[1]), d->toggle_out & 1);
     R(o, HcCommandStatus) = CS_BLF;
     while ((r = done(t, 1)) < 0 && timer_ticks() - t0 < 100)
         nap();
-    unqueue(o->ed_bulk);
+    unqueue(o->ed_out, r < 0);
     if (r != 0) {
         *status = (u32)(r < 0 ? 0xF : r);
         return -1;
@@ -244,8 +254,8 @@ static int ohci_bulk(struct hc *h, struct usb_dev *d, int in, u32 n, u32 *got)
                 break;
             nap();
         }
+        unqueue(o->ed_bulk, r < 0);
         *tog = (o->ed_bulk->headp & OHCI_ED_CARRY) ? 1 : 0;     /* (where the controller left the toggle) */
-        unqueue(o->ed_bulk);
         if (r != 0) {
             *got = moved;
             return r == OHCI_CC_STALL ? MSC_STALL : -1;
@@ -348,17 +358,23 @@ int ohci_take(struct hc *h, struct pci_dev *pd)
     o->ed_ctrl = (struct ohci_ed *)(o->pool + 256);
     o->ed_bulk = o->ed_ctrl + 1;
     o->ed_int = o->ed_ctrl + 2;
+    o->ed_out = o->ed_int + NPIPE;
     o->td_ctrl = (struct ohci_td *)(o->pool + 512);
     o->td_int = o->td_ctrl + 4;
     o->td_bulk = o->td_int + 2 * NPIPE;
+    o->td_out = o->td_bulk + 2;
     o->setup = o->pool + 1536;
     o->data = o->pool + 2048;
     o->int_buf = o->pool + 3072;
+    o->out_buf = o->int_buf + NPIPE * 64;
     h->bulk_buf = o->pool + 4096;
     o->ed_ctrl->info = OHCI_ED_SKIP;
     o->ed_ctrl->headp = o->ed_ctrl->tailp = P(o, &o->td_ctrl[3]);
     o->ed_bulk->info = OHCI_ED_SKIP;
     o->ed_bulk->headp = o->ed_bulk->tailp = P(o, &o->td_bulk[1]);
+    o->ed_bulk->next = P(o, o->ed_out);
+    o->ed_out->info = OHCI_ED_SKIP;
+    o->ed_out->headp = o->ed_out->tailp = P(o, &o->td_out[1]);
     for (i = 0; i < NPIPE; i++) {               /* the pipes' EDs in a chain, every frame's */
         o->ed_int[i].info = OHCI_ED_SKIP;
         o->ed_int[i].headp = o->ed_int[i].tailp = P(o, &o->td_int[2 * i + 1]);
@@ -388,9 +404,8 @@ int ohci_take(struct hc *h, struct pci_dev *pd)
     fi = R(o, HcFmInterval) & 0x3FFF;
     if (fi < 11000 || fi > 13000)
         fi = 11999;
-    R(o, HcCommandStatus) = CS_HCR;
-    for (i = 0; i < 100 && (R(o, HcCommandStatus) & CS_HCR); i++)
-        usb_wait_ms(1);
+    R(o, HcCommandStatus) = CS_HCR;             /* (done in 10 us: watched, not slept on) */
+    for (i = 0; i < 100000 && (R(o, HcCommandStatus) & CS_HCR); i++) ;
     /* (After a reset the controller is suspended, and wants to be operational within 2 ms: everything at once.) */
     R(o, HcFmInterval) = ((R(o, HcFmInterval) & (1u << 31)) ^ (1u << 31)) | (((fi - 210) * 6 / 7) << 16) | fi;
     R(o, HcPeriodicStart) = fi * 9 / 10;
@@ -407,12 +422,11 @@ int ohci_take(struct hc *h, struct pci_dev *pd)
     if (ports > MAX_PORTS)
         ports = MAX_PORTS;
     h->ports = (u8)ports;
-    if (!(a & RHA_NPS)) {                       /* power switched: each port's, or all of them */
+    if (!(a & RHA_NPS)) {                       /* power switched: all of them (the ganged ports), and each */
+        R(o, HcRhStatus) = RHS_LPSC;
         if (a & RHA_PSM)
             for (i = 0; i < ports; i++)
                 R(o, HcRhPortStatus(i)) = PS_PPS;
-        else
-            R(o, HcRhStatus) = RHS_LPSC;
     }
     pwr = (a >> 24) * 2;                        /* its power-on-to-power-good, in 2 ms units */
     usb_wait_ms(pwr < 20 ? 20 : pwr);
