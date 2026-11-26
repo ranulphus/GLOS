@@ -9038,7 +9038,13 @@ def ndos_case(profile, card):
                 and re.search(r"^%s ata .* native\r?$" % n, disks2, re.M) is not None
             checks["copy"] = cp[0] == 0 and "NDOS COPY: %d bytes" % len(ndos_nhello()) in cp[1] and "NHELLO.COM" in ls[1]
             checks["native-run"] = nrun[0] == 4 and nrun[1] == "Loaded from the native volume: abc\r\n"
-            # NS2: NDOSTEST under the DOS beside GLOS (the reference), then in a native machine.
+            # NS2: NDOSTEST under the DOS beside GLOS (the reference), then in a native machine. Its date check needs
+            # GLOS's clock set (the emulator's starts at 1980): SNTP's answer waited for first. A lost first answer
+            # is asked again 20 s later (lwipopts.h), which NDOSTEST used to beat (gate 67 on devserver, 11-26).
+            t0 = time.time()
+            while "GLOS-TIME set by=sntp" not in agent.log() and time.time() - t0 < 60:
+                time.sleep(2)
+            checks["clock-set"] = "GLOS-TIME set by=sntp" in agent.log()
             agent.ssh("cd \\TEST")
             ref = agent.ssh("C:\\TEST\\NDOSTEST.EXE ref two")
             agent.ssh("cd \\")
