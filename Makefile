@@ -85,7 +85,8 @@ WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
 .PHONY: census rbil fat-test fat-test-run floppy native-floppy usb-stick loopa-smoke loopa-floppy loopa-ndos loopa-nboot native-loader loopa-joy loopa-int2f loopa-cache loopa-mem-page loopa-umaprobe loopa-umb sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
-all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN build/glos/COMMAND.COM
+all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN build/glos/COMMAND.COM build/ow/GLOSLDR.SYS     # (the loader with no DOS:
+                                                # in every install, for DISK n INSTALL p's upgrade)
 
 help:
 	@sed -n '3,/^[^#]/p' Makefile | grep '^#' | sed 's/^# //'

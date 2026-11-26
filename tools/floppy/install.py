@@ -15,7 +15,8 @@ with its network, SSH and SFTP, and answers as HOST (glos-setup.local, or its ad
   ... --new-disk --erase-existing                     the same on a disk that has partitions (any system's):
                                                       EVERYTHING ON THE DISK IS LOST
 
-What goes to C:\\GLOS: GLOS.EXE and GLOSK.BIN, the programs (build/apps), CERTS.DAT, the package key, the
+What goes to C:\\GLOS: GLOS.EXE and GLOSK.BIN, GLOSLDR.SYS (the loader with no DOS, for DISK n INSTALL p's upgrade
+to a GLOS that starts the PC by itself), the programs (build/apps), CERTS.DAT, the package key, the
 fonts' smoothing data, a GLOS.CFG with the PC's name (--name; one that is there already is kept), and KEYS\\ (the
 floppy's host key and AUTHKEYS, so the PC stays who it was and lets the same people in).
 
@@ -198,7 +199,9 @@ def new_disk(pc, erase):
 def glos_files(args):
     """(local path, name there under /C/GLOS) for the whole system; what is missing ends the run."""
     files = [("build/ow/GLOS.EXE", "GLOS.EXE"), ("build/kernel/GLOSK.BIN", "GLOSK.BIN"),
-             ("build/glos/COMMAND.COM", "COMMAND.COM")]         # (GLOS's own, for programs that shell out: S4c)
+             ("build/glos/COMMAND.COM", "COMMAND.COM"),         # (GLOS's own, for programs that shell out: S4c)
+             ("build/ow/GLOSLDR.SYS", "GLOSLDR.SYS")]           # (the loader with no DOS: DISK n INSTALL p's upgrade
+                                                                #  of a GLOS that DOS starts takes it from here)
     files += [("build/apps/%s.EXE" % a, a + ".EXE") for a in APPS + ["SSH", "SFTP", "SSHKEY"]]
     files += [("build/apps/%s.SCR" % v, v + ".SCR") for v in SAVERS]   # (the savers' programs: phase D)
     files += [("build/glos/CERTS.DAT", "CERTS.DAT"), ("sdk/gui/fonts/SMOOTH.DAT", "SMOOTH.DAT"),
