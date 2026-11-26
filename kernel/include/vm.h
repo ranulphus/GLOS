@@ -188,6 +188,16 @@ int  vdos_cd_mount(const char *path, char *msg, unsigned room);     /* vdos.c: a
                                                    letter (0 A:), or -1 with msg */
 int  vdos_cd_eject(int letter, char *msg, unsigned room);       /* 0, or -1 with msg */
 int  vdos_cd_list(char *out, unsigned room);    /* the CD drives, a line each */
+/* Disks that come and go (a USB stick; vdos.c): each FAT volume a letter, its sectors (512 bytes) the device's
+   callbacks on a thread with interrupts on (they may sleep: vdos_disk_breathe in long waits). attach: the letters
+   given (msg says them), 0 none, -1 with msg; detach refuses while a file is open there; gone: 15h at once. */
+int  vdos_disk_attach(int (*read)(void *ctx, unsigned long lba, unsigned char *buf, unsigned count),
+                      int (*write)(void *ctx, unsigned long lba, const unsigned char *buf, unsigned count), void *ctx,
+                      unsigned long sectors, char *msg, unsigned room);
+int  vdos_disk_detach(void *ctx, char *msg, unsigned room);
+void vdos_disk_gone(void *ctx);
+void vdos_disk_breathe(void);
+int  vdos_testdisk(const char *how, char *msg, unsigned room);    /* glos testdisk */
 int  mscdex_int2f(struct dos_regs86 *r);
 void mscdex_request(u32 r, int unit);
 void mscdex_strategy(unsigned es, unsigned bx);

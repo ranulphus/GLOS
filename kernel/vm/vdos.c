@@ -31,6 +31,7 @@
 #include "cache.h"
 #include "vdos.h"
 #include "cdrom.h"
+#include "../disk/letters.h"
 
 static struct dos_m vd;
 static struct ata_dev *cdev;
@@ -156,8 +157,11 @@ int vdos_usb_bios(void)
    A volume: where it is (a disk GLOS's IDE driver has, else one of the BIOS's by its calls; its first sector
    there) and the file system on it. The volume GLOS started from is the first, kept here; the others the loader
    lettered (bootinfo's vols: stage 3) are made as they are mounted. */
+struct xdisk;
+
 struct nvol {
     struct fsv_vol v;
+    struct xdisk *x;                            /* a disk that comes and goes (vdos_disk_attach): its callbacks */
     struct ata_dev *dev;                        /* 0: the BIOS's calls */
     struct bi_disk *bd;                         /* the BIOS's disk (its number, its geometry) */
     unsigned long base;
@@ -191,10 +195,15 @@ static int flop_changed(struct nvol *n)
 }
 
 /* (through the disk cache, which a program's own INT 13h on the same disk goes through too) */
+static int xd_read(struct xdisk *x, unsigned long lba, unsigned char *buf, unsigned count);
+static int xd_write(struct xdisk *x, unsigned long lba, const unsigned char *buf, unsigned count);
+
 static int c_read(void *ctx, unsigned long lba, unsigned char *buf, unsigned count)
 {
     struct nvol *n = ctx;
 
+    if (n->x)
+        return xd_read(n->x, n->base + lba, buf, count);
     vd_window();
     if (!n->dev)
         return bios_rw(n->bd, 0, (u32)(n->base + lba), buf, count) != 0;
@@ -205,6 +214,8 @@ static int c_write(void *ctx, unsigned long lba, const unsigned char *buf, unsig
 {
     struct nvol *n = ctx;
 
+    if (n->x)
+        return xd_write(n->x, n->base + lba, buf, count);
     vd_window();
     if (n->removable && flop_changed(n)) {      /* (what was meant for the disk taken out: not onto another) */
         n->mounted = 0;
@@ -251,9 +262,14 @@ static struct iso_vol *vd_cdmedia(void *ctx, int drive, unsigned *err)
    disk hasn't changed, or while files are open on it (DOS's "invalid disk change": they stay that disk's); else
    the disk there now, mounted afresh, its geometry its boot sector's. 15h: no disk, or none that is a FAT
    volume. */
+static struct fsv_vol *xd_media(int drive, unsigned *err);
+
 static struct fsv_vol *vd_media(void *ctx, int drive, unsigned *err)
 {
     struct nvol *n = drive >= 0 && drive < 2 ? flop[drive] : 0;
+
+    if (drive >= 2)
+        return xd_media(drive, err);            /* (a disk that comes and goes: a USB stick's volume) */
     static unsigned char bs[512];
     int i, open = 0;
 
@@ -955,6 +971,274 @@ int vdos_cd_list(char *out, unsigned room)
     if (!n)
         ksnprintf(out, room, "No CD drives\n");
     return 0;
+}
+
+/* ---- disks that come and go (a USB stick: the GLOS session's USB mass storage; vdos.h)
+
+   A disk attached gives each FAT volume let_scan finds on it (a superfloppy's too) the next free letter, as a
+   removable drive of GLOS's DOS: vd_media asks xd_media at each use. Its sectors are the device's callbacks',
+   512 bytes each, uncached (a write held in a cache would be lost when the stick goes). detach refuses while a file
+   is open on one of its volumes; gone (pulled out without warning) makes them answer 15h at once, open files or
+   not, and frees each letter once nothing has a file open there. */
+#define XD_MAX 4
+#define XD_VOLS 8
+
+struct xdisk {
+    int used, gone;
+    int (*read)(void *ctx, unsigned long lba, unsigned char *buf, unsigned count);
+    int (*write)(void *ctx, unsigned long lba, const unsigned char *buf, unsigned count);
+    void *ctx;
+    int nv;
+    struct nvol *v[XD_VOLS];
+    signed char letter[XD_VOLS];
+};
+static struct xdisk xd[XD_MAX];
+
+static int xd_read(struct xdisk *x, unsigned long lba, unsigned char *buf, unsigned count)
+{
+    return x->gone || x->read(x->ctx, lba, buf, count) != 0;
+}
+
+static int xd_write(struct xdisk *x, unsigned long lba, const unsigned char *buf, unsigned count)
+{
+    return x->gone || !x->write || x->write(x->ctx, lba, buf, count) != 0;
+}
+
+static int xd_open_files(const struct nvol *n)
+{
+    int i;
+    for (i = 0; i < FSV_NODES; i++)
+        if (n->v.node[i].refs)
+            return 1;
+    return 0;
+}
+
+/* Volume k of x given up: its letter free, its memory back. */
+static void xd_drop(struct xdisk *x, int k)
+{
+    u32 f = irq_save();
+    int l = x->letter[k];
+    if (l >= 0) {
+        vd.vol[l] = 0;
+        vd.removable &= ~(1u << l);
+        vd.cds.valid &= ~(1u << l);
+        x->letter[k] = -1;
+    }
+    irq_restore(f);
+    if (x->v[k]) {
+        kprintf("GLOS-DISK xdisk drop letter=%c%s\n", l >= 0 ? 'A' + l : '-', x->gone ? " gone" : "");
+        kfree(x->v[k]);
+        x->v[k] = 0;
+    }
+}
+
+static void xd_sweep(struct xdisk *x)
+{
+    int k, left = 0;
+    for (k = 0; k < x->nv; k++) {
+        if (x->v[k] && x->gone && !xd_open_files(x->v[k]))
+            xd_drop(x, k);
+        left |= x->v[k] != 0;
+    }
+    if (x->gone && !left)
+        x->used = 0;
+}
+
+static struct fsv_vol *xd_media(int drive, unsigned *err)
+{
+    int i, k;
+
+    *err = 0x0F;
+    for (i = 0; i < XD_MAX; i++)
+        for (k = 0; xd[i].used && k < xd[i].nv; k++)
+            if (xd[i].letter[k] == drive && xd[i].v[k]) {
+                if (!xd[i].gone)
+                    return &xd[i].v[k]->v;
+                *err = 0x15;                    /* (pulled out: not ready, and its letter free once nothing is open) */
+                xd_sweep(&xd[i]);
+                return 0;
+            }
+    return 0;
+}
+
+static int xd_scan_read(void *ctx, unsigned long lba, unsigned char *sector)
+{
+    struct xdisk *x = ctx;
+    return x->read(x->ctx, lba, sector, 1);
+}
+
+int vdos_disk_attach(int (*read)(void *ctx, unsigned long lba, unsigned char *buf, unsigned count),
+                     int (*write)(void *ctx, unsigned long lba, const unsigned char *buf, unsigned count), void *ctx,
+                     unsigned long sectors, char *msg, unsigned room)
+{
+    struct let_vol vols[XD_VOLS];
+    struct xdisk *x;
+    int i, k, n, got = 0, at = 0;
+
+    msg[0] = 0;
+    if (!ready) {
+        ksnprintf(msg, room, "disk: a native GLOS's alone\n");
+        return -1;
+    }
+    for (i = 0; i < XD_MAX && xd[i].used; i++)
+        ;
+    if (i == XD_MAX) {
+        ksnprintf(msg, room, "disk: %d such disks already\n", XD_MAX);
+        return -1;
+    }
+    x = &xd[i];
+    memset(x, 0, sizeof *x);
+    x->used = 1, x->read = read, x->write = write, x->ctx = ctx;
+    for (k = 0; k < XD_VOLS; k++)
+        x->letter[k] = -1;
+    n = let_scan((unsigned)(0x10 + i), sectors, xd_scan_read, x, vols, 0, XD_VOLS);
+    for (k = 0; k < n; k++) {
+        struct nvol *v = kmalloc(sizeof *v);
+        int l = free_letter();
+        u32 f;
+        if (!v || l < 0) {
+            if (v)
+                kfree(v);
+            break;
+        }
+        memset(v, 0, sizeof *v);
+        v->x = x, v->base = vols[k].start;
+        if (fsv_mount(&v->v, c_read, c_write, c_now, v, 437, 0) != 0) {
+            kfree(v);
+            continue;
+        }
+        f = irq_save();
+        vd.vol[l] = &v->v;
+        vd.removable |= 1u << l;
+        vd.cds.valid |= 1u << l;
+        vd.media = vd_media;
+        x->v[x->nv] = v, x->letter[x->nv] = (signed char)l;
+        x->nv++;
+        irq_restore(f);
+        at += ksnprintf(msg + at, room - (unsigned)at, "%s%c:", got ? " " : "", 'A' + l);
+        got++;
+    }
+    kprintf("GLOS-DISK xdisk attach slot=%d sectors=%u volumes=%d letters=%d\n", i, (u32)sectors, n, got);
+    if (!got) {
+        x->used = 0;
+        ksnprintf(msg, room, "disk: no FAT volume on it\n");
+        return 0;
+    }
+    ksnprintf(msg + at, room - (unsigned)at, "\n");
+    return got;
+}
+
+static struct xdisk *xd_of(void *ctx)
+{
+    int i;
+    for (i = 0; i < XD_MAX; i++)
+        if (xd[i].used && xd[i].ctx == ctx)
+            return &xd[i];
+    return 0;
+}
+
+int vdos_disk_detach(void *ctx, char *msg, unsigned room)
+{
+    struct xdisk *x = xd_of(ctx);
+    int k;
+
+    if (!x || x->gone) {
+        ksnprintf(msg, room, "disk: not attached\n");
+        return -1;
+    }
+    for (k = 0; k < x->nv; k++)
+        if (x->v[k] && xd_open_files(x->v[k])) {
+            ksnprintf(msg, room, "disk: a program has a file open on %c:\n", 'A' + x->letter[k]);
+            return -1;
+        }
+    for (k = 0; k < x->nv; k++) {
+        if (x->v[k])
+            fsv_flush(&x->v[k]->v);             /* (what is cached of its FAT and folders, to the device first) */
+        xd_drop(x, k);
+    }
+    x->used = 0;
+    ksnprintf(msg, room, "disk: taken away\n");
+    return 0;
+}
+
+void vdos_disk_gone(void *ctx)
+{
+    struct xdisk *x = xd_of(ctx);
+
+    if (!x)
+        return;
+    x->gone = 1;
+    kprintf("GLOS-DISK xdisk gone\n");
+    xd_sweep(x);
+}
+
+void vdos_disk_breathe(void)
+{
+    if (current == vm.thread) {
+        vd_window();
+        vd_nap();
+    } else {
+        thread_yield();
+    }
+}
+
+/* glos testdisk (sshd.c): a disk image on one of GLOS's volumes as a disk that comes and goes, through the same
+   calls a USB stick's driver makes: attach PATH, detach, gone. For loopa's cases before USB storage is there. */
+static struct { struct fsv_file f; int open; } td;
+
+static int td_read(void *ctx, unsigned long lba, unsigned char *buf, unsigned count)
+{
+    (void)ctx;
+    return fsv_seek(&td.f, lba * 512) != 0 || fsv_read(&td.f, buf, (unsigned long)count * 512) != (long)count * 512;
+}
+
+static int td_write(void *ctx, unsigned long lba, const unsigned char *buf, unsigned count)
+{
+    (void)ctx;
+    return fsv_seek(&td.f, lba * 512) != 0 || fsv_write(&td.f, buf, (unsigned long)count * 512) != (long)count * 512;
+}
+
+int vdos_testdisk(const char *how, char *msg, unsigned room)
+{
+    char full[128];
+    int drive, r;
+
+    if (!strncmp(how, "attach ", 7)) {
+        if (td.open) {
+            ksnprintf(msg, room, "glos testdisk: one is attached already\n");
+            return -1;
+        }
+        if (!ready || dos_resolve(&vd.cds, vd.cp, how + 7, &drive, full, sizeof full) != 0 || !vd.vol[drive]
+            || fsv_open(vd.vol[drive], full, FSV_RW, FSV_DENY_WRITE, &td.f) != 0) {
+            ksnprintf(msg, room, "glos testdisk: %s can't be opened\n", how + 7);
+            return -1;
+        }
+        td.open = 1;
+        r = vdos_disk_attach(td_read, td_write, &td, fsv_size(&td.f) / 512, msg, room);
+        if (r <= 0) {
+            fsv_close(&td.f);
+            td.open = 0;
+        }
+        return r > 0 ? 0 : -1;
+    }
+    if (!strcmp(how, "detach") || !strcmp(how, "gone")) {
+        if (!td.open) {
+            ksnprintf(msg, room, "glos testdisk: none is attached\n");
+            return -1;
+        }
+        if (how[0] == 'd') {
+            if (vdos_disk_detach(&td, msg, room) != 0)
+                return -1;
+        } else {
+            vdos_disk_gone(&td);
+            ksnprintf(msg, room, "disk: gone\n");
+        }
+        fsv_close(&td.f);
+        td.open = 0;
+        return 0;
+    }
+    ksnprintf(msg, room, "glos testdisk attach PATH | detach | gone\n");
+    return -1;
 }
 
 /* MSCDEX's INT 2Fh 15xxh (v86.c's INT 2Fh, at the chain's bottom): 1 if answered. */

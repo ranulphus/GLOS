@@ -1404,6 +1404,14 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             say(ch, 0, line);
             ssh_chan_exit(ch, 0);
         }
+    } else if (ci_starts(cmd, "glos testdisk ")) {
+        /* glos testdisk attach PATH | detach | gone: a disk image as a disk that comes and goes (vdos.c), as a USB
+           stick's driver attaches one: for loopa's cases (native GLOS's) */
+        char t[256];
+        int e = !(vm.bi->flags & BI_F_NATIVE) ? (ksnprintf(t, sizeof t, "glos testdisk: a native GLOS's\n"), -1)
+                : vdos_testdisk(cmd + 14, t, sizeof t);
+        say(ch, e != 0, t);
+        ssh_chan_exit(ch, e != 0);
     } else if (ci_starts(cmd, "glos cdrom") && (!cmd[10] || cmd[10] == ' ')) {
         /* glos cdrom: the CD drives (N4, native GLOS's own: kernel/drv/cdrom.c); glos cdrom mount PATH: an ISO 9660
            image, or a CUE sheet's data track, as a drive of its own (C7), the next letter; glos cdrom eject X:: an

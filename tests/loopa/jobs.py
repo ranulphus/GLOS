@@ -8465,6 +8465,68 @@ def cdimage_case(profile, card):
         not bad
 
 
+def xdisk_case(profile, card):
+    """Disks that come and go (vdos.c's vdos_disk_attach, detach and gone: what the GLOS session's USB mass storage
+    calls), natively, with glos testdisk's disk image on C: as the device: a stick of 16 MB (a partition table, one
+    FAT16 volume) attached as D:; DIR, TYPE, a file written to it; detach (D: gone); attached again, the file
+    still there; gone (pulled out): D: not ready, then no drive."""
+    tag = "xdisk-" + profile
+    d = os.path.join(ROOT, "out", tag + "-img")
+    subprocess.run(["rm", "-rf", d])
+    os.makedirs(d)
+    stick = os.path.join(d, "STICK.IMG")
+    readme = batfile(tag + "/README.TXT", ["hello from a stick"])
+    cyls = 32                                   # (32 x 16 x 63 sectors: 16 MB)
+    script = "\n".join([
+        "set -e", "t=$(mktemp -d)", "trap 'rm -rf $t' EXIT", "export MTOOLS_SKIP_CHECK=1",
+        "gcc -m32 -O1 -Ikernel/include -Iinclude -o $t/mkvol tools/ndos/mkvol.c kernel/disk/fatfmt.c kernel/disk/mbr.c "
+        "kernel/disk/mbrboot.S kernel/disk/fdboot.S sdk/config/cp.c sdk/config/cp_tables.c",
+        "gcc -m32 -O1 -o $t/mkmbr tools/ndos/mkmbr.c kernel/disk/mbr.c kernel/disk/mbrboot.S",
+        "$t/mkmbr %d 0 16 > $t/mbr 2> $t/part" % (cyls * 16 * 63), "read start sectors < $t/part",
+        "truncate -s %d %s" % (cyls * 16 * 63 * 512, stick), "dd if=$t/mbr of=%s conv=notrunc status=none" % stick,
+        "$t/mkvol %s $start $sectors STICK 16" % stick,
+        "mcopy -i %s@@$((start * 512)) %s ::README.TXT" % (stick, readme)])
+    mk = subprocess.run(["sh", "-c", script], cwd=ROOT, capture_output=True)
+    checks, info = {"image": mk.returncode == 0}, ""
+    if not checks["image"]:
+        return "  %-22s FAIL image=%r" % (tag, mk.stderr.decode("latin-1")[-300:]), False
+    agent = Agent(tag + "-" + card, profile, card, ["--file", stick + "=/TEST/STICK.IMG", "--cmd", "C:\\TEST\\GLOS.EXE"],
+                  timeout=900)
+    try:
+        checks["listen"] = agent.listening()
+        if checks["listen"]:
+            out = lambda c: (lambda r: (r[0], (r[1] + r[2]).replace("\r", "")))(agent.ssh(c))
+            rc, o = out("glos testdisk attach C:\\TEST\\STICK.IMG")
+            checks["attach"] = rc == 0 and "D:" in o
+            if not checks["attach"]:
+                info += " attach=%r" % o[-200:]
+            rc, o = out("type D:\\README.TXT")
+            checks["read"] = rc == 0 and "hello from a stick" in o
+            rc, o = out("copy D:\\README.TXT D:\\NEW.TXT")
+            rc2, o2 = out("dir D:\\")
+            checks["write"] = rc == 0 and "NEW      TXT" in o2
+            rc, o = out("glos testdisk detach")
+            rc2, o2 = out("dir D:\\")
+            checks["detach"] = rc == 0 and rc2 != 0
+            rc, o = out("glos testdisk attach C:\\TEST\\STICK.IMG")
+            rc2, o2 = out("type D:\\NEW.TXT")
+            checks["kept"] = rc == 0 and "hello from a stick" in o2
+            rc, o = out("glos testdisk gone")
+            rc2, o2 = out("dir D:\\")
+            rc3, o3 = out("dir D:\\")
+            checks["gone"] = rc == 0 and rc2 != 0 and rc3 != 0
+            info += " gone=%r/%r" % (o2.strip()[-60:], o3.strip()[-60:])
+            agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    log = agent.wait()
+    checks["logged"] = "GLOS-DISK xdisk attach slot=0" in log and "GLOS-DISK xdisk gone" in log
+    checks["clean"] = "GLOS-PANIC" not in log and "GLOS-WARN" not in log
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % (tag, "PASS" if not bad else "FAIL", " " + info if not bad else " failed: " + " ".join(bad) + info), \
+        not bad
+
+
 def cdrom_audio_case(profile, card):
     """N4's CD audio by the drive's own output (C6's first part): a mixed-mode disc (mkiso.py --cue: the data
     track and two tone tracks) in 86Box's drive, an SB16 beside it (86Box plays a disc's audio through the sound
@@ -14034,6 +14096,7 @@ def main():
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
         res = matrix(cdrom_case, cases, a.jobs)
         res += matrix(cdimage_case, cases, a.jobs)              # (images as drives: no CD-ROM drive needed)
+        res += matrix(xdisk_case, cases, a.jobs)                # (disks that come and go: USB storage's way in)
         res += matrix(cdrom_audio_case, [c for c in cases if c[0] == "bf6"], a.jobs)    # (the 486's board: no sound)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "ndos":                       # (native machines: the bf6 with VME, the 486 without)
