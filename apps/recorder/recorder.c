@@ -721,6 +721,7 @@ static void build(void)
     char t[40];
     int i;
     win = gui_window(GUI_T("Sound Recorder"), 520, 250, 0);
+    gui_window_icon(win, "app-recorder");
     win->on_command = command;
     win->on_update = update;
     win->on_key = key;

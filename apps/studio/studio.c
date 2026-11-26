@@ -1994,6 +1994,7 @@ static void build(void)
     struct gui_widget *tb, *row;
     int i;
     win = gui_window(GUI_T("MIDI Studio"), 620, 430, 0);
+    gui_window_icon(win, "app-studio");
     win->on_command = command;
     win->on_update = update;
     win->on_key = key;

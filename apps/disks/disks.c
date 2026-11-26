@@ -2042,6 +2042,7 @@ static void build(void)
     struct gui_menu *m;
     struct gui_widget *tb;
     win = gui_window(GUI_T("Disk Tools"), 600, 380, 0);
+    gui_window_icon(win, "app-disks");
     win->on_command = command;
     win->on_update = update;
     win->on_close = on_close;

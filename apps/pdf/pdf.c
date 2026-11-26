@@ -1072,6 +1072,7 @@ static void build(void)
     struct gui_menu *m;
     struct gui_widget *tb;
     win = gui_window(GUI_T("PDF Viewer"), 620, 440, 0);
+    gui_window_icon(win, "app-pdf");
     win->on_command = command;
     win->on_update = update;
     gui_command(win, C_OPEN, GUI_T("&Open..."), "Ctrl+O", gui_glyph("open"), GUI_T("Open a PDF file"));

@@ -545,6 +545,7 @@ static void build(void)
     struct gui_widget *box, *row, *tb, *l;
     int i;
     win = gui_window(GUI_T("Player"), 420, 300, 0);
+    gui_window_icon(win, "app-player");
     win->on_command = command;
     win->on_update = update;
     win->on_key = key;

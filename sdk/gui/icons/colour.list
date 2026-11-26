@@ -43,6 +43,11 @@ app-mail        email
 app-chat        comments
 app-clock       clock
 app-calendar    calendar
+app-recorder    microphone
+app-pdf         book_open
+app-studio      piano
+app-disks       drive_edit
+app-player      headphone
 settings        cog
 display         monitor
 keyboard        keyboard
