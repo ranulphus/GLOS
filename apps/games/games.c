@@ -853,6 +853,7 @@ static void build(void)
     struct gui_menu *m;
     struct gui_widget *tb, *row, *split, *page;
     win = gui_window(GUI_T("Games"), 620, 440, 0);
+    gui_window_icon(win, "app-games");
     win->on_command = command;
     win->on_update = update;
     gui_command(win, C_PLAY, GUI_T("&Play"), "Enter", gui_glyph("play"), GUI_T("Play the game"));

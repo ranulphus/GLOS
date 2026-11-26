@@ -1318,6 +1318,7 @@ static void build(void)
     struct gui_menu *m;
     struct gui_widget *side, *right;
     win = gui_window(GUI_T("Chat"), 620, 440, 0);
+    gui_window_icon(win, "app-chat");
     win->on_command = command;
     win->on_update = update;
     gui_command(win, C_CONNECT, GUI_T("&Connect"), "Ctrl+K", NULL, NULL);

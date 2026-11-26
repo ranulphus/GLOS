@@ -424,6 +424,7 @@ static void build(void)
     unsigned ndev = 0;
     char text[80];
     win = gui_window(GUI_T("Mixer"), 300, 220, GUI_W_FIXED);
+    gui_window_icon(win, "app-audio");
     win->on_key = key;
     row = gui_hbox(win->root, 6, 6);
     g = gui_group(row, GUI_T("Volume"));

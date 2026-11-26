@@ -1600,6 +1600,7 @@ static void build(void)
     struct gui_menu *m;
     struct gui_widget *tb, *row;
     win = gui_window(GUI_T("Web Reader"), 620, 440, 0);
+    gui_window_icon(win, "app-web");
     win->on_command = command;
     win->on_update = update;
     gui_command(win, C_BACK, GUI_T("&Back"), "Alt+Left", gui_glyph("back"), GUI_T("The page before"));
