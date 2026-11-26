@@ -719,6 +719,12 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
   486 lost the chord's third key (`z c b`: note 62 at 960 never said; 5 of 5 alone pass, one in three beside two
   other emulators). Neither is new code's; both are to be chased like the Games Library's: instrument, then fix.
 
+- **The AcerMagic S20's MIDI tone missed under load** (2026-11-25, twice: here beside two other emulators, and in
+  the native-dos session's gate on 8b46ef0 with eight): `audio-bf6-g200-acermagic_s20`'s recording lacks the
+  Player's MIDI file's 370 Hz (every other tone there), and the case passes alone. The OPTi card alone so far (its
+  codec is a CS4231 through opti.c's crystal_card). To chase: whether the MIDI file's notes were played late (the
+  FM's timing on the tick) or the recording missed them.
+
 - **Keys typed as the Terminal's window comes are lost** (gate 52, 2026-11-24, local: `native-486dx2-vbe-8
   term-run`, the 486 natively). `c:`, Enter and `cd \g` went nowhere; `ui` and what followed reached the shell.
   Neither end drops them by design: the Terminal's keys wait in its event queue until its shell's job exists
