@@ -842,7 +842,7 @@ loopa-gpu: all dos-tests build/dj/GPUTEST.EXE check-deps
 # The virtual game port (docs/gamepad.md J1): glos joy's stick read by JOYTEST three ways on bf6 and the 486.
 loopa-joy: all dos-tests build/dj/JOYTEST.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py joy -j $(JOBS)
-loopa-audio: all dos-tests build/dj/AUDTEST.EXE build/apps/MIXER.EXE build/apps/RECORDER.EXE build/apps/PLAYER.EXE build/apps/STUDIO.EXE \
+loopa-audio: all dos-tests build/dj/AUDTEST.EXE build/dj/MPUSTEP.EXE build/apps/MIXER.EXE build/apps/RECORDER.EXE build/apps/PLAYER.EXE build/apps/STUDIO.EXE \
              check-deps
 	$(Q)python3 tests/loopa/jobs.py audio -j $(JOBS)
 # Windowed DOS-GL (M8 step D): DOS-GL's conformance EXEs (from DOSGL_DIR's build) full-screen on plain DOS and
@@ -1067,6 +1067,12 @@ build/dj/FMSYNTH.EXE: tests/dos/fmsynth.c build/sdk/libfmsynth.a include/glos/fm
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O2 -Wall -Wextra -Werror -Iinclude -o $@ $< build/sdk/libfmsynth.a
 dos-tests: build/dj/FMSYNTH.EXE
+# MPUSTEP (tests/dos/mpustep.c): one MPU-401 step a run, for the P3's resets at 330h (2026-11-26).
+build/dj/MPUSTEP.EXE: tests/dos/mpustep.c
+	@mkdir -p build/dj
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O2 -Wall -Wextra -Werror -o $@ $<
+dos-tests: build/dj/MPUSTEP.EXE
 # The linker's options for a program with threads (glos_thread: include/glos/glos.h): --wrap for each of the C
 # library's functions libglos puts its lock round (sdk/libglos/wrap.list). Used as @build/sdk/gloswrap.opt.
 build/sdk/gloswrap.opt: sdk/libglos/wrap.list

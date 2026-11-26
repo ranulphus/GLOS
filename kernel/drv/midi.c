@@ -31,6 +31,7 @@
 #include "nic.h"
 #include "midi.h"
 #include "timer.h"
+#include "vm.h"
 
 #define TICK_MAX 8
 #define TX 256
@@ -151,8 +152,10 @@ static void mpu_find(u16 port, int sb)
         md.mpu = 0;
     md.mpu_sb = (u8)(ok && sb);
     irq_restore(f);
+    if (ok && !sb)                              /* (GLOS's own card's: no session reaches it, as a NIC's ports) */
+        vdev_hide(port, 2);
     if (ok)
-        kprintf("GLOS-MIDI mpu port=%x\n", port);
+        kprintf("GLOS-MIDI mpu port=%x%s\n", port, sb ? "" : " hidden");
     else if (port >= 0x1000)
         kprintf("GLOS-MIDI mpu none port=%x status=%02x,%02x\n", port, st, inb((u16)(port + 1)));
 }
@@ -209,16 +212,21 @@ static void tx_pump(u32 most)
     }
 }
 
+/* The MPU-401's bytes read, an app's MIDI in kept. GLOS's own card's MPU-401 (a CMI8738's or a Crystal's) is
+   always emptied, in its intelligent mode too: its interrupt is on a line of GLOS's alone, a PCI one held high
+   while a byte waits, so a byte left there would interrupt again for ever (the P3's resets, 2026-11-26: a
+   session's MPU reset command, FFh, then its answer FEh, unread). A Sound Blaster's (mpu_sb) is a session's
+   program's too, outside UART mode: its bytes are left for it (its ISA line raises no more edges meanwhile). */
 void midi_mpu_drain(void)
 {
     struct midi_msg m;
     u32 n, now;
-    if (!md.mpu || !md.uart)
+    if (!md.mpu || (!md.uart && md.mpu_sb))
         return;
     now = now_ms();
     for (n = 0; n < 64 && !(inb((u16)(md.mpu + 1)) & 0x80); n++) {
         u8 b = inb(md.mpu);
-        if (!md.in_app || !midi_parse(&md.parse, b, &m))
+        if (!md.uart || !md.in_app || !midi_parse(&md.parse, b, &m))
             continue;
         m.time = now;
         md.in_got++;

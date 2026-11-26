@@ -26,7 +26,7 @@
 #include "vm.h"
 #include "vsbdev.h"
 
-static struct { u16 base, len; } hidden[4];
+static struct { u16 base, len; u8 said; } hidden[16];  /* (a NIC, cable ports, UHCI controllers, an MPU-401...) */
 static int nhidden;
 
 /* COM1's data port, trapped: whether a program is part-way through a line,
@@ -61,9 +61,12 @@ static void com1_out(u8 v)
 void vdev_hide(u16 base, u16 len)
 {
     u32 p;
-    if (nhidden == ARRAY_SIZE(hidden))
-        panic("vdev-hide", NULL);
+    if (nhidden == ARRAY_SIZE(hidden)) {        /* (the VM keeps reaching them: worse, but no reason to stop GLOS) */
+        kprintf("GLOS-WARN vdev-hide-full port=%x len=%u: a session still reaches it\n", base, len);
+        return;
+    }
     hidden[nhidden].base = base;
+    hidden[nhidden].said = 0;
     hidden[nhidden++].len = len;
     for (p = base; p < (u32)base + len; p++)
         cpu_io_trap(p, 1);
@@ -85,13 +88,23 @@ void vdev_unhide(u16 base)
         }
 }
 
+/* A port of a device GLOS's drivers own. The first write a session makes to each range is logged (a program
+   probing for a card GLOS drives: the P3's MPU-401, 2026-11-26). */
 static int is_hidden(u16 port)
 {
     int i;
     for (i = 0; i < nhidden; i++)
         if (port >= hidden[i].base && port < hidden[i].base + hidden[i].len)
-            return 1;
+            return i + 1;
     return 0;
+}
+
+static int hidden_write(u16 port, u8 v)
+{
+    int i = is_hidden(port);
+    if (i && !hidden[i - 1].said++)
+        kprintf("GLOS-DEV hidden-port-write port=%x val=%02x: GLOS's driver's, dropped\n", port, v);
+    return i;
 }
 
 void vdev_init(void)
@@ -280,7 +293,7 @@ static void dev_outb(u16 port, u8 v)
             return;
         }
         cache_port_out(port, v);                /* an IDE command the disk cache must see (when it watches) */
-        if (!is_hidden(port))
+        if (!hidden_write(port, v))
             outb(port, v);
     }
 }

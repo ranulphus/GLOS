@@ -5950,6 +5950,43 @@ def share_dos_case(profile, vcard, card):
     return "  %-22s %s%s" % (tag, "PASS" if not bad else "FAIL", " failed: " + " ".join(bad) if bad else ""), not bad
 
 
+def mpu_hidden_case(profile, vcard, card):
+    """The MPU-401 of GLOS's own card (a CMI8738's, as the P3's) is hidden from sessions (2026-11-26): on the P3 a
+    session's MPU probe (Echoes' music; tests/dos/mpustep.c) reset the PC twice, its reset command FFh answered by
+    a byte nobody read, whose interrupt on GLOS's PCI line came again for ever. With 86Box's CMI8738 GLOS finds its
+    MPU-401 and says it hidden; MPUSTEP's whole probe there, over SSH in a session, reads FFh (no card: the probe
+    gives up), its first write is logged as dropped, and GLOS goes on: no storm, the network answering."""
+    tag = "mpuhide-%s-%s" % (profile, vcard)
+    cfg = batfile(tag + "/GLOS.CFG", ["; jobs.py audio: the CMI8738's MPU-401 hidden", "[time]", "sntp = off"])
+    agent = Agent(tag, profile, card, ["--card", vcard, "--sound", "cmi8738", "--file", cfg + "=/TEST/GLOS.CFG",
+        "--file", "build/dj/MPUSTEP.EXE=/TEST/MPUSTEP.EXE",
+        "--cmd", "SERSAY HX-START mpuhide", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
+        "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"], timeout=600)
+    checks = {"listen": agent.listening()}
+    port = None
+    try:
+        lg = agent.log()
+        m = re.search(r"GLOS-MIDI mpu port=(\w+) hidden", lg)
+        checks["found"] = m is not None
+        port = m.group(1) if m else "330"
+        rc, out, _ = agent.ssh("C:\\TEST\\MPUSTEP.EXE %s all" % port, timeout=90)
+        checks["reads-ff"] = (rc == 0 and "MPUSTEP status s=" + ",".join(["FF"] * 16) in out
+                              and "MPUSTEP ack status=FF data=FF" in out and "MPUSTEP done" in out)
+        lg = agent.log()
+        checks["logged"] = re.search(r"GLOS-DEV hidden-port-write port=%x val=ff" % (int(port, 16) + 1), lg) is not None
+        checks["net"] = agent.ssh("glos ver")[0] == 0
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+        if not (checks["found"] and checks["reads-ff"] and checks["logged"]):
+            print("    %s: %r %r" % (tag, out.strip()[:300], re.findall(r"GLOS-(?:MIDI|DEV hidden|CMI)[^\n]*", lg)[:8]))
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["no-storm"] = "irq-storm" not in text and "GLOS-PANIC" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text) and hx_vecchk(text)
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % (tag, "PASS" if not bad else "FAIL", " failed: " + " ".join(bad) if bad else ""), not bad
+
+
 def crystal_off_case(profile, vcard, card):
     """[sound] crystal = off (docs/crystal-audio.md): with 86Box's CS4236B there, GLOS leaves the chip alone and has
     no sound card; `glos config set` takes the key's other values (the schema has it: before 2026-11-05 it didn't,
@@ -13977,6 +14014,9 @@ def main():
                                        if not a.profile or c[0] in a.profile], a.jobs)
         if not os.environ.get("LOOPA_AUDIO_SOUND") or "sharedos" in os.environ["LOOPA_AUDIO_SOUND"].split(","):
             res += matrix(share_dos_case, [c for c in [("bf6", "g200", "ne2kpci")] if not a.profile or c[0] in a.profile],
+                          a.jobs)
+        if not os.environ.get("LOOPA_AUDIO_SOUND") or "mpuhide" in os.environ["LOOPA_AUDIO_SOUND"].split(","):
+            res += matrix(mpu_hidden_case, [c for c in [("bf6", "g200", "ne2kpci")] if not a.profile or c[0] in a.profile],
                           a.jobs)
         if not os.environ.get("LOOPA_AUDIO_SOUND") or "off" in os.environ["LOOPA_AUDIO_SOUND"].split(","):
             res += matrix(crystal_off_case, [c[:3] for c in AUDIO_CASES if len(c) > 3
