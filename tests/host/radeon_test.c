@@ -96,6 +96,15 @@ int main(void)
     setup(0x80000010, -1, 1, 0);                /* (no bus-mastering hook: the harder reset without it) */
     CHECK(radeon_settle_regs(regs, wait, 0, 0) == RADEON_DEAD);
 
+    /* (2026-11-26) the session's end, the card alive: the CP stopped, no write-back, bus mastering untouched */
+    memset(regs, 0, sizeof regs);
+    R(0x0740) = 0x10000000u;                    /* (CP_CSQ_CNTL: the CP on, a ring's mode) */
+    R(0x0770) = 0x3F;                           /* (SCRATCH_UMSK: six written back) */
+    R(0x0704) = 0x0012;                         /* (CP_RB_CNTL: a ring's size, write-back on) */
+    bm_off = bm_on = 0;
+    radeon_quiet_regs(regs);
+    CHECK(R(0x0740) == 0 && R(0x0770) == 0 && R(0x0704) == (0x0012u | (1u << 27)) && !bm_off && !bm_on);
+
     printf("radeon_test: %d failures\n", fails);
     return fails != 0;
 }

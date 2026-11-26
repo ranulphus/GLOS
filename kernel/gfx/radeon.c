@@ -43,6 +43,8 @@
 #define   HDP_SOFT_RESET    (1u << 26)
 #define CP_RB_CNTL          0x0704
 #define   RB_RPTR_WR_ENA    (1u << 31)
+#define   RB_NO_UPDATE      (1u << 27)      /* (no write-back of the read pointer to the host's memory) */
+#define SCRATCH_UMSK        0x0770          /* (which scratch registers are written back to memory: 0 none) */
 #define CP_RB_RPTR          0x0710
 #define CP_RB_WPTR          0x0714
 #define CP_RB_RPTR_WR       0x071C
@@ -182,4 +184,16 @@ int radeon_settle_regs(volatile u32 *r, void (*wait)(void), void (*bm)(int on), 
         R(SURFACE0_UPPER) = 0;
     }
     return how;
+}
+
+/* A session's end or a kill, the engine settled (2026-11-26, DOS-GL's P3 reset, insurance whatever its cause):
+   nothing the program left running may reach memory that is GLOS's again once its memory is freed. The CP
+   stopped (its fetches from the program's ring), and no write-back to host memory (the read pointer's, the
+   scratch registers'). Bus mastering is left as it is: cleared while the engine is busy it hangs the card
+   (DOS-GL: only after the soft resets). A program on the card sets all of these again when it starts. */
+void radeon_quiet_regs(volatile u32 *r)
+{
+    R(CP_CSQ_CNTL) = 0;
+    R(SCRATCH_UMSK) = 0;
+    R(CP_RB_CNTL) = R(CP_RB_CNTL) | RB_NO_UPDATE;
 }

@@ -14,5 +14,8 @@ enum {
 /* r: the card's registers (BAR 2, 16 KB mapped); wait: about 55 ms; bm: bus mastering off (0) and on (1) at the
    PCI command register (may be 0). surfaces: SURFACE0's registers cleared too. */
 int radeon_settle_regs(volatile u32 *r, void (*wait)(void), void (*bm)(int on), int surfaces);
+/* At a session's end or a kill, after a settle that left the card alive: the CP stopped and no write-back to host
+   memory (bus mastering left alone). */
+void radeon_quiet_regs(volatile u32 *r);
 
 #endif

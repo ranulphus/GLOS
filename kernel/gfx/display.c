@@ -536,6 +536,8 @@ static void radeon_bm(int on)                  /* its bus mastering, at the PCI 
    such an end froze the P3 (DOS-GL's GLQuake, 2026-11-26): the BIOS's writes held the bus. */
 static u8 card_dead;
 
+static volatile u32 *radeon_regs;              /* (the Radeon's registers, once looked for: radeon_settle) */
+
 static int radeon_settle(int surfaces)
 {
     static const u16 ids[] = { 0x5144, 0x5145, 0x5146, 0x5147, 0x5157, 0x5158, 0x5159, 0x515A };
@@ -555,6 +557,7 @@ static int radeon_settle(int surfaces)
     }
     if (!regs)
         return RADEON_IDLE;
+    radeon_regs = regs;
     how = radeon_settle_regs(regs, pit2_wait, radeon_bm, surfaces);
     if (how == RADEON_DEAD)
         card_dead = 1;                          /* (for good: until the PC is started again) */
@@ -564,7 +567,14 @@ static int radeon_settle(int surfaces)
 /* Before a mode set the BIOS makes for GLOS outside this file (a session's end puts its first mode back:
    vm/session.c), which on a PC with no desktop is the only one: the P3's freeze at a kill was there. 0, or -1:
    the card is stuck past two resets, and no mode set may be made. */
-int display_card_settle(void) { return radeon_settle(0) == RADEON_DEAD ? -1 : 0; }
+int display_card_settle(void)
+{
+    if (radeon_settle(0) == RADEON_DEAD)
+        return -1;
+    if (radeon_regs)                            /* (the program's CP and write-backs off before its memory is freed) */
+        radeon_quiet_regs(radeon_regs);
+    return 0;
+}
 
 /* The desktop's mode set: 0, or -1 with why in the log. */
 static int mode_set(void)
