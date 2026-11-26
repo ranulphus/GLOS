@@ -227,6 +227,13 @@ void sshd_net_start(void (*kick)(void))
 static volatile u32 turns;
 u32 sshd_turns(void) { return turns; }
 
+/* Where the SSH thread is in its turn (any context reads it): what it waits in when its turns stop. The net thread
+   accepts connections and the SSH thread alone frees them, so a thread stuck in one of these leaves the slots
+   taken and every new connection reset (the P3, 2026-11-26 18:33: ping answered, ssh "Connection reset by peer"
+   until the owner's reset). sshd_net_poll says so once, naming it. */
+static const char *volatile ssh_in = "wait";
+#define STUCK_TICKS (15 * 1024)                 /* (15 s with a connection waiting and no turn) */
+
 /* The shell sessions that run a command for a client (ssh HOST COMMAND) and have not ended (any context): each
    ends when its command has, and its client is then told the exit status. GLOS's exit waits for them. */
 static volatile u32 commands;
@@ -260,7 +267,20 @@ int sshd_ending(void)
 /* Each turn of the net thread: output into TCP, and the closes. */
 void sshd_net_poll(void)
 {
-    int i;
+    static u32 seen_turns, seen_at;
+    static u8 said;
+    int i, waiting = 0;
+    for (i = 0; i < NCONN; i++)
+        waiting += conns[i].used && !conns[i].ssh_done;
+    if (turns != seen_turns || !waiting) {
+        if (said && turns != seen_turns)
+            kprintf("GLOS-SSH turns again turns=%u\n", turns);
+        seen_turns = turns, seen_at = timer_ticks(), said = 0;
+    } else if (!said && timer_ticks() - seen_at > STUCK_TICKS) {
+        said = 1;
+        kprintf("GLOS-WARN ssh-stuck in=%s turns=%u slots=%d s=%u: new connections are refused until it goes on\n",
+                ssh_in, turns, waiting, (timer_ticks() - seen_at) / 1024);
+    }
     for (i = 0; i < NCONN; i++) {
         struct sconn *s = &conns[i];
         u8 chunk[1460];
@@ -2295,6 +2315,7 @@ static void ssh_main(void *arg)
                 }
                 kprintf("GLOS-SSH connect slot=%u\n", (u32)i);
             }
+            ssh_in = "input";                   /* (a request's own work: a command, a file, an exec) */
             while ((n = ring_get(&s->rx, buf, sizeof buf)) != 0)
                 if (ssh_conn_input(s->conn, buf, n) != 0)
                     break;
@@ -2307,13 +2328,21 @@ static void ssh_main(void *arg)
             else if (!ssh_conn_authenticated(s->conn) && timer_ticks() - s->since > GRACE)
                 finish(s, "login-grace");
         }
+        ssh_in = "agent";
         agent_service(agent_write, agent_done);
+        ssh_in = "asks";
         asks_turn();
+        ssh_in = "shells";
         shells_turn();
+        ssh_in = "sftp";
         sftp_turn();
+        ssh_in = "streams";
         streams_turn();
+        ssh_in = "vnc-keys";
         vnc_keys_turn();                        /* (keys a viewer sent, that the keyboard hadn't room for yet) */
+        ssh_in = "gdb";
         gdbp_turn();
+        ssh_in = "wait";
         for (i = 0; i < NCONN; i++)             /* (for sshd_ending, read from other threads: the connections are
                                                    this thread's) */
             conns[i].ending = conns[i].used && conns[i].conn && ssh_conn_ending(conns[i].conn) > 0;
