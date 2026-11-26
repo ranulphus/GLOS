@@ -586,6 +586,7 @@ $(eval $(call dos_test,SBTEST,sbtest))
 $(eval $(call dos_test,CONIN,conin))
 $(eval $(call dos_test,MOUSEHND,mousehnd))
 $(eval $(call dos_test,CDTEST,cdtest))
+$(eval $(call dos_test,EMSTEST,emstest))
 $(eval $(call dos_test,RUNOUT,runout))
 $(eval $(call dos_test,SESSTEST,sesstest))
 $(eval $(call dos_test,TIMECHK,timechk))
@@ -631,7 +632,7 @@ build/ow/dos/DPMI16.EXE: tests/dos/dpmi16/dpmi16.c tests/dos/dpmi16/dpmi16a.asm
 	  file build/ow/dos/obj/dpmi16.obj,build/ow/dos/obj/dpmi16a.obj
 DOS_TESTS := build/ow/dos/HOSTILE.EXE build/ow/dos/XMSTEST.EXE build/ow/dos/XMSBIG.EXE build/ow/dos/ECHOARGS.EXE build/ow/dos/DPMIMINI.COM \
              build/ow/dos/RUNOUT.EXE build/ow/dos/DPMI16.EXE build/ow/dos/SESSTEST.EXE build/ow/dos/TIMECHK.EXE \
-             build/ow/dos/SHOTTEST.EXE build/ow/dos/TYPEIN.EXE build/ow/dos/CONIN.EXE build/ow/dos/MOUSEHND.EXE build/ow/dos/CDTEST.EXE build/ow/dos/SHAREDOS.EXE build/ow/dos/CLOCKCHK.EXE build/ow/dos/SBTEST.EXE \
+             build/ow/dos/SHOTTEST.EXE build/ow/dos/TYPEIN.EXE build/ow/dos/CONIN.EXE build/ow/dos/MOUSEHND.EXE build/ow/dos/CDTEST.EXE build/ow/dos/EMSTEST.EXE build/ow/dos/SHAREDOS.EXE build/ow/dos/CLOCKCHK.EXE build/ow/dos/SBTEST.EXE \
              build/ow/dos/I2FTSR.EXE build/ow/dos/STUBTSR.EXE build/ow/dos/UMBRD.EXE build/ow/dos/FMTEST.EXE \
              build/ow/dos/JOYTEST.EXE build/ow/dos/SCRTEXT.EXE build/ow/dos/NDOSTEST.EXE build/ow/dos/DOSDIFF.EXE build/ow/dos/CONTEST.EXE
 dos-tests: $(DOS_TESTS)
@@ -658,7 +659,7 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/arch/mtrr.c
          kernel/ssh/sshd.c \
          kernel/drv/serial.c kernel/lib/kprintf.c kernel/mm/pmm.c kernel/mm/heap.c kernel/mm/vmm.c kernel/mm/umapage.c \
          kernel/dbg/gdbstub.c kernel/dbg/gdbprog.c kernel/vm/v86.c kernel/vm/session.c kernel/vm/v86dec.c kernel/vm/vpic.c kernel/vm/vdev.c kernel/vm/vcon.c \
-         kernel/vm/vkbc.c kernel/vm/vmouse.c kernel/vm/vkeyb.c kernel/vm/mscdex.c kernel/vm/int15.c kernel/vm/vjoy.c kernel/vm/vdma.c kernel/vm/vsb.c kernel/vm/vsbdev.c kernel/drv/uhci.c kernel/drv/ehci.c kernel/drv/cmi8738.c kernel/drv/es1371.c kernel/drv/ess.c kernel/drv/opti.c kernel/drv/isapnp.c kernel/drv/pnpbus.c kernel/drv/ich97.c kernel/drv/via686.c kernel/drv/ac97.c kernel/drv/uhcitd.c kernel/drv/msc.c kernel/drv/ohci.c kernel/drv/ohcitd.c kernel/drv/ehcitd.c kernel/drv/hidparse.c kernel/drv/xpad.c kernel/drv/usbkbd.c kernel/vm/xms.c kernel/dos/agent.c kernel/dos/watch.c \
+         kernel/vm/vkbc.c kernel/vm/vmouse.c kernel/vm/vkeyb.c kernel/vm/mscdex.c kernel/vm/ems.c kernel/vm/emsvm.c kernel/vm/int15.c kernel/vm/vjoy.c kernel/vm/vdma.c kernel/vm/vsb.c kernel/vm/vsbdev.c kernel/drv/uhci.c kernel/drv/ehci.c kernel/drv/cmi8738.c kernel/drv/es1371.c kernel/drv/ess.c kernel/drv/opti.c kernel/drv/isapnp.c kernel/drv/pnpbus.c kernel/drv/ich97.c kernel/drv/via686.c kernel/drv/ac97.c kernel/drv/uhcitd.c kernel/drv/msc.c kernel/drv/ohci.c kernel/drv/ohcitd.c kernel/drv/ehcitd.c kernel/drv/hidparse.c kernel/drv/xpad.c kernel/drv/usbkbd.c kernel/vm/xms.c kernel/dos/agent.c kernel/dos/watch.c \
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
          kernel/disk/bdisk.c kernel/disk/letters.c kernel/disk/mbr.c kernel/disk/mbrboot.S kernel/disk/fatfmt.c kernel/disk/fdboot.S \
          kernel/disk/diskcmd.c kernel/drv/uart.c kernel/net/slip.c kernel/net/member.c kernel/drv/plip.c kernel/drv/rhine.c kernel/drv/pcnet.c kernel/drv/tulip.c \

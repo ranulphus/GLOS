@@ -1121,7 +1121,14 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   answering 3Dh on the device name EMMXXXX0 (its IOCTL 4400h/4407h as a character device); [memory] ems = auto,
   off, or the KB; VCPI not offered (DPMI is GLOS's: extenders take it first); E4 a DOS test program (EMSTEST)
   asking each function with patterns written through the frame and read back, then games that want EMS (Loop A
-  first, the owner's game set where they have them); native machines (N6) later, each its own frame and pages.
+  first, the owner's game set where they have them); native machines (N6) later, each its own frame and pages. **E1-E4 built
+  (2026-11-26):** ems.c host-tested (ems_test); emsvm.c: the frame the first free 64 KB from C800h below E0000h
+  (umapage's rules), up to 8 MB and half the free memory, frames taken when pages are allocated, zeroed;
+  INT 67h at an ARPL (V67, the twelfth: DOS_MISC's last room) in a block with EMMXXXX0's header; EMMXXXX0 a
+  DOS device name while EMS is on. On by default natively (an EMS nobody uses costs the window alone); the
+  [memory] ems setting waits for the GLOS session (the Control Panel's goldens). `jobs.py cdrom`'s ems case:
+  EMSTEST's checks, the frame at C800h with 512 pages, on the bf6 and the 486: PASS. Owed: games that want EMS,
+  native machines' own EMS.
 - **N4, the keyboard's layout (2026-11-25, native-dos; KEYB's work):** the system VM's INT 09h is an ARPL of GLOS's
   in front of the BIOS's handler (kernel/vm/vkeyb.c). A key pressed whose character on [region] layout (keymap.h:
   Shift, Caps Lock, Num Lock, AltGr from the BIOS's flags) differs from the US one, and the 102nd key, GLOS answers:

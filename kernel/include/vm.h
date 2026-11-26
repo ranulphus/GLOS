@@ -198,6 +198,10 @@ int  vdos_disk_detach(void *ctx, char *msg, unsigned room);
 void vdos_disk_gone(void *ctx);
 void vdos_disk_breathe(void);
 int  vdos_testdisk(const char *how, char *msg, unsigned room);    /* glos testdisk */
+struct ems_regs;
+int  ems_vm_init(void);                         /* emsvm.c: EMS for the system VM (natively): 0, or -1 off */
+int  ems_vm_on(void);
+void ems_vm_call(struct ems_regs *r);
 int  mscdex_int2f(struct dos_regs86 *r);
 void mscdex_request(u32 r, int unit);
 void mscdex_strategy(unsigned es, unsigned bx);

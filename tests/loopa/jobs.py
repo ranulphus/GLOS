@@ -8602,6 +8602,36 @@ def xdisk_case(profile, card):
         not bad
 
 
+def ems_case(profile, card):
+    """N4's EMS (docs/v1/native-dos.md, E1-E4), natively: GLOS's own LIM 4.0 manager (kernel/vm/ems.c, emsvm.c)
+    found and used as programs find and use one: tests/dos/emstest.c's checks (EMMXXXX0 by INT 67h's segment and
+    as a device, status, version, the frame, pages allocated, mapped and written through the frame, a page shown
+    elsewhere by the page tables, 57h's move, the pages given back)."""
+    tag = "ems-" + profile
+    agent = Agent(tag + "-" + card, profile, card, ["--file", "build/ow/dos/EMSTEST.EXE=/TEST/EMSTEST.EXE",
+                                                    "--cmd", "C:\\TEST\\GLOS.EXE"], timeout=900)
+    checks, info = {}, ""
+    try:
+        checks["listen"] = agent.listening()
+        if checks["listen"]:
+            rc, o, e = agent.ssh("C:\\TEST\\EMSTEST.EXE")
+            o = (o + e).replace("\r", "")
+            checks["emstest"] = rc == 0 and "EMSTEST done failures=0" in o
+            if not checks["emstest"]:
+                info += " %r" % [l for l in o.split("\n") if "FAIL" in l or "done" in l][:6]
+            agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    log = agent.wait()
+    m = re.search(r"GLOS-EMS on frame=(\w+) pages=(\d+)", log)
+    checks["on"] = m is not None
+    info += " frame=%s pages=%s" % (m.group(1), m.group(2)) if m else " ems=%r" % [l for l in log.split("\n") if "GLOS-EMS" in l][:3]
+    checks["clean"] = "GLOS-PANIC" not in log and "GLOS-WARN" not in log
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % (tag, "PASS" if not bad else "FAIL", info if not bad else " failed: " + " ".join(bad) + info), \
+        not bad
+
+
 def cdrom_audio_case(profile, card):
     """N4's CD audio by the drive's own output (C6's first part): a mixed-mode disc (mkiso.py --cue: the data
     track and two tone tracks) in 86Box's drive, an SB16 beside it (86Box plays a disc's audio through the sound
@@ -14186,6 +14216,7 @@ def main():
         res = matrix(cdrom_case, cases, a.jobs)
         res += matrix(cdimage_case, cases, a.jobs)              # (images as drives: no CD-ROM drive needed)
         res += matrix(xdisk_case, cases, a.jobs)                # (disks that come and go: USB storage's way in)
+        res += matrix(ems_case, cases, a.jobs)                  # (EMS: GLOS's own LIM 4.0 manager)
         res += matrix(cdrom_audio_case, [c for c in cases if c[0] == "bf6"], a.jobs)    # (the 486's board: no sound)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "ndos":                       # (native machines: the bf6 with VME, the 486 without)
