@@ -166,6 +166,20 @@ static void tab_drop(struct tab *t)
     gui_relayout(win);
 }
 
+/* (-log) What a session wrote, as it came, a line a read: control codes and bytes past ASCII as \xHH. For the
+   suite's term-run, whose "MODE done" came to the Terminal (the kernel showed its 11 bytes) and was not on its
+   screen, once under load (gate 65, 2026-11-26). */
+static void log_rx(int tab_no, const unsigned char *b, int n)
+{
+    static char line[4 * 2048 + 64];
+    int i, k = snprintf(line, sizeof line, "TERMRX tab=%d n=%d t=%u ", tab_no, n, glos_ticks());
+    for (i = 0; i < n && k < (int)sizeof line - 5; i++)
+        k += b[i] >= 0x20 && b[i] < 0x7F && b[i] != '\\' ? snprintf(line + k, sizeof line - (size_t)k, "%c", b[i])
+                                                          : snprintf(line + k, sizeof line - (size_t)k, "\\x%02x", b[i]);
+    printf("%s\n", line);
+    fflush(stdout);
+}
+
 /* What the sessions have written, onto their screens; their ends. */
 static void poll(void)
 {
@@ -183,6 +197,8 @@ static void poll(void)
             st.state = GLOS_JS_DONE, st.code = 255;
         in_poll = 1;
         while ((n = glos_job_read(t->job, GLOS_JOB_OUT, buf, sizeof buf)) > 0) {
+            if (log_on)
+                log_rx(i, buf, n);
             gui_term_feed(t->grid, buf, n);
             any = 1;
         }
@@ -226,6 +242,10 @@ static void term_send(struct gui_widget *w, const char *d, int n, int typed)
 static void term_resize(struct gui_widget *w, int cols, int rows)
 {
     struct tab *t = tab_of(w);
+    if (log_on) {                               /* (term-run's lost line: whether a size came between) */
+        printf("TERMSIZE cols=%d rows=%d t=%u\n", cols, rows, glos_ticks());
+        fflush(stdout);
+    }
     if (t && t->job && !t->ended)
         glos_job_size(t->job, (unsigned)cols, (unsigned)rows);
 }
