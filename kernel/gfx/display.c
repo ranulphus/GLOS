@@ -531,11 +531,17 @@ static void radeon_bm(int on)                  /* its bus mastering, at the PCI 
     pci_write32(radeon_pd->bus, radeon_pd->dev, radeon_pd->fn, 0x04, on ? (c & 0xFFFFu) | 4u : (c & 0xFFFFu) & ~4u);
 }
 
+/* A Radeon the guard found dead (its FIFO full past both resets): no program's mode set reaches the BIOS
+   from then until the PC is started again (display_quiet), as GLOS's own don't. A program on the card after
+   such an end froze the P3 (DOS-GL's GLQuake, 2026-11-26): the BIOS's writes held the bus. */
+static u8 card_dead;
+
 static int radeon_settle(int surfaces)
 {
     static const u16 ids[] = { 0x5144, 0x5145, 0x5146, 0x5147, 0x5157, 0x5158, 0x5159, 0x515A };
     static volatile u32 *regs;
     static int looked;
+    int how;
     if (!looked) {
         struct pci_dev *pd = 0;
         u32 k;
@@ -547,7 +553,12 @@ static int radeon_settle(int surfaces)
             && (regs = mm_dev_map(pd->bar[2] & ~15u, 0x4000)) != 0)
             radeon_pd = pd;
     }
-    return regs ? radeon_settle_regs(regs, pit2_wait, radeon_bm, surfaces) : RADEON_IDLE;
+    if (!regs)
+        return RADEON_IDLE;
+    how = radeon_settle_regs(regs, pit2_wait, radeon_bm, surfaces);
+    if (how == RADEON_DEAD)
+        card_dead = 1;                          /* (for good: until the PC is started again) */
+    return how;
 }
 
 /* Before a mode set the BIOS makes for GLOS outside this file (a session's end puts its first mode back:
@@ -1015,6 +1026,14 @@ void display_leave(void)
 int display_quiet(u32 *eax, u32 *ebx, u32 *ecx, u32 *edx, int app)
 {
     u32 ax = *eax & 0xFFFF, ah = ax >> 8;
+    if (card_dead && (!ah || ax == 0x4F02)) {   /* a dead Radeon: refused, the mode as it is (VBE: failed) */
+        static u32 said;
+        if (!said++ || !(said & 63))
+            kprintf("GLOS-WARN radeon-dead-refused int10=%04x n=%u: the card is stuck; start the PC again\n", ax, said);
+        if (ah)
+            SET16(*eax, 0x014F);
+        return 1;
+    }
     if (d.on ? d.held : app || !session_console())
         return 0;                               /* (with no desktop, a console job's alone: a login's program, whose
                                                    console is its terminal and not the PC's screen. MS-DOS 7.1's
