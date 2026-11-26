@@ -8619,6 +8619,20 @@ def ems_case(profile, card):
             checks["emstest"] = rc == 0 and "EMSTEST done failures=0" in o
             if not checks["emstest"]:
                 info += " %r" % [l for l in o.split("\n") if "FAIL" in l or "done" in l][:6]
+            # [memory] ems = 1024 at the next start (64 pages), then off (no EMM: EMSTEST's first check fails, the
+            # log says why); the loader reads it into bootinfo v16 (EMS starts before the kernel reads GLOS.CFG)
+            checks["set-kb"] = agent.ssh("glos config set memory ems 1024")[0] == 0
+            agent.ssh("glos reboot --force", timeout=30)
+            checks["kb"] = agent.listening(limit=400, after="GLOS-EMS on frame") and \
+                re.search(r"GLOS-EMS on frame=\w+ pages=64 kb=1024", agent.log()) is not None
+            checks["set-off"] = agent.ssh("glos config set memory ems off")[0] == 0
+            agent.ssh("glos reboot --force", timeout=30)
+            if agent.listening(limit=400, after="pages=64 kb=1024"):
+                rc, o, e = agent.ssh("C:\\TEST\\EMSTEST.EXE")
+                checks["off"] = rc != 0 and "EMSTEST name FAIL" in (o + e) and "GLOS-EMS off reason=setting" in agent.log()
+            else:
+                checks["off"] = False
+                info += " no-second-start"
             agent.ssh("glos exit")
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
@@ -13616,6 +13630,7 @@ CONTROL_NUMBERS = {"gpu_watchdog": "1000", "repeat_rate": "20", "double_click": 
                    "memory": "8192", "interval": "12", "size": "16", "range": "2000", "wait": "240", "power": "240",
                    "volume": "70", "timeout": "12"}
 CONTROL_TEXTS = {"hostname": "cptest", "start": "NOTEPAD.EXE", "console": "C:\\KIOSK.BAT", "options": "/NOVME",
+                 "ems": "4096",
                  "title": "CP Test", "args": "-a -b", "comspec": "C:\\COMMAND.COM",
                  "autoexec": "C:\\AUTOEXEC.BAT", "dir": "C:\\CP", "blaster": "A220 I7 D1 H5",
                  "env": "CPA=1\nPATH=C:\\A;C:\\B", "server": "time.example.org:1230",

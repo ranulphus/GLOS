@@ -42,6 +42,7 @@ theme = slate
 | sound volume | 0 to 100 | The main volume |
 | sound virtual | on, off | The Sound Blaster that DOS programs find |
 | net hostname | a name | The PC's name on the network |
+| memory ems | auto, off, or KB (64 to 32768) | Expanded memory for DOS programs, with GLOS started by itself. auto is up to 8 MB |
 | saver wait | minutes, or off | When the screen saver starts |
 | saver saver | blank, stars, pipes, text, objects, maze | Which one |
 | boot default | glos, dos, partition 1 to 8 | What the start-up menu of a PC that starts GLOS by itself starts when nobody chooses |

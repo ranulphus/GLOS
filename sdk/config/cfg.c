@@ -129,6 +129,9 @@ const struct cfg_key cfg_schema[] = {
     { "memory", "stub_page", CFG_TEXT, CFG_RESTART, 3, 4, "page", "off", "&Upper memory page",
       "GLOS's resident part (2.6 KB) in a free 4 KB page above 640 KB: auto finds one from C800, or name it (D800). "
       "A page a card or ROM uses is refused" },
+    { "memory", "ems", CFG_TEXT, CFG_RESTART, 2, 5, "ems", "auto", "&Expanded memory (EMS)",
+      "DOS programs' expanded memory, with GLOS started by itself: auto (up to 8 MB), off, or the KB (64 to 32768). "
+      "Its 64 KB window is the first free one above 640 KB" },
     /* [vnc] (M10 step F) */
     { "vnc", "enable", CFG_CHOICE, CFG_NOW, 0, 0, "on|off", "off", "&Viewers through SSH",
       "A VNC viewer may see and use the desktop, through an SSH tunnel to port 5900 (ssh -L): whoever may log in" },
@@ -591,6 +594,14 @@ int cfg_check(const struct cfg_key *k, const char *v, char *why, int room)
         if (same(k->choices ? k->choices : "", "page")) {
             if (cfg_page(v) < 0)
                 return say(why, room, "off, auto, or a page's segment from C800 to EF00 (D800)", "", "");
+            return 0;
+        }
+        if (same(k->choices ? k->choices : "", "ems")) {      /* auto, off, or KB: 64 to 32768, 16 KB pages */
+            long kb;
+            if (same(v, "auto") || same(v, "off"))
+                return 0;
+            if (number(v, &kb) != 0 || kb < 64 || kb > 32768 || kb % 16)
+                return say(why, room, "auto, off, or the KB from 64 to 32768, a multiple of 16", "", "");
             return 0;
         }
         if (same(k->choices ? k->choices : "", "boot")) {

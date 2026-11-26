@@ -7,6 +7,7 @@
  * window. At most 8 MB, and no more than half the memory free at the start. INT 67h's entry is vdos.c's. */
 #include <string.h>
 
+#include "glos/bootinfo.h"
 #include "kprintf.h"
 #include "mm.h"
 #include "pci.h"
@@ -14,7 +15,8 @@
 #include "vm.h"
 #include "ems.h"
 
-#define MAX_PAGES 512                   /* 8 MB */
+#define AUTO_PAGES 512                  /* auto: 8 MB */
+#define MAX_PAGES 2048                  /* [memory] ems's most: 32 MB */
 
 static struct ems e;
 static u32 (*frames)[4];                /* each logical page's four frames (0: the slot free) */
@@ -104,10 +106,18 @@ static u32 find_window(void)
 int ems_vm_init(void)
 {
     static const struct ems_ops ops = { 0, em_map, em_alloc, em_free, em_page_at };
-    unsigned total = pmm_free_frames() / 8;     /* (half the free memory, in 16 KB pages) */
+    unsigned total = pmm_free_frames() / 8, want = AUTO_PAGES;     /* (half the free memory, in 16 KB pages) */
+    u32 kb = vm.bi->ems_kb;                     /* ([memory] ems as the loader read it: GLOS.CFG isn't the
+                                                   kernel's yet when EMS starts) */
 
-    if (total > MAX_PAGES)
-        total = MAX_PAGES;
+    if (kb == BI_EMS_OFF) {
+        kprintf("GLOS-EMS off reason=setting\n");
+        return -1;
+    }
+    if (kb >= 64)
+        want = kb / 16 > MAX_PAGES ? MAX_PAGES : kb / 16;
+    if (total > want)
+        total = want;
     if (!(frame_lin = find_window())) {
         kprintf("GLOS-EMS off reason=no-window\n");
         return -1;
