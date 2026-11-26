@@ -3,8 +3,9 @@
 # kernel with GLOS as its shell, its network and SSH on, so that the rest is put on the PC's hard disk from another computer
 # (tools/floppy/install.py). In the dev container (mtools), from the repository's root.
 #
-# SIZE: 1440 (a 3.5" 1.44 MB disk, the default) or 1200 (5.25" 1.2 MB, the kernel packed: build/kernel/GLOSK.PAK,
-# which GLOS.EXE unpacks). 720 KB is no longer made (phase G, 2026-11-25: the packed kernel outgrew its room).
+# SIZE: 1440 (a 3.5" 1.44 MB disk, the default) or 1200 (5.25" 1.2 MB); on both the kernel packed (build/kernel/
+# GLOSK.PAK, which GLOS.EXE unpacks: the unpacked one outgrew the 1.44 MB disk when N4's CD-ROM came, 2026-11-26).
+# 720 KB is no longer made (phase G, 2026-11-25: the packed kernel outgrew its room).
 #
 # On it: FreeDOS 1.4's kernel (KERNEL.SYS) and, on the larger two, a few of its tools (as its own boot floppy has
 # them: FreeDOS's programs, unchanged, under their own licences, the GPL for most); GLOS.EXE, GLOSK.BIN and
@@ -15,7 +16,7 @@
 set -euo pipefail
 out=$1 keys=$2 host=$3 size=${4:-1440} cable=${5:-}
 case $size in
-    1440) fd=144m kernel=build/kernel/GLOSK.BIN
+    1440) fd=144m kernel=build/kernel/GLOSK.PAK
           keep="ATTRIB.COM XCOPY.EXE MEM.EXE MORE.EXE DELTREE.COM";;
     1200) fd=120m kernel=build/kernel/GLOSK.PAK
           keep="ATTRIB.COM XCOPY.EXE MEM.EXE MORE.EXE DELTREE.COM";;

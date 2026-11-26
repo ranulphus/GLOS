@@ -23,8 +23,9 @@ disk.
   back to.
 - **No `FDISK`, `FORMAT` or `SYS`** (since 2026-11-13): the disk is laid out, formatted and made to start by
   GLOS's own `DISK` command ([below](#the-disk-command)), which `install.py --new-disk` uses.
-- **The 1.2 MB disk** carries the kernel packed (`tools/packkernel.py`: deflate, half the size; `GLOS.EXE` unpacks
-  it and checks its sum, and takes either form under the name `GLOSK.BIN`). A 720 KB disk is no longer made
+- **Both disks** carry the kernel packed (`tools/packkernel.py`: deflate, half the size; `GLOS.EXE` unpacks it and
+  checks its sum, and takes either form under the name `GLOSK.BIN`): the 1.2 MB disk from the start, the 1.44 MB
+  one since 2026-11-26, when N4's CD-ROM grew the unpacked kernel past the 44,032 bytes it had left there. A 720 KB disk is no longer made
   (phase G, 2026-11-25): the packed kernel outgrew the 607,232 bytes it had there.
 - **Who may log in:** `FLOPPY_AUTHKEYS`, an ed25519 public key or a file of them (by default `~/.ssh/glos_bench.pub`,
   else `~/.ssh/id_ed25519.pub`). GLOS takes public keys only.

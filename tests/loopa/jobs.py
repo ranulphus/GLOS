@@ -10854,8 +10854,8 @@ def floppy_case(profile, card, size):
         open(batch, "w").write("get /A/GLOS/GLOSK.BIN %s\n" % got)
         subprocess.run(["sftp", "-P", str(port), "-b", batch] + opts + ["glos@127.0.0.1"], capture_output=True, timeout=900)
         checks["floppy-read"] = os.path.exists(got) and open(got, "rb").read() == \
-            open(os.path.join(ROOT, "build/kernel/GLOSK.BIN" if size == 1440 else "build/kernel/GLOSK.PAK"), "rb").read()
-        checks["packed"] = ("packed=" in log(serial)) == (size != 1440)
+            open(os.path.join(ROOT, "build/kernel/GLOSK.PAK"), "rb").read()     # (both sizes: the packed kernel)
+        checks["packed"] = "packed=" in log(serial)    # (unpacked by GLOS.EXE on both sizes, since 2026-11-26)
         p = subprocess.run([sys.executable, os.path.join(ROOT, "tools/floppy/install.py"), "127.0.0.1", "--port", str(port),
                             "--key", key, "--keys", os.path.join(ROOT, "out", "floppy-keys")], capture_output=True, timeout=600)
         checks["refuses-blank"] = p.returncode == 1 and b"--new-disk" in p.stderr       # (nothing done unasked)
