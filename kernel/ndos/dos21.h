@@ -22,6 +22,8 @@ struct dos_regs86 {
 };
 
 #define DOS_FILES     40u               /* the file table's entries ([dos] files' default) */
+
+extern int dos_emm_dev;                 /* EMS is on: EMMXXXX0 a device name (vdos.c) */
 #define DOS_SDA_SIZE  0x30u             /* the swappable data area's bytes (5D06h) */
 
 /* Where a machine's DOS keeps its tables (linear addresses; segments in paragraphs). A native machine's are

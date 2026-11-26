@@ -1121,6 +1121,8 @@ static void read_cfg(const char *argv0, int shell_keys)
                                                    memory (docs/upper-memory.md); checked by the schema above */
             if (!stricmp(k, "stub_page"))
                 bi.stub_page = (unsigned long)cfg_page(v);
+            else if (!stricmp(k, "ems"))        /* ems = auto | off | KB: for the kernel's EMS (emsvm.c) */
+                bi.ems_kb = !stricmp(v, "off") ? BI_EMS_OFF : !stricmp(v, "auto") ? 0 : (unsigned long)atol(v);
             else
                 say("GLOS-WARN cfg-key section=memory key=%s", k);
             continue;

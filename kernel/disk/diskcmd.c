@@ -23,6 +23,9 @@
  *   ... INSTALL ... /SET:section.key=value   (up to four) GLOS.CFG's copy on the new volume with that setting,
  *                                    checked against the schema first (the setup floppy's installer: the PC's
  *                                    name, its keyboard; the floppy's own GLOS.CFG as it was)
+ *   ... INSTALL ... /FROM:X:\FOLDER  GLOS's files (and GLOSLDR.SYS) from that folder, not from the one GLOS runs
+ *                                    from: a boot CD's \GLOS, the whole system, while GLOS runs from the small
+ *                                    setup floppy the CD emulates (its GLOS.CFG the copy's, /SET's put in it)
  *   DISK n INSTALL p /Y              p the volume GLOS's own folder is on (a GLOS that DOS starts): that GLOS
  *                                    made to start by itself, nothing erased: GLOSLDR.SYS into the volume's
  *                                    first folder, its boot sector kept as BOOTSECT.DOS beside GLOS's files (the
@@ -750,6 +753,17 @@ static void f_close(u16 h)
     (void)dos_call(&q);
 }
 
+static void f_unlink(const char *path)
+{
+    struct dos_req q;
+    char p[128];
+    memset(p, 0, sizeof p);
+    strcpy(p, path);
+    dq(&q, 0x4100, 0, 0, 0);
+    q.in = (const u8 *)p, q.in_len = sizeof p, q.in_at = 0;
+    (void)dos_call(&q);
+}
+
 /* ---- DISK n INSTALL: GLOS put on a disk, to start from it with no DOS
  *
  * NEW, FORMAT (the volume named GLOS) and BOOT /GLOS, their own checks and refusals kept; then the files, from
@@ -774,6 +788,9 @@ static struct fsv_vol ifs;                      /* (one DISK at a time) */
 static struct { char sec[24], key[24], val[64]; } sets[4];     /* /SET's, for GLOS.CFG's copy */
 static u32 nsets;
 static u8 cfg_copied;
+static char from_dir[80];                       /* /FROM's folder ("" without it) */
+static u8 first_was[512];                       /* the disk's first sector before INSTALL, to keep on the new volume */
+static char cfg_src[96];                        /* the GLOS.CFG the copy's comes from (/SET's settings put in it) */
 
 static int same_path(const char *a, const char *b)
 {
@@ -864,7 +881,7 @@ static int i_file(struct inst *I, const char *src, const char *dst, const u8 *dt
     u16 h;
     u32 got = 0;
     int e;
-    if (nsets && same_path(src, vm.bi->cfg_path)) {    /* GLOS.CFG with /SET's settings */
+    if (nsets && same_path(src, cfg_src)) {     /* GLOS.CFG with /SET's settings */
         enum { ROOM = 32768 };
         char *t = kmalloc(ROOM);
         int n = 0;
@@ -1141,20 +1158,22 @@ static int do_install(struct diskcmd *c, u32 n, u32 p, int into_free, int erase,
     struct inst I;
     struct vol *v;
     struct mbr_part made;
-    char dir[80], ldr[96], part[80];
+    char dir[80], own[80], ldr[96], part[80];
     u8 plan[512];
     u32 i, junk = 0, t0;
     unsigned slot = 0;
     u16 h;
-    int e;
+    int e, keep_late = 0;
+    char keep[96];
     if ((e = target(c, n)) != 0)
         return e;
     if (p && !into_free && !erase)              /* (GLOS's own volume: the upgrade) */
         for (i = 0; i < W.nv; i++)
             if (W.v[i].n == p && W.v[i].fat && glos_volume(c, &W.v[i])) {
-                if (nsets) {
-                    say(c, "DISK: /SET is for GLOS copied to another volume; here GLOS.CFG is this GLOS's own "
-                        "(CONFIG SET)\n");
+                if (nsets || from_dir[0]) {
+                    say(c, nsets ? "DISK: /SET is for GLOS copied to another volume; here GLOS.CFG is this GLOS's "
+                        "own (CONFIG SET)\n" : "DISK: /FROM is for GLOS copied to another volume; here GLOS is "
+                        "made to start from where it is\n");
                     return 2;
                 }
                 if (do_upgrade(c, n, p, &W.v[i], yes, &e))
@@ -1166,7 +1185,8 @@ static int do_install(struct diskcmd *c, u32 n, u32 p, int into_free, int erase,
     }
     for (i = 0; i < 512; i++)
         junk |= W.first[i];
-    /* The source: the folder GLOS.CFG is in, and a GLOSLDR.SYS. */
+    /* The source: the folder GLOS.CFG is in, or /FROM's (a boot CD's whole system: GLOS runs from the setup
+       floppy it emulates), and a GLOSLDR.SYS. */
     memset(dir, 0, sizeof dir);
     strncpy(dir, vm.bi->cfg_path, sizeof dir - 1);
     if (dir[1] != ':' || dir[2] != '\\' || !strrchr(dir + 3, '\\')) {
@@ -1174,6 +1194,28 @@ static int do_install(struct diskcmd *c, u32 n, u32 p, int into_free, int erase,
         return 1;
     }
     *strrchr(dir, '\\') = 0;
+    memcpy(own, dir, sizeof own);
+    strncpy(cfg_src, vm.bi->cfg_path, sizeof cfg_src - 1);
+    if (from_dir[0]) {
+        u8 dta[43];
+        size_t fl = strlen(from_dir);
+        while (fl > 3 && from_dir[fl - 1] == '\\')
+            from_dir[--fl] = 0;
+        if (fl < 4 || from_dir[1] != ':' || from_dir[2] != '\\') {
+            say(c, "DISK: /FROM:X:\\FOLDER, a folder that holds GLOS's files (%s)\n", from_dir);
+            return 2;
+        }
+        dos_hold();
+        ksnprintf(ldr, sizeof ldr, "%s\\GLOSK.BIN", from_dir);
+        if (i_find(ldr, dta, 1) != 0) {
+            dos_release();
+            say(c, "DISK: %s has no GLOSK.BIN: it isn't a folder of GLOS's files\n", from_dir);
+            return 1;
+        }
+        dos_release();
+        strcpy(dir, from_dir);
+        ksnprintf(cfg_src, sizeof cfg_src, "%s\\GLOS.CFG", dir);
+    }
     dos_hold();
     ksnprintf(ldr, sizeof ldr, "%c:\\GLOSLDR.SYS", dir[0]);
     if (f_open(ldr, 0, &h) != 0) {
@@ -1257,18 +1299,30 @@ static int do_install(struct diskcmd *c, u32 n, u32 p, int into_free, int erase,
     if (into_free || p) {
         /* Beside other systems: the disk's first sector as it is (its table, another system's start-up code),
            kept in a file beside GLOS's own on the disk GLOS runs from, before anything is written. DD puts it
-           back: DD IF=that file OF=DISKn COUNT=1 /Y. Nothing is done if it can't be kept. */
-        char keep[96];
+           back: DD IF=that file OF=DISKn COUNT=1 /Y. Where that can't be written (a boot CD: the CD and the
+           floppy it emulates are both read-only), it is kept on the new volume instead, the first file there
+           (written before GLOS's: only the table's new entry is on the disk by then). */
         u16 kh;
-        ksnprintf(keep, sizeof keep, "%s\\DISK%u.MBR", dir, n);
-        if (f_open(keep, 1, &kh) != 0 || f_write(kh, W.first, 512) != 0) {
-            dos_release();
-            say(c, "DISK: the disk's first sector couldn't be kept in %s: nothing was done.\n", keep);
-            return 1;
+        int k;
+        for (k = 0; k < 2; k++) {
+            ksnprintf(keep, sizeof keep, "%s\\DISK%u.MBR", k ? own : dir, n);
+            if ((k && !strcmp(own, dir)) || f_open(keep, 1, &kh) != 0)
+                continue;
+            if (f_write(kh, W.first, 512) == 0) {
+                f_close(kh);
+                break;
+            }
+            f_close(kh);
+            f_unlink(keep);                     /* (a part written, on a full disk: not copied over the real one) */
         }
-        f_close(kh);
-        say(c, "The disk's first sector as it was is kept in %s\n(to put it back: DD IF=%s OF=DISK%u COUNT=1 /Y).\n",
-            keep, keep, n);
+        if (k < 2) {
+            say(c, "The disk's first sector as it was is kept in %s\n(to put it back: DD IF=%s OF=DISK%u COUNT=1 "
+                "/Y).\n", keep, keep, n);
+        } else {
+            /* (W.first is read again after the writes: the sector as it is now is taken here) */
+            memcpy(first_was, W.first, 512);
+            keep_late = 1;
+        }
     }
     c->mute = 1;
     e = 0;
@@ -1337,13 +1391,30 @@ static int do_install(struct diskcmd *c, u32 n, u32 p, int into_free, int erase,
                 e = 1;
             }
         }
+    if (!e && keep_late) {                      /* (the first sector where nothing else could keep it) */
+        struct fsv_file f;
+        ksnprintf(keep, sizeof keep, "%s\\DISK%u.MBR", dir + 2, n);
+        if (fsv_create(&ifs, keep, 0x20, 1, FSV_WRITE, FSV_DENY_NONE, &f) != 0) {
+            say(c, "DISK: %s can't be made on the new volume\n", keep);
+            e = 1;
+        } else {
+            e = fsv_write(&f, first_was, 512) != 512;
+            if (fsv_close(&f) != 0)
+                e = 1;
+            if (e)
+                bios_failed(c, I.bios, "the copy");
+            else
+                say(c, "The disk's first sector as it was is kept on the new volume, in %s\n(to put it back from "
+                    "there: DD IF=that file OF=DISK%u COUNT=1 /Y).\n", keep, n);
+        }
+    }
     if (!e)
         e = i_folder(&I, dir, dir + 2, 0);
-    if (!e && nsets && !cfg_copied && vm.bi->cfg_path[1] == ':') {     /* (no GLOS.CFG there: one of /SET's alone) */
+    if (!e && nsets && !cfg_copied && cfg_src[1] == ':') {     /* (no GLOS.CFG there: one of /SET's alone) */
         char t[512];
         struct fsv_file f;
         int tn = with_sets(t, 0, (int)sizeof t);
-        if (tn < 0 || fsv_create(&ifs, vm.bi->cfg_path + 2, 0x20, 1, FSV_WRITE, FSV_DENY_NONE, &f) != 0) {
+        if (tn < 0 || fsv_create(&ifs, cfg_src + 2, 0x20, 1, FSV_WRITE, FSV_DENY_NONE, &f) != 0) {
             say(c, "DISK: GLOS.CFG can't be made on the new volume\n");
             e = 1;
         } else {
@@ -1668,6 +1739,7 @@ static const char usage[] =
     "DISK n INSTALL p [/ERASE] /Y      ... in partition p, which is made empty\n"
     "DISK n INSTALL p /Y               p GLOS's own volume: this GLOS made to start with no DOS\n"
     "  ... /SET:section.key=value      GLOS.CFG's copy with that setting (up to four)\n"
+    "  ... /FROM:X:\\FOLDER             GLOS's files copied from that folder (a boot CD's \\GLOS)\n"
     "Without /Y a command says what would be lost and does nothing. The disk GLOS or DOS runs\n"
     "from is never written.\n";
 
@@ -1690,7 +1762,7 @@ static int run(struct diskcmd *c)
     char *w[8], *label = 0, *verb;
     u32 nw = 0, i, n = 0, p = 1;
     int yes = 0, native = 0, erase = 0, into_free = 0;
-    nsets = 0, cfg_copied = 0;
+    nsets = 0, cfg_copied = 0, from_dir[0] = 0;
     char *a = c->args;
     while (*a) {                                /* words, in capitals; the switches taken out */
         while (*a == ' ' || *a == '\t')
@@ -1721,7 +1793,13 @@ static int run(struct diskcmd *c)
             into_free = 1;
         else if (!strncmp(w[i], "/V:", 3))
             label = w[i] + 3;
-        else if (!strncmp(w[i], "/SET:", 5)) {
+        else if (!strncmp(w[i], "/FROM:", 6)) {
+            if (strlen(w[i] + 6) >= sizeof from_dir) {
+                say(c, "DISK: /FROM's folder is too long (%s)\n", w[i] + 6);
+                return 2;
+            }
+            strcpy(from_dir, w[i] + 6);
+        } else if (!strncmp(w[i], "/SET:", 5)) {
             char *s = w[i] + 5, *dot = strchr(s, '.'), *eq = strchr(s, '='), why[96], *q;
             const struct cfg_key *k;
             if (!dot || !eq || dot > eq || nsets == ARRAY_SIZE(sets) || dot - s >= (int)sizeof sets[0].sec
@@ -1771,8 +1849,8 @@ static int run(struct diskcmd *c)
         return do_new(c, n, yes);
     if (!strcmp(verb, "INSTALL") && (nw == 2 || (nw == 3 && !into_free && number(w[2], &p) == 0)))
         return do_install(c, n, nw == 3 ? p : 0, into_free, erase, yes);
-    if (nsets) {
-        say(c, "DISK: /SET is DISK n INSTALL's alone\n");
+    if (nsets || from_dir[0]) {
+        say(c, "DISK: %s is DISK n INSTALL's alone\n", nsets ? "/SET" : "/FROM");
         return 2;
     }
     if ((!strcmp(verb, "FORMAT") || !strcmp(verb, "BOOT")) && (nw == 2 || (nw == 3 && number(w[2], &p) == 0)))

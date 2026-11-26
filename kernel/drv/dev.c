@@ -165,6 +165,41 @@ static int mga_quiet(struct pci_dev *d, const char **how)
     return 0;
 }
 
+/* An NVIDIA display card (the RIVA 128's NV3 to the GeForce 6's NV4x: TNT, TNT2, Vanta, GeForce, Quadro; RIVA 128s
+   were sold as SGS-Thomson's too, 12D2). Its registers are its first memory range; every interrupt it raises goes
+   through the master control's enable register (PMC_INTR_EN_0, 140h), which a BIOS or a DOS program's VGA and VESA
+   use leaves 0 (the owner's M925G again: a TNT2 Pro in the G550's place on the Rhine's line, 2026-11-26). With it
+   0 the card is quiet as it is, and nothing is written; if something has enabled it, the card is somebody's. */
+#define NV_PMC_INTR_EN 0x140
+
+static int nv_match(const struct pci_dev *d)
+{
+    return d->class == 0x03 && (d->vendor == 0x10DE || d->vendor == 0x12D2);
+}
+
+static int nv_quiet(struct pci_dev *d, const char **how)
+{
+    volatile u32 *r;
+    if (!(pci_read32(d->bus, d->dev, d->fn, 4) & 2)) {         /* its memory isn't decoded */
+        *how = "off";
+        return 0;
+    }
+    if ((d->bar[0] & 1) || !(d->bar[0] & ~15u)) {   /* (an unassigned BAR read hangs some boards' buses) */
+        *how = "no-bar";
+        return -1;
+    }
+    if (!(r = mm_dev_map(d->bar[0] & ~15u, 4096))) {
+        *how = "no-memory";
+        return -1;
+    }
+    if (r[NV_PMC_INTR_EN / 4]) {
+        *how = "driven";
+        return -1;
+    }
+    *how = "no-intr";
+    return 0;
+}
+
 /* EHCI USB 2.0 (class 0C 03 20: its registers in memory, BAR 0; the operational ones after the capability length,
    the first byte). It drives its line only when a cause it has enabled (USBINTR) is up. With none enabled it is
    quiet as it is (bench B's NEC controller, which shares IRQ 10 with the CMI8738: the sound chip was refused
@@ -381,6 +416,7 @@ static const struct quiet quiets[] = {
     { "uhci", uhci_match, uhci_quiet },
     { "ohci", ohci_match, ohci_quiet },
     { "mga", mga_match, mga_quiet },
+    { "nvidia", nv_match, nv_quiet },
     { "ehci", ehci_match, ehci_quiet },
     { "smbus", smb_match, smb_quiet },
     { "cmi8738", cmi_match, cmi_quiet },

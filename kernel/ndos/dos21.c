@@ -108,11 +108,13 @@ static int fs_err(int r, int nf)
 /* ---- names and paths */
 
 /* A device's name as the last part of a path, in any folder, with or without an extension: DOS_DEV_*, or 0. */
+int dos_emm_dev;                                /* (EMS is on: EMMXXXX0 a device, as an EMM's name is; vdos.c) */
+
 static int dev_name(const char *path)
 {
     static const struct { const char *n; int dev; } devs[] = {
         { "CON", DOS_DEV_CON }, { "NUL", DOS_DEV_NUL }, { "AUX", DOS_DEV_AUX }, { "COM1", DOS_DEV_AUX },
-        { "PRN", DOS_DEV_PRN }, { "LPT1", DOS_DEV_PRN },
+        { "PRN", DOS_DEV_PRN }, { "LPT1", DOS_DEV_PRN }, { "EMMXXXX0", DOS_DEV_NUL },
     };
     const char *b = path, *p;
     char base[9];
@@ -127,7 +129,7 @@ static int dev_name(const char *path)
         return 0;
     base[k] = 0;
     for (i = 0; i < sizeof devs / sizeof devs[0]; i++)
-        if (!strcmp(base, devs[i].n))
+        if (!strcmp(base, devs[i].n) && (devs[i].n[0] != 'E' || dos_emm_dev))
             return devs[i].dev;
     return 0;
 }

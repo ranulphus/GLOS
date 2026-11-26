@@ -84,7 +84,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: census rbil fat-test fat-test-run floppy native-floppy usb-stick loopa-smoke loopa-floppy loopa-ndos loopa-nboot native-loader loopa-joy loopa-int2f loopa-cache loopa-mem-page loopa-umaprobe loopa-umb sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-native-a loopa-native-b loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
+.PHONY: census rbil fat-test fat-test-run floppy native-floppy usb-stick cd-image loopa-smoke loopa-floppy loopa-ndos loopa-nboot native-loader loopa-joy loopa-int2f loopa-cache loopa-mem-page loopa-umaprobe loopa-umb sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-native-a loopa-native-b loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN build/glos/COMMAND.COM build/ow/GLOSLDR.SYS     # (the loader with no DOS:
                                                 # in every install, for DISK n INSTALL p's upgrade)
 
@@ -118,7 +118,7 @@ HOST_TESTS := pmm_test:kernel/mm/pmm.c heap_test:kernel/mm/heap.c v86dec_test:ke
               regex_test:sdk/gui/regex.c piece_test:sdk/gui/piece.c popmenu_test:kernel/wm/popmenu.c \
               vdma_test:kernel/vm/vdma.c radeon_test:kernel/gfx/radeon.c \
               timing_test:kernel/gfx/timing.c iso_test:kernel/fs/iso.c msc_test:kernel/drv/msc.c \
-              ohci_test:kernel/drv/ohcitd.c ehci_test:kernel/drv/ehcitd.c
+              ohci_test:kernel/drv/ohcitd.c ehci_test:kernel/drv/ehcitd.c ems_test:kernel/vm/ems.c
 host-test:
 	$(Q)$(DEV) $(MAKE) -s host-test-run
 # N1a's FAT reader against mkfs.fat's, mtools' and fat_format's volumes (docs/v1/native-dos.md): fat-test alone.
@@ -585,6 +585,7 @@ $(eval $(call dos_test,SBTEST,sbtest))
 $(eval $(call dos_test,CONIN,conin))
 $(eval $(call dos_test,MOUSEHND,mousehnd))
 $(eval $(call dos_test,CDTEST,cdtest))
+$(eval $(call dos_test,EMSTEST,emstest))
 $(eval $(call dos_test,RUNOUT,runout))
 $(eval $(call dos_test,SESSTEST,sesstest))
 $(eval $(call dos_test,TIMECHK,timechk))
@@ -630,7 +631,7 @@ build/ow/dos/DPMI16.EXE: tests/dos/dpmi16/dpmi16.c tests/dos/dpmi16/dpmi16a.asm
 	  file build/ow/dos/obj/dpmi16.obj,build/ow/dos/obj/dpmi16a.obj
 DOS_TESTS := build/ow/dos/HOSTILE.EXE build/ow/dos/XMSTEST.EXE build/ow/dos/XMSBIG.EXE build/ow/dos/ECHOARGS.EXE build/ow/dos/DPMIMINI.COM \
              build/ow/dos/RUNOUT.EXE build/ow/dos/DPMI16.EXE build/ow/dos/SESSTEST.EXE build/ow/dos/TIMECHK.EXE \
-             build/ow/dos/SHOTTEST.EXE build/ow/dos/TYPEIN.EXE build/ow/dos/CONIN.EXE build/ow/dos/MOUSEHND.EXE build/ow/dos/CDTEST.EXE build/ow/dos/SHAREDOS.EXE build/ow/dos/CLOCKCHK.EXE build/ow/dos/SBTEST.EXE \
+             build/ow/dos/SHOTTEST.EXE build/ow/dos/TYPEIN.EXE build/ow/dos/CONIN.EXE build/ow/dos/MOUSEHND.EXE build/ow/dos/CDTEST.EXE build/ow/dos/EMSTEST.EXE build/ow/dos/SHAREDOS.EXE build/ow/dos/CLOCKCHK.EXE build/ow/dos/SBTEST.EXE \
              build/ow/dos/I2FTSR.EXE build/ow/dos/STUBTSR.EXE build/ow/dos/UMBRD.EXE build/ow/dos/FMTEST.EXE \
              build/ow/dos/JOYTEST.EXE build/ow/dos/SCRTEXT.EXE build/ow/dos/NDOSTEST.EXE build/ow/dos/DOSDIFF.EXE build/ow/dos/CONTEST.EXE
 dos-tests: $(DOS_TESTS)
@@ -657,7 +658,7 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/arch/mtrr.c
          kernel/ssh/sshd.c \
          kernel/drv/serial.c kernel/lib/kprintf.c kernel/mm/pmm.c kernel/mm/heap.c kernel/mm/vmm.c kernel/mm/umapage.c \
          kernel/dbg/gdbstub.c kernel/dbg/gdbprog.c kernel/vm/v86.c kernel/vm/session.c kernel/vm/v86dec.c kernel/vm/vpic.c kernel/vm/vdev.c kernel/vm/vcon.c \
-         kernel/vm/vkbc.c kernel/vm/vmouse.c kernel/vm/vkeyb.c kernel/vm/mscdex.c kernel/vm/int15.c kernel/vm/vjoy.c kernel/vm/vdma.c kernel/vm/vsb.c kernel/vm/vsbdev.c kernel/drv/uhci.c kernel/drv/ehci.c kernel/drv/cmi8738.c kernel/drv/es1371.c kernel/drv/ess.c kernel/drv/opti.c kernel/drv/isapnp.c kernel/drv/pnpbus.c kernel/drv/ich97.c kernel/drv/via686.c kernel/drv/ac97.c kernel/drv/uhcitd.c kernel/drv/msc.c kernel/drv/ohci.c kernel/drv/ohcitd.c kernel/drv/ehcitd.c kernel/drv/hidparse.c kernel/drv/xpad.c kernel/drv/usbkbd.c kernel/vm/xms.c kernel/dos/agent.c kernel/dos/watch.c \
+         kernel/vm/vkbc.c kernel/vm/vmouse.c kernel/vm/vkeyb.c kernel/vm/mscdex.c kernel/vm/ems.c kernel/vm/emsvm.c kernel/vm/int15.c kernel/vm/vjoy.c kernel/vm/vdma.c kernel/vm/vsb.c kernel/vm/vsbdev.c kernel/drv/uhci.c kernel/drv/ehci.c kernel/drv/cmi8738.c kernel/drv/es1371.c kernel/drv/ess.c kernel/drv/opti.c kernel/drv/isapnp.c kernel/drv/pnpbus.c kernel/drv/ich97.c kernel/drv/via686.c kernel/drv/ac97.c kernel/drv/uhcitd.c kernel/drv/msc.c kernel/drv/ohci.c kernel/drv/ohcitd.c kernel/drv/ehcitd.c kernel/drv/hidparse.c kernel/drv/xpad.c kernel/drv/usbkbd.c kernel/vm/xms.c kernel/dos/agent.c kernel/dos/watch.c \
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
          kernel/disk/bdisk.c kernel/disk/letters.c kernel/disk/mbr.c kernel/disk/mbrboot.S kernel/disk/fatfmt.c kernel/disk/fdboot.S \
          kernel/disk/diskcmd.c kernel/drv/uart.c kernel/net/slip.c kernel/net/member.c kernel/drv/plip.c kernel/drv/rhine.c kernel/drv/pcnet.c kernel/drv/tulip.c \
@@ -1268,6 +1269,18 @@ usb-stick: all apps native-loader build/apps/FETCH.EXE build/apps/PKG.EXE build/
 	  || { echo "usb-stick: FLOPPY_AUTHKEYS=FILE, an ed25519 public key (ssh-keygen -t ed25519): none found"; exit 1; }
 	$(Q)grep '^ssh-ed25519 ' "$(FLOPPY_AUTHKEYS)" > build/usb/keys/AUTHKEYS
 	$(Q)$(DEV) python3 tools/ndos/stick.py build/usb/glos-usb.img --keys build/usb/keys --name $(USB_HOST) --mb $(USB_MB)
+# GLOS's boot CD (tools/ndos/cdimage.py; docs/v1/native-dos.md, N4's C8): build/cd/glos.iso, the setup floppy as
+# its El Torito image and the whole system in \GLOS for SETUP to install, with a host key of its own and
+# FLOPPY_AUTHKEYS as who may log in. CD_HOST: the installed PC's name (SETUP asks for it).
+CD_HOST ?= glos
+build/cd/keys/HOSTKEY:
+	@mkdir -p build/cd/keys
+	$(Q)ssh-keygen -q -t ed25519 -N "" -C "$(CD_HOST)" -f $@
+cd-image: all apps native-loader build/kernel/GLOSK.PAK build/apps/FETCH.EXE build/apps/PKG.EXE build/glos/CERTS.DAT build/glos/KEYS/PKG/GLOS.PUB build/cd/keys/HOSTKEY check-deps
+	@[ -n "$(FLOPPY_AUTHKEYS)" ] && grep -q '^ssh-ed25519 ' "$(FLOPPY_AUTHKEYS)" \
+	  || { echo "cd-image: FLOPPY_AUTHKEYS=FILE, an ed25519 public key (ssh-keygen -t ed25519): none found"; exit 1; }
+	$(Q)grep '^ssh-ed25519 ' "$(FLOPPY_AUTHKEYS)" > build/cd/keys/AUTHKEYS
+	$(Q)$(DEV) python3 tools/ndos/cdimage.py build/cd/glos.iso --keys build/cd/keys --name $(CD_HOST)
 # ... in Loop A (tests/loopa/jobs.py floppy): a 486 with an NE2000 and a blank disk boots the floppy (made here with
 # the tests' keys), install.py --new-disk does its work, and the PC then starts GLOS from the disk alone. It needs
 # RetroGPU's run.py to have --floppy.

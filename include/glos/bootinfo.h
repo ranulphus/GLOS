@@ -11,7 +11,7 @@ typedef unsigned int   bi_u32;
 #endif
 
 #define BOOTINFO_MAGIC   0x4F4F4247UL           /* "GBOO" */
-#define BOOTINFO_VERSION 15
+#define BOOTINFO_VERSION 16
 
 #define KERNEL_MAGIC     0x4B4F4C47UL           /* "GLOK", first word of GLOSK.BIN */
 #define KERNEL_LINK      0xC0100000UL           /* where the kernel is linked */
@@ -204,7 +204,10 @@ struct bootinfo {
         bi_u32 type, flags;                     /* the partition's type byte; BI_VOL_* */
         bi_u32 start, sectors;                  /* on the disk */
     } vols[BI_VOLS];
+    /* version 16: [memory] ems (N4's EMS: kernel/vm/emsvm.c, which starts before the kernel reads GLOS.CFG) */
+    bi_u32 ems_kb;                              /* 0: auto; BI_EMS_OFF: off; else the KB (64 to 32768) */
 };
+#define BI_EMS_OFF 0xFFFFFFFFu
 #define BI_VOL_OWN     1u                       /* the volume GLOS started from */
 #define BI_VOL_DOS     2u                       /* a DOS's or a Windows's own (by its boot sector) */
 #define BI_VOL_ACTIVE  4u

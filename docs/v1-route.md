@@ -545,6 +545,8 @@ EMS and CD-ROM; USB mass storage partly (a stick boots through the BIOS).
 - **A CD** (El Torito, **in v1**: the owner, 2026-11-25) once N4's ATAPI is in: booting the setup floppy's
   kernel and shell by floppy emulation or no emulation, the whole install with the apps on ISO 9660, the text
   installer copying from it. `make cd-image`; Loop A boots it (86Box's ATAPI drive); a bench burns and boots one.
+  **Built 2026-11-26 (native-dos, N4's C8):** floppy emulation, SETUP's `DISK n INSTALL /FROM:X:\GLOS`, Loop A's
+  cdboot cases on the bf6 and the 486 (docs/v1/native-dos.md); owed: a bench's burned CD.
 
 **G4. The benches, native**
 

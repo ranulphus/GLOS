@@ -31,6 +31,7 @@
 #include "cache.h"
 #include "vdos.h"
 #include "cdrom.h"
+#include "ems.h"
 #include "../disk/letters.h"
 
 static struct dos_m vd;
@@ -242,6 +243,8 @@ static unsigned long c_now(void *ctx)
 static int fat_first(const unsigned char *s);
 
 static void cd_entry_points(unsigned seg);     /* (below the ARPLs' table) */
+static void ems_entry(void);
+static void set_vec(u32 n, u32 v);
 
 /* GLOS's own DOS asks which disc is in CD drive `drive` (dos21.h: cdmedia; N4's CD-ROM): cdrom.c's volume. */
 static signed char cd_letter[4] = { -1, -1, -1, -1 };
@@ -494,6 +497,7 @@ static void mount_c(void)
                 cd_entry_points(seg);
             }
         }
+        ems_entry();                            /* (EMS: emsvm.c) */
     }
     if (!cbios && !needs_bios && xseg) {        /* (GLOS's own driver for all: the BIOS's calls' block back to DOS) */
         dos_mem_free(&vd.mcb, xseg);
@@ -570,11 +574,13 @@ static int vd_wait(void *ctx)
 
 /* DOS's bytes for the vectors (the layout's misc + 4 on): ARPLs for INT 21h, 20h, 29h and 23h (DOS's own Ctrl-C
    handler), one a program's INT 23h returns to, and an IRET that ends INT 2Fh's chain. */
-enum { V21, V20, V29, V23, VC23, V33, V74, V74R, V09, VCDS, VCDI, NV };  /* (V33: GLOS's INT 33h, the mouse:
-                                                           vmouse.c; V74 its IRQ 12, V74R where the program's mouse
-                                                           routine returns to; V09 the keyboard's layout, vkeyb.c;
-                                                           VCDS, VCDI the CD driver's strategy and interrupt
-                                                           routines, called far, in its header's block: mscdex.c) */
+enum { V21, V20, V29, V23, VC23, V33, V74, V74R, V09, VCDS, VCDI, V67, NV };  /* (V33: GLOS's INT 33h, the
+                                                           mouse: vmouse.c; V74 its IRQ 12, V74R where the program's
+                                                           mouse routine returns to; V09 the keyboard's layout,
+                                                           vkeyb.c; VCDS, VCDI the CD driver's strategy and interrupt
+                                                           routines, called far, in its header's block: mscdex.c;
+                                                           V67 INT 67h, EMS, in the EMM's block: emsvm.c. NV 12 is
+                                                           the most DOS_MISC's 20h bytes hold) */
 static u32 old09;                               /* the BIOS's INT 09h, which V09 chains to */
 static u32 arpl[NV];                            /* (seg << 16 | off) */
 
@@ -584,6 +590,27 @@ static void cd_entry_points(unsigned seg)
 {
     arpl[VCDS] = (u32)seg << 16 | 0x16;
     arpl[VCDI] = (u32)seg << 16 | 0x18;
+}
+
+/* EMS's (emsvm.c): INT 67h at an ARPL in a block whose segment holds an EMM's device header, EMMXXXX0 at 0Ah, as
+   programs look for one there; and DOS's device name. mount_c's, after vdos_init. */
+static void ems_entry(void)
+{
+    unsigned seg, largest;
+    u32 h;
+
+    if (ems_vm_init() != 0 || dos_mem_alloc(&vd.mcb, 3, 8, &seg, &largest) != 0)
+        return;
+    h = (u32)seg << 4;
+    vm_wr16(h, 0xFFFF), vm_wr16(h + 2, 0xFFFF);
+    vm_wr16(h + 4, 0xC000);                     /* (a character device, IOCTL) */
+    vm_wr16(h + 6, 0x12), vm_wr16(h + 8, 0x12); /* (its strategy and interrupt: a RETF; nothing calls them) */
+    memcpy(vm_ptr(h + 10), "EMMXXXX0", 8);
+    vm_wr8(h + 0x12, 0xCB);
+    vm_wr8(h + 0x14, 0x63), vm_wr8(h + 0x15, 0xC0);
+    arpl[V67] = (u32)seg << 16 | 0x14;
+    set_vec(0x67, arpl[V67]);
+    dos_emm_dev = 1;
 }
 
 /* ---- interrupts during a call
@@ -1341,6 +1368,15 @@ int vdos_arpl(struct trapframe *tf)
     }
     case V09:                                   /* (a key GLOS answered: the IRET only) */
         break;
+    case V67: {                                 /* INT 67h: EMS (emsvm.c, ems.c) */
+        struct ems_regs er;
+        to_regs(tf, &r, ip);
+        er.ax = r.ax, er.bx = r.bx, er.cx = r.cx, er.dx = r.dx, er.si = r.si, er.di = r.di, er.ds = r.ds, er.es = r.es;
+        ems_vm_call(&er);
+        r.ax = er.ax, r.bx = er.bx, r.cx = er.cx, r.dx = er.dx, r.si = er.si, r.di = er.di, r.es = er.es;
+        from_regs(tf, &r);
+        break;
+    }
     case V33:                                   /* the mouse (vmouse.c) */
         to_regs(tf, &r, ip);
         vmouse_int33(&r);
