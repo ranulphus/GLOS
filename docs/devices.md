@@ -142,6 +142,11 @@ share a line with one. So the first half of D2 was built the same morning:
   interrupt enabled (`how=no-intr`, or `how=intr` when an enable had been left on and was cleared); a chip
   that plays by interrupt is a DOS driver's and stays in the way (`why=driven`). The mixer's driver then
   joins the network's on the line.
+- **A quiet driver for NVIDIA display cards** (2026-11-26: bench G's TNT2 Pro, in the G550's place, on the Rhine's
+  IRQ 11; GLOS 11-24 refused the Rhine): RIVA 128 to GeForce 6 (vendor 10DE, and 12D2 for SGS-Thomson's RIVA
+  128s) are quiet while their master control's interrupt enable (`PMC_INTR_EN_0`, 140h in BAR 0) is 0, as a BIOS
+  and DOS's VGA and VESA use leave it (`how=no-intr`); nothing is written. Enabled, the card is a driver's
+  (`why=driven`). The Matrox cards' was the same since 2026-11-23 (`mga`, IEN at 1E1Ch).
 - The second half followed on 2026-11-25 (below).
 - **Tests:**
   - host: `dev_test` (the rule; each sound chip's quiet driver idle, with an enable left on, driven, and with
