@@ -50,6 +50,43 @@ u32 uhci_control_tds(struct uhci_td *td, u32 max, u32 td_phys, const u8 setup[8]
 u32 uhci_bulk_tds(struct uhci_td *td, u32 max, u32 td_phys, int in, u32 data_phys, u32 len, u32 addr, u32 ep,
                   u32 maxp, u32 *toggle);
 
+/* OHCI's endpoint and transfer descriptors (the OHCI specification rev 1.0a, §4.2 and §4.3.1): 16 bytes each for the
+   controller, 16-byte aligned; a TD here is 32 bytes on (its last 16 software's). */
+struct ohci_ed {
+    volatile u32 info;                  /* address, endpoint, direction, speed, skip, max packet size */
+    volatile u32 tailp;                 /* the queue's last TD (a dummy: the controller stops at it) */
+    volatile u32 headp;                 /* its first, | C (the toggle carried) and H (halted) */
+    volatile u32 next;                  /* the next ED on the list */
+};
+struct ohci_td {
+    volatile u32 info;                  /* buffer rounding, direction, delay interrupt, toggle, errors, condition */
+    volatile u32 cbp;                   /* the next byte to move (0: all moved) */
+    volatile u32 next;                  /* the next TD (the controller relinks it into its done queue when retired) */
+    volatile u32 be;                    /* the buffer's last byte */
+    u32 len, sw[3];                     /* (software's: the bytes it was given) */
+};
+
+#define OHCI_ED_SKIP    (1u << 14)
+#define OHCI_ED_LOW     (1u << 13)
+#define OHCI_ED_HALTED  0x1u            /* headp */
+#define OHCI_ED_CARRY   0x2u            /* headp: DATA1 next */
+#define OHCI_TD_CC(i)   ((i) >> 28)     /* the condition code: 0 no error, 4 stall, 5 no answer, Eh-Fh not yet */
+#define OHCI_CC_NONE    0x0u
+#define OHCI_CC_STALL   0x4u
+#define OHCI_CC_NOT_YET 0xEu            /* (and Fh: not accessed) */
+
+/* An ED's first word: addr, ep, its direction from its TDs (dir 0) or OUT (1) or IN (2), low speed, maxp. */
+u32 ohci_ed_info(u32 addr, u32 ep, u32 dir, int low, u32 maxp);
+/* A control transfer's TDs (SETUP with DATA0; the data stage in one TD from DATA1, its packets toggling; the status
+   stage the other way with DATA1), the last linked to tail_phys (the ED's dummy). How many, or 0. (No I/O.) */
+u32 ohci_control_tds(struct ohci_td *td, u32 max, u32 td_phys, const u8 setup[8], u32 setup_phys, u32 data_phys,
+                     u32 tail_phys);
+/* A bulk transfer's TDs, 4 KB a TD at most, the toggles the ED's; IN ones taking a short packet as the end. How
+   many, or 0. */
+u32 ohci_bulk_tds(struct ohci_td *td, u32 max, u32 td_phys, int in, u32 data_phys, u32 len, u32 tail_phys);
+/* The bytes a retired TD moved. */
+u32 ohci_td_moved(const struct ohci_td *td);
+
 struct usb_dev {
     u8 used, addr, port, low;
     u8 maxp0, config, nif;

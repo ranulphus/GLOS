@@ -69,5 +69,6 @@ struct hc {
 
 void usb_wait_ms(u32 ms);               /* (uhci.c's wait: a sleep, or at glos exit a busy wait) */
 void usb_nap(void);                     /* a tick's wait in a transfer (on the VM's thread: vdos_disk_breathe) */
+int ohci_take(struct hc *h, struct pci_dev *pd);        /* (ohci.c) 0, -1 no registers, -2 no memory */
 
 #endif

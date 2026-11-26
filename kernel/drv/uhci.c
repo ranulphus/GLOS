@@ -1335,6 +1335,15 @@ void usb_late(void)
             int e = take(pd);
             dev_note(pci_where(pd, w), "uhci", e ? DEVS_REFUSED : DEVS_ON, e ? (e == -2 ? "no-memory" : "no-io") : "", 0);
         }
+    for (i = 0; (pd = pci_at(i)) != 0 && nhc < MAX_HC; i++)     /* (U3) OHCI's: ALi, SiS, NEC, OPTi */
+        if (pd->class == 0x0C && pd->subclass == 0x03 && pd->progif == 0x10 && !dev_pci_off(pd, "ohci")) {
+            char w[8];
+            int e = ohci_take(&hc[nhc], pd);
+            if (!e)
+                nhc++;
+            dev_note(pci_where(pd, w), "ohci", e ? DEVS_REFUSED : DEVS_ON, e ? (e == -2 ? "no-memory" : "no-registers") : "",
+                     0);
+        }
     if (nhc)
         thread_create("usb", PRIO_NORMAL, usb_thread, 0);
 }
