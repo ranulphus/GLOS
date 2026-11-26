@@ -730,7 +730,7 @@ After that:
   programs, the channel's volume, expression, pan (left, both, right), the pedal, the bend and its range, all
   notes off; percussion on channel 10. A voice free the longest is taken first; with none free, the oldest
   note's.
-- **The instruments** are Freedoom's GENMIDI lump (BSD-3-Clause; `THIRD_PARTY.md`), kept as a generated table
+- **The instruments** were Freedoom's GENMIDI lump until 2026-11-26 (now Fifth Wheel's, extended: `tools/mkfmbank.py`), kept as a generated table
   (`kernel/drv/fmbank.c`, `make fmbank`, the release pinned in `tools/setup/versions.mk`). The driver was written
   from the format's documentation and the chips' data sheets; no player's code was read into it.
 - **The MPU-401:** its port is BLASTER's `P` (the loader passes it on: boot contract version 7), or the Crystal

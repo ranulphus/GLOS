@@ -1,6 +1,7 @@
 /* GLOS's FM synthesiser for DOS programs (sdk/fm; build/sdk/libfmsynth.a): MIDI channel messages played on an
  * OPL3 or OPL2 with General MIDI's instruments, by the same driver and instruments GLOS plays its MIDI ports' FM
- * with (kernel/drv/fm.c; kernel/drv/fmbank.c, Freedoom's GENMIDI). So a program sounds the same on plain DOS and
+ * with (kernel/drv/fm.c; kernel/drv/fmbank.c, Fifth Wheel's instruments, extended: tools/mkfmbank.py). So a
+ * program sounds the same on plain DOS and
  * under GLOS.
  *
  * For a program that reaches the chip's ports itself: on plain DOS, and in a GLOS session (a program run full
@@ -19,7 +20,7 @@
  *
  * Building it into another project (no copies: the sources are GLOS's, compiled where they are; DJGPP):
  *   the driver's half, freestanding with the kernel's headers: kernel/drv/fm.c kernel/drv/fmbank.c (the
- *     instruments: another bank in GENMIDI's layout may take its place) kernel/drv/fmtab.c kernel/drv/midiq.c
+ *     instruments, made by tools/mkfmbank.py: dgk's games take them from here too) kernel/drv/fmtab.c kernel/drv/midiq.c
  *     sdk/fm/fmq.c, each with
  *     -ffreestanding -IGLOS/include -IGLOS/kernel/include -IGLOS/kernel/include/libc
  *   the program's half, as any DJGPP file: sdk/fm/fmsynth.c with -IGLOS/include

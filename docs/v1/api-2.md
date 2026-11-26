@@ -385,7 +385,7 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
   - The card records what MIXER's input says, at the mixer's rate; GLOS converts to the stream's.
 - **As built (step 10, third part):** MIDI_OUT and MIDI_IN.
   - One structure for both, its `what` OPEN, SEND, FLUSH or RAW; a port is a handle.
-  - Ports: the FM chip (an OPL3 or OPL2; GLOS's driver, Freedoom's General MIDI instruments) and an MPU-401.
+  - Ports: the FM chip (an OPL3 or OPL2; GLOS's driver, Fifth Wheel's General MIDI instruments) and an MPU-401.
   - A message carries its time on GLOS's clock; GLOS plays it on its tick. The queue holds 512.
   - MIDI in: a `GLOS_EV_MIDI` event for each channel message, with the time it came. No USB MIDI yet (phase F).
 

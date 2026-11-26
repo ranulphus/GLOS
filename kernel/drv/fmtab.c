@@ -1,7 +1,7 @@
-/* Made by tools/mkfmbank.py (make fmbank): don't edit.
- *
- * fm_fnum, fm_atten: the FM driver's computed tables (tools/mkfmbank.py says how), apart from the instruments
- * (kernel/drv/fmbank.c), which another bank may replace. */
+/* Made by tools/mkfmbank.py (make fmbank): don't edit. The FM driver's computed tables, apart from the
+ * instruments (kernel/drv/fmbank.c): fm_fnum, an octave of F-numbers (A = 440 Hz at the chip's
+ * 49716 Hz); fm_atten, a MIDI level as attenuation at half General MIDI's slope, 20 log10(127 / v) dB
+ * in 0.75 dB steps (63: silent; the owner's curve, 2026-11-26). */
 #include "fm.h"
 
 const u16 fm_fnum[384] = {
@@ -32,12 +32,12 @@ const u16 fm_fnum[384] = {
 };
 
 const u8 fm_atten[128] = {
-    63,63,63,63,63,63,63,63,63,61,59,57,55,53,51,49,
-    48,47,45,44,43,42,41,40,39,38,37,36,35,34,33,33,
-    32,31,31,30,29,29,28,27,27,26,26,25,25,24,24,23,
-    23,22,22,21,21,20,20,19,19,19,18,18,17,17,17,16,
-    16,16,15,15,14,14,14,13,13,13,13,12,12,12,11,11,
-    11,10,10,10,10,9,9,9,8,8,8,8,7,7,7,7,
-    6,6,6,6,6,5,5,5,5,4,4,4,4,4,3,3,
-    3,3,3,2,2,2,2,2,1,1,1,1,1,0,0,0,
+    63,56,48,43,40,37,35,34,32,31,29,28,27,26,26,25,
+    24,23,23,22,21,21,20,20,19,19,18,18,18,17,17,16,
+    16,16,15,15,15,14,14,14,13,13,13,13,12,12,12,12,
+    11,11,11,11,10,10,10,10,9,9,9,9,9,8,8,8,
+    8,8,8,7,7,7,7,7,7,6,6,6,6,6,6,5,
+    5,5,5,5,5,5,5,4,4,4,4,4,4,4,3,3,
+    3,3,3,3,3,3,3,2,2,2,2,2,2,2,2,2,
+    1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,
 };

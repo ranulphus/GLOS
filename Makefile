@@ -452,11 +452,10 @@ FONT_SIGNS := 0x20AC,0x2116,0x2122,0x2190-0x2193
 FONT_437 := 0x207F,0x20A7,0x20AC,0x2116,0x2122,0x2190-0x2193,0x2219-0x221A,0x221E,0x2229,0x2248,0x2261,0x2264-0x2265
 FONT_437 := $(FONT_437),0x2310,0x2320-0x2321,0x23BA-0x23BD,0x2500-0x257F,0x2580-0x259F,0x25A0
 # (And the toolkit's font smoothing, M10: the same glyphs anti-aliased, sdk/gui/fonts/SMOOTH.DAT, C:\GLOS's.)
-# The FM driver's instruments and tables (kernel/drv/fmbank.c) again, from Freedoom's pinned release
-# (tools/setup/versions.mk; tools/mkfmbank.py). Kept in the repository: the kernel's build needs no download.
+# The FM driver's instruments and tables (kernel/drv/fmbank.c, fmtab.c) again, from tools/mkfmbank.py, where the
+# instruments are written (Fifth Wheel's, extended: the owner's choice, 2026-11-26). Kept in the repository.
 fmbank:
-	$(Q)tools/setup/fetch.sh $(FREEDOOM_URL) $(FREEDOOM_SHA256) $(MGA_CACHE)/dl/$(notdir $(FREEDOOM_URL))
-	$(Q)python3 -I tools/mkfmbank.py $(MGA_CACHE)/dl/$(notdir $(FREEDOOM_URL)) kernel/drv/fmbank.c kernel/drv/fmtab.c
+	$(Q)python3 -I tools/mkfmbank.py kernel/drv/fmbank.c kernel/drv/fmtab.c
 fonts:
 	@mkdir -p build/fonts sdk/gui/fonts
 	$(Q)python3 tools/mkfont.py $(FONT_DIR)/DejaVuSans.ttf 11 ui --last 0x17F --ranges $(FONT_TEXT),$(FONT_SIGNS) \
