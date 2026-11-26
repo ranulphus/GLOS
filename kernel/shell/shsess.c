@@ -106,6 +106,10 @@ struct shsess {
     volatile u8 stopped;                /* Ctrl+C was typed to a program: the shell is told when it asks (h_stop) */
     u8 out_cr;                          /* the last character written to the terminal was a carriage return */
     u8 out_mid;                         /* ... was neither that nor a line feed: the terminal is part way along a line */
+    u8 out_text;                        /* the terminal's line has text on it (a carriage return keeps it: only a
+                                           line feed ends it) */
+    u8 eat_lf;                          /* the session's notice has ended a line the program ended with a carriage
+                                           return alone: the line feed it sends next is that line's, not written */
     u8 mid_bad, nmid;                   /* that line so far (mid), while it is plain letters and short: the session
                                            can take it off the terminal and write it again under a notice of its
                                            own (job_turn); mid_bad: it is not to be had (a control code, too long) */
@@ -187,6 +191,15 @@ static void term_text(struct shsess *s, const char *t, int n, int lf)
             term_bytes(s, b, k);
             k = 0;
         }
+        if (s->eat_lf) {                        /* (job_turn's notice ended the program's line for it) */
+            s->eat_lf = 0;
+            if (c == '\n')
+                continue;
+        }
+        if (c == '\n')
+            s->out_text = 0;
+        else if (c >= 0x20 && c != 0x7F)
+            s->out_text = 1;
         if (c == '\r' || c == '\n')             /* (the line under way: kept while it can be written again) */
             s->nmid = s->mid_bad = 0;
         else if (c < 0x20 || c == 0x7F || s->nmid == sizeof s->mid)
@@ -857,6 +870,7 @@ static int h_run(void *ctx, const char *command, const char *prog, const char *n
     s->job_on = 1;
     s->job_esc = s->job_full = 0;
     s->job_how = 0, s->job_shown = 0;
+    s->eat_lf = 0;
     return 1;
 }
 
@@ -931,6 +945,14 @@ static void job_turn(struct shsess *s)
             term_text(s, "\r\x1b[K", 4, 0);
             term_text(s, full, (int)sizeof full - 1, 1);
             term_text(s, piece, k, 1);
+        } else if (!s->out_mid && s->out_cr && s->out_text) {
+            /* A line the program ended with its carriage return, its line feed not yet come: the notice under it,
+               not over it ("MODE done\r", the notice, "\n": the line lost, native-bf6-g200's term-run in gate 68,
+               2026-11-26). The program's line feed, when it comes, is that line's: not written again. */
+            s->job_how = 'C';
+            term_text(s, "\n", 1, 0);
+            term_text(s, full, (int)sizeof full - 1, 1);
+            s->eat_lf = 1;
         } else {
             s->job_how = s->out_mid ? 'B' : 'P';
             if (s->out_mid)
@@ -1904,6 +1926,8 @@ u32 shsess_term_write(struct shsess *s, const u8 *d, u32 n)    /* what there is 
     if (n) {
         s->out_cr = d[n - 1] == '\r';
         s->out_mid = d[n - 1] != '\r' && d[n - 1] != '\n';
+        s->out_text = d[n - 1] != '\n';
+        s->eat_lf = 0;
         s->nmid = 0;                            /* (an app's own bytes: a line of them is not written again) */
         s->mid_bad = s->out_mid;
         s->kick(s->kick_arg);
