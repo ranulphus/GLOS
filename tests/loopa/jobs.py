@@ -1696,6 +1696,37 @@ def dpmi_tools(boot):
                              "" if not bad else " failed: " + " ".join(bad) + info), not bad
 
 
+def fmsynth_case(boot):
+    """GLOS's FM synthesiser for DOS programs (sdk/fm, include/glos/fmsynth.h; 2026-11-26): FMSYNTH plays a General
+    MIDI flute's F sharp (370 Hz) through it on 86Box's Sound Blaster 16's OPL3 at 388h, on plain DOS and in a GLOS
+    session (GLOS.EXE /RUN: the chip the program's), and the recording has the tone both times. Judge it from a
+    run on its own: under load --wav's recording has gaps (86Box behind the wall clock)."""
+    path = os.path.join(ROOT, "build", "dj", "FMSYNTH.EXE")
+    if not os.path.exists(path):
+        return "  %-22s FAIL no %s (make build/dj/FMSYNTH.EXE)" % ("fmsynth-" + boot, path), False
+    common = ["--machine", "bf6", "--boot-cfg", boot, "--sound", "sb16", "--wav", "--file", path + "=/TEST/FMSYNTH.EXE",
+              "--timeout", "200", "--idle", "80"]
+    checks, info = {}, ""
+    for how, pre in (("dos", ""), ("glos", "C:\\TEST\\GLOS.EXE /RUN ")):
+        st, text = run("fmsynth-%s-%s" % (how, boot), common + (GLOS_FILES if how == "glos" else []) + [
+            "--cmd", "SERSAY HX-START fmsynth", "--cmd", pre + "C:\\TEST\\FMSYNTH.EXE 388 1500 > C:\\OUT\\FM.TXT",
+            "--cmd", "SERSAY HX-DONE 0"])
+        wav = os.path.join(ROOT, "out", "fmsynth-%s-%s" % (how, boot), "audio.wav")
+        said = os.path.join(ROOT, "out", "fmsynth-%s-%s" % (how, boot), "files", "FM.TXT")
+        said = open(said, "rb").read().decode("latin-1") if os.path.exists(said) else ""
+        checks[how + "-ran"] = st == "PASS" and "FMSYNTH open port=388 chip=3" in said and "FMSYNTH played queued=0" in said
+        checks[how + "-tone"] = os.path.exists(wav) and wavcheck_run(
+            [sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav_for_check(wav), "--tone", "370"],
+            capture_output=True).returncode == 0
+        if how == "glos":
+            checks["glos-session"] = "GLOS-SESSION begin" in text and "GLOS-PANIC" not in text
+        if not checks[how + "-ran"]:
+            info += " %s: %s %r" % (how, st, [l for l in said.splitlines() if l.startswith("FMSYNTH")][:3])
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("fmsynth-" + boot, "PASS" if not bad else "FAIL",
+                             "" if not bad else " failed: " + " ".join(bad) + info), not bad
+
+
 # ---- M4c: HDPMI's regression tests (make m4c-inputs), HDPMI32i against GLOS
 
 # Left out: interactive (WAITKEY, MOUEVNT*, NEWCLMZ starts a shell), HDPMI's
@@ -13792,7 +13823,7 @@ def main():
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
                                       "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time", "netapp", "https", "sshc", "pkg", "vnc", "cache",
                                       "umaprobe", "mem-page", "int2f", "umb", "joy", "xfer", "api", "thr", "floppy", "ndos",
-                                      "nboot", "cdrom"])
+                                      "nboot", "cdrom", "fmsynth"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -14023,6 +14054,9 @@ def main():
         return 0 if all(r[1] for r in matrix(shell, combos, a.jobs)) else 1
     if a.suite == "int2f":
         return 0 if all(r[1] for r in matrix(int2f_exit, combos, a.jobs)) else 1
+    if a.suite == "fmsynth":                    # (sdk/fm on plain DOS and in a GLOS session: bf6 raw)
+        cases = [b for b in ([a.boot] if a.boot else ["default"])]
+        return 0 if all(r[1] for r in matrix(lambda b: fmsynth_case(b), [(b,) for b in cases], a.jobs)) else 1
     if a.suite == "mem":
         res = matrix(mem, combos, a.jobs) + matrix(int2f_exit, combos, a.jobs) + matrix(mempage, combos, a.jobs)
         return 0 if all(r[1] for r in res) else 1

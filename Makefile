@@ -1047,6 +1047,26 @@ build/sdk/libglos.a: $(LIBGLOS_SRCS) include/glos/glos.h include/glos/api.h incl
 	$(Q)set -e; for f in $(LIBGLOS_GFX); do \
 	  $(DJCC) -O2 -Wall -Werror -ffreestanding -Iinclude -Ikernel/include -c -o build/sdk/glos/gfx_$$(basename $$f .c).o $$f; done
 	$(Q)$(DJENV) $(DJGPP_PREFIX)/bin/i586-pc-msdosdjgpp-ar rcs $@ $(LIBGLOS_OBJS)
+# GLOS's FM synthesiser for DOS programs (include/glos/fmsynth.h, 2026-11-26: Echoes' music on plain DOS and in a
+# GLOS session sounds as GLOS's MIDI ports do): the kernel's FM driver, its instruments and its queue compiled
+# again (freestanding, with the kernel's headers), beside sdk/fm's program half. FMSYNTH (tests/dos/fmsynth.c)
+# plays a General MIDI flute's F sharp through it (the audio suite).
+FMSYNTH_K := kernel/drv/fm.c kernel/drv/fmbank.c kernel/drv/midiq.c sdk/fm/fmq.c
+build/sdk/libfmsynth.a: $(FMSYNTH_K) sdk/fm/fmsynth.c include/glos/fmsynth.h kernel/include/fm.h kernel/include/midiq.h
+	@mkdir -p build/sdk/fm
+	$(Q)rm -f $@
+	$(Q)set -e; for f in $(FMSYNTH_K); do echo "  DJCC    $$f"; \
+	  $(DJCC) -O2 -Wall -Werror -ffreestanding -Iinclude -Ikernel/include -Ikernel/include/libc \
+	  -c -o build/sdk/fm/$$(basename $$f .c).o $$f; done
+	$(Q)echo "  DJCC    sdk/fm/fmsynth.c"
+	$(Q)$(DJCC) -O2 -Wall -Wextra -Werror -Iinclude -c -o build/sdk/fm/fmsynth.o sdk/fm/fmsynth.c
+	$(Q)$(DJENV) $(DJGPP_PREFIX)/bin/i586-pc-msdosdjgpp-ar rcs $@ build/sdk/fm/fm.o build/sdk/fm/fmbank.o \
+	  build/sdk/fm/midiq.o build/sdk/fm/fmq.o build/sdk/fm/fmsynth.o
+build/dj/FMSYNTH.EXE: tests/dos/fmsynth.c build/sdk/libfmsynth.a include/glos/fmsynth.h
+	@mkdir -p build/dj
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O2 -Wall -Wextra -Werror -Iinclude -o $@ $< build/sdk/libfmsynth.a
+dos-tests: build/dj/FMSYNTH.EXE
 # The linker's options for a program with threads (glos_thread: include/glos/glos.h): --wrap for each of the C
 # library's functions libglos puts its lock round (sdk/libglos/wrap.list). Used as @build/sdk/gloswrap.opt.
 build/sdk/gloswrap.opt: sdk/libglos/wrap.list
