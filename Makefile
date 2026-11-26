@@ -84,7 +84,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: census rbil fat-test fat-test-run floppy native-floppy usb-stick loopa-smoke loopa-floppy loopa-ndos loopa-nboot native-loader loopa-joy loopa-int2f loopa-cache loopa-mem-page loopa-umaprobe loopa-umb sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
+.PHONY: census rbil fat-test fat-test-run floppy native-floppy usb-stick loopa-smoke loopa-floppy loopa-ndos loopa-nboot native-loader loopa-joy loopa-int2f loopa-cache loopa-mem-page loopa-umaprobe loopa-umb sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-native-a loopa-native-b loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN build/glos/COMMAND.COM build/ow/GLOSLDR.SYS     # (the loader with no DOS:
                                                 # in every install, for DISK n INSTALL p's upgrade)
 
@@ -879,6 +879,13 @@ loopa-gui: all dos-tests build/dj/GUITEST.EXE gui-goldens check-deps
 # The native apps (M9 steps D-G): their scripts (tests/gui) on the desktop against the host's goldens.
 loopa-native: all dos-tests apps gui-goldens check-deps
 	$(Q)python3 tests/loopa/jobs.py native -j $(JOBS)
+# ... in two halves, for the merge gate's lanes (tools/merge-gate.sh; the owner, 2026-11-26): the VBE machines (the
+# bf6 and the 486, 29 and 42 minutes), then the bf6's G200 and G400 (34, 36). Whole, its 75 minutes held one lane
+# past all the others.
+loopa-native-a: all dos-tests apps gui-goldens check-deps
+	$(Q)GUI_ONLY=vbe python3 tests/loopa/jobs.py native -j $(JOBS)
+loopa-native-b: all dos-tests apps gui-goldens check-deps
+	$(Q)GUI_ONLY=g200,g400 python3 tests/loopa/jobs.py native -j $(JOBS)
 # The settings (M9 step B): every setting set over ssh, the file kept and written, a new start reading it.
 loopa-config: all check-deps
 	$(Q)python3 tests/loopa/jobs.py config -j $(JOBS)
