@@ -118,7 +118,8 @@ HOST_TESTS := pmm_test:kernel/mm/pmm.c heap_test:kernel/mm/heap.c v86dec_test:ke
               regex_test:sdk/gui/regex.c piece_test:sdk/gui/piece.c popmenu_test:kernel/wm/popmenu.c \
               vdma_test:kernel/vm/vdma.c radeon_test:kernel/gfx/radeon.c \
               timing_test:kernel/gfx/timing.c iso_test:kernel/fs/iso.c msc_test:kernel/drv/msc.c \
-              ohci_test:kernel/drv/ohcitd.c ehci_test:kernel/drv/ehcitd.c ems_test:kernel/vm/ems.c
+              ohci_test:kernel/drv/ohcitd.c ehci_test:kernel/drv/ehcitd.c ems_test:kernel/vm/ems.c \
+              cdda_test:kernel/drv/cdda.c cue_test:kernel/drv/cue.c
 host-test:
 	$(Q)$(DEV) $(MAKE) -s host-test-run
 # N1a's FAT reader against mkfs.fat's, mtools' and fat_format's volumes (docs/v1/native-dos.md): fat-test alone.
@@ -652,7 +653,7 @@ KCFLAGS := -m32 -march=i486 -ffreestanding -fno-pic -fno-pie -fno-stack-protecto
            -Ithird_party/lwip/src/include -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint -Ikernel/ssh \
            -I$(RETROGPU)/hal/include
 KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/arch/mtrr.c kernel/arch/pmc.c kernel/core/main.c kernel/core/timer.c \
-         kernel/core/sched.c kernel/drv/pci.c kernel/drv/dev.c kernel/drv/devlist.c kernel/drv/cstore.c kernel/drv/cache.c kernel/drv/ata.c kernel/drv/ide.c kernel/drv/cdrom.c kernel/vm/ndm.c kernel/vm/ndcmd.c kernel/vm/vdos.c kernel/ndos/exe.c kernel/ndos/dtime.c kernel/fs/fat.c kernel/fs/fsv.c kernel/fs/iso.c kernel/ndos/psp.c kernel/ndos/dos21.c kernel/ndos/files.c kernel/ndos/share.c kernel/ndos/mcb.c kernel/ndos/path.c kernel/ndos/find.c kernel/ndos/names.c kernel/ndos/fucase.c kernel/drv/nic.c kernel/drv/ne2k.c kernel/drv/rtl8139.c kernel/drv/e100.c \
+         kernel/core/sched.c kernel/drv/pci.c kernel/drv/dev.c kernel/drv/devlist.c kernel/drv/cstore.c kernel/drv/cache.c kernel/drv/ata.c kernel/drv/ide.c kernel/drv/cdrom.c kernel/drv/cdda.c kernel/drv/cue.c kernel/vm/ndm.c kernel/vm/ndcmd.c kernel/vm/vdos.c kernel/ndos/exe.c kernel/ndos/dtime.c kernel/fs/fat.c kernel/fs/fsv.c kernel/fs/iso.c kernel/ndos/psp.c kernel/ndos/dos21.c kernel/ndos/files.c kernel/ndos/share.c kernel/ndos/mcb.c kernel/ndos/path.c kernel/ndos/find.c kernel/ndos/names.c kernel/ndos/fucase.c kernel/drv/nic.c kernel/drv/ne2k.c kernel/drv/rtl8139.c kernel/drv/e100.c \
          kernel/net/net.c kernel/net/sock.c kernel/lib/libc.c \
          kernel/core/random.c kernel/core/kat.c kernel/ssh/ssh.c kernel/ssh/sshbuf.c kernel/ssh/sshkeys.c \
          kernel/ssh/sshd.c \

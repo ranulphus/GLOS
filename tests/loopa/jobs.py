@@ -8560,6 +8560,61 @@ def cdimage_case(profile, card):
         not bad
 
 
+def cdimage_audio_case(profile, card):
+    """N4's images' audio (C6 with C7): mkiso.py's mixed-mode disc (the data track, then two tone tracks each in
+    a BIN of its own after a PREGAP) as files on C:, mounted by glos cdrom mount with no CD-ROM drive (cue.c lays
+    the sheet out: three tracks); an SB16 for the mixer. CDTEST audio against it as against a drive: the TOC's
+    tracks, PLAY AUDIO busy, the Q channel moving, STOP, RESUME, STOP twice; the play digital (the image's own
+    files read by the reader), the card's output (--wav) with track 2's 440 Hz."""
+    tag = "cdimgaud-" + profile
+    d = os.path.join(ROOT, "out", tag + "-img")
+    src = os.path.join(d, "src")
+    subprocess.run(["rm", "-rf", d])
+    os.makedirs(src)
+    open(os.path.join(src, "README.TXT"), "wb").write(b"hello, an image with audio\r\n")
+    iso, cue = os.path.join(d, "TONES.ISO"), os.path.join(d, "TONES.CUE")
+    mk = subprocess.run([sys.executable, os.path.join(ROOT, "tools/ndos/mkiso.py"), iso, src, "--label", "TONES",
+                         "--cue", cue, "--tone", "8", "--tone", "4"], capture_output=True)
+    bins = sorted(f for f in os.listdir(d) if f.upper().endswith(".BIN"))
+    checks, info = {"image": mk.returncode == 0 and len(bins) == 2}, ""
+    if not checks["image"]:
+        return "  %-22s FAIL image=%r bins=%r" % (tag, mk.stderr.decode("latin-1")[-300:], bins), False
+    files = ["--file", iso + "=/TEST/TONES.ISO", "--file", cue + "=/TEST/TONES.CUE"]
+    for b in bins:
+        files += ["--file", os.path.join(d, b) + "=/TEST/" + b.upper()]
+    agent = Agent(tag + "-" + card, profile, card, files + ["--sound", "sb16", "--wav",
+                                                            "--file", "build/ow/dos/CDTEST.EXE=/TEST/CDTEST.EXE",
+                                                            "--cmd", "C:\\TEST\\GLOS.EXE"], timeout=900)
+    try:
+        checks["listen"] = agent.listening()
+        if checks["listen"]:
+            out = lambda c: (lambda r: (r[0], (r[1] + r[2]).replace("\r", "")))(agent.ssh(c))
+            rc, o = out("glos cdrom mount C:\\TEST\\TONES.CUE")
+            checks["mount"] = rc == 0 and "D: is C:\\TEST\\TONES.CUE" in o and "tracks=3" in agent.log()
+            if not checks["mount"]:
+                info += " mount=%r" % o[-200:]
+            rc, o = out("type D:\\README.TXT")
+            checks["data"] = rc == 0 and "an image with audio" in o
+            rc, o = out("C:\\TEST\\CDTEST.EXE audio")
+            checks["audio"] = rc == 0 and "CDTEST done failures=0" in o
+            info += " " + " ".join(l.split(" ", 1)[1] for l in o.split("\n") if l.startswith("CDTEST ") and "PASS" not in l)
+            agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    log = agent.wait()
+    checks["clean"] = "GLOS-PANIC" not in log and "GLOS-WARN" not in log
+    checks["digital"] = "GLOS-CDAUDIO play digital drive=0" in log
+    wav = os.path.join(ROOT, "out", agent.proc.run_name, "audio.wav")
+    res = wavcheck_run([sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav_for_check(wav), "--tone", "440"],
+                       capture_output=True, text=True) if os.path.exists(wav) else None
+    checks["tone"] = res is not None and res.returncode == 0
+    if not checks["tone"]:
+        info += " wav=%r" % ((res.stdout + res.stderr)[-200:] if res else "none")
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % (tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad) + info), \
+        not bad
+
+
 def xdisk_case(profile, card):
     """Disks that come and go (vdos.c's vdos_disk_attach, detach and gone: what the GLOS session's USB mass storage
     calls), natively, with glos testdisk's disk image on C: as the device: a stick of 16 MB (a partition table, one
@@ -8813,10 +8868,11 @@ def cdboot_case(profile, card, free=False):
 
 
 def cdrom_audio_case(profile, card):
-    """N4's CD audio by the drive's own output (C6's first part): a mixed-mode disc (mkiso.py --cue: the data
-    track and two tone tracks) in 86Box's drive, an SB16 beside it (86Box plays a disc's audio through the sound
-    card); CDTEST audio: the TOC's tracks through IOCTL input 10 and 11, PLAY AUDIO busy, the Q channel's time
-    moving, STOP pausing (the time held), RESUME, STOP twice. Skipped as cdrom_case is."""
+    """N4's CD audio (C6): a mixed-mode disc (mkiso.py --cue: the data track and two tone tracks) in 86Box's
+    drive, an SB16 beside it; CDTEST audio: the TOC's tracks through IOCTL input 10 and 11, PLAY AUDIO busy, the
+    Q channel's time moving, STOP pausing (the time held), RESUME, STOP twice. The drive reads CD-DA and the mixer
+    has the card, so the play is the digital way (cdrom.c's reader, cdda.c, the mixer): the log says so, and the
+    card's output (--wav) has track 2's 440 Hz. Skipped as cdrom_case is."""
     tag = "cdaudio-" + profile
     if not cdrom_runpy():
         return "  %-22s SKIP RetroGPU's run.py has no --cdrom (LOOPA_RUNPY)" % tag, True
@@ -8831,7 +8887,7 @@ def cdrom_audio_case(profile, card):
     checks, info = {"image": mk.returncode == 0}, ""
     if not checks["image"]:
         return "  %-22s FAIL image=%r" % (tag, mk.stderr.decode("latin-1")[-300:]), False
-    agent = Agent(tag + "-" + card, profile, card, ["--cdrom", cue, "--sound", "sb16",
+    agent = Agent(tag + "-" + card, profile, card, ["--cdrom", cue, "--sound", "sb16", "--wav",
                                                     "--file", "build/ow/dos/CDTEST.EXE=/TEST/CDTEST.EXE",
                                                     "--cmd", "C:\\TEST\\GLOS.EXE"], timeout=900)
     try:
@@ -8846,6 +8902,15 @@ def cdrom_audio_case(profile, card):
         checks["timeout"] = False
     log = agent.wait()
     checks["clean"] = "GLOS-PANIC" not in log and "GLOS-WARN" not in log
+    # (C6: the drive reads CD-DA, the mixer has the SB16, so the play is GLOS's own, read digitally; the drive's
+    # own output stays silent, so track 2's 440 Hz in the card's output is the mixer's)
+    checks["digital"] = "GLOS-CDAUDIO drive=0 cdda=1" in log and "GLOS-CDAUDIO play digital drive=0" in log
+    wav = os.path.join(ROOT, "out", agent.proc.run_name, "audio.wav")
+    res = wavcheck_run([sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav_for_check(wav), "--tone", "440"],
+                       capture_output=True, text=True) if os.path.exists(wav) else None
+    checks["tone"] = res is not None and res.returncode == 0
+    if not checks["tone"]:
+        info += " wav=%r" % ((res.stdout + res.stderr)[-200:] if res else "none")
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s" % (tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad) + info), \
         not bad
@@ -14408,6 +14473,7 @@ def main():
         res += matrix(xdisk_case, cases, a.jobs)                # (disks that come and go: USB storage's way in)
         res += matrix(ems_case, cases, a.jobs)                  # (EMS: GLOS's own LIM 4.0 manager)
         res += matrix(cdrom_audio_case, [c for c in cases if c[0] == "bf6"], a.jobs)    # (the 486's board: no sound)
+        res += matrix(cdimage_audio_case, [c for c in cases if c[0] == "bf6"], a.jobs)   # (an image's audio)
         res += matrix(cdboot_case, [c + (f,) for c in cases for f in (False, True) if c[0] == "bf6" or not f],
                       a.jobs)                   # (the boot CD: all the disk; on the bf6 beside a volume too)
         return 0 if all(r[1] for r in res) else 1

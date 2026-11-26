@@ -31,6 +31,7 @@ static struct {
     unsigned long last;                 /* the last sector read or sought (IOCTL input 1) */
     unsigned long play_from, play_to;   /* the last PLAY's, for RESUME and audio status */
     int paused, played;
+    unsigned char quiet[2];             /* IOCTL output 3's volumes, as 255 less each (0: the drive's full 255) */
 } st[UNITS];
 static u32 said;
 
@@ -145,8 +146,9 @@ void mscdex_request(u32 r, int u)
         case 1:
             wr32(t + 2, vm_rd8(t + 1) ? redbook(st[u].last) : (u32)st[u].last);
             break;
-        case 4:
-            vm_wr8(t + 1, 0), vm_wr8(t + 2, 0xFF), vm_wr8(t + 3, 1), vm_wr8(t + 4, 0xFF);
+        case 4:                                 /* (the volumes output 3 set: a digital play's gain) */
+            vm_wr8(t + 1, 0), vm_wr8(t + 2, (u8)(0xFF - st[u].quiet[0])), vm_wr8(t + 3, 1);
+            vm_wr8(t + 4, (u8)(0xFF - st[u].quiet[1]));
             vm_wr8(t + 5, 2), vm_wr8(t + 6, 0), vm_wr8(t + 7, 3), vm_wr8(t + 8, 0);
             break;
         case 6: {
@@ -219,7 +221,10 @@ void mscdex_request(u32 r, int u)
         u32 t = far(r + 14), code = vm_rd8(t);
         if (code == 0 || code == 5)
             cdrom_tray(u, code == 0);
-        else if (code != 1 && code != 2 && code != 3)
+        else if (code == 3) {                   /* audio channel control: outputs 0 and 1's volumes */
+            st[u].quiet[0] = (u8)(0xFF - vm_rd8(t + 2)), st[u].quiet[1] = (u8)(0xFF - vm_rd8(t + 4));
+            cdrom_volume(u, vm_rd8(t + 2), vm_rd8(t + 4));
+        } else if (code != 1 && code != 2)
             err = 0x03;
         break;
     }

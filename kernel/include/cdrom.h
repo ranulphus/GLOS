@@ -26,6 +26,12 @@ int cdrom_stop(int i);
 int cdrom_pause(int i, int resume);
 int cdrom_subq(int i, unsigned char *buf16);
 int cdrom_tray(int i, int open);
+/* Digital audio (C6): a drive that reads CD-DA plays through GLOS's mixer, cdrom_play to cdrom_subq answering
+   for it as the drive does. MSCDEX's audio channel control's volumes (0 to 255) for that play; the mixer's part
+   (its card's interrupt: frames of 16-bit stereo at rate added into acc) and whether it plays now. */
+void cdrom_volume(int i, unsigned left, unsigned right);
+void cdaudio_mix(int *acc, unsigned long frames, unsigned long rate);
+int cdaudio_on(void);
 /* An image as a unit (C7): an ISO 9660 file, or a CUE sheet's first data track, on volume v at path (shown: how
    it is named to people). Its unit, or -2 (none free), -3 (not opened), -4 (a sheet with no data track GLOS reads). */
 int cdrom_mount_image(struct fsv_vol *v, const char *path, const char *shown);

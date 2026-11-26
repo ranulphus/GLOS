@@ -46,6 +46,7 @@
 #include "sched.h"
 #include "timer.h"
 #include "vsbdev.h"
+#include "cdrom.h"
 
 #define STREAMS   8
 #define PERIOD    256                           /* frames */
@@ -342,6 +343,7 @@ static void fill(s16 *out, u32 frames, const struct trapframe *tf)
                 take(&st[i], frames, tf);
     }
     vsbdev_mix(mx.acc, frames, mx.rate);        /* what a DOS program plays on the virtual Sound Blaster */
+    cdaudio_mix(mx.acc, frames, mx.rate);       /* a CD's audio, read digitally (cdrom.c, N4's C6) */
     {
         u16 peak[2] = { 0, 0 };
         mix_master(mx.acc, out, frames, mx.master, mx.mute, peak);
@@ -368,7 +370,7 @@ static void card_want(void)
 {
     if (!mx.on)
         return;
-    if (mx.desk || session_streams() || vsbdev_on()) {
+    if (mx.desk || session_streams() || vsbdev_on() || cdaudio_on()) {
         mx.out = 0;
         if (!mx.card->running() && mx.card->start(mx.rate, PERIOD, fill) != 0)
             mx.on = 0;
