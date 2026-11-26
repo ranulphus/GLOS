@@ -575,7 +575,12 @@ DOSBench within 3% under native GLOS of plain DOS (the P1 target, kept). Phase H
 
 Gone with hosted mode: shell mode on MS-DOS 7.1.
 
-**G6. The docs:** the Help app's guide for a native PC (installing, the start-up menu, living beside DOS or
+**G5b. UAT** (the owner, 2026-11-26: after G5's must-fix list): the owner tests a build with the known faults
+fixed on the real PCs; what is found is fixed before the docs are written. No user-guide pages are written before
+it (the owner: "too soon to write the user manual, we haven't done any UAT yet"; a draft of the install page is
+parked on branch g6-install-draft).
+
+**G6. The docs** (after UAT, from what it found): the Help app's guide for a native PC (installing, the start-up menu, living beside DOS or
 Windows), the PRD (D32 becomes the native distribution), the release notes, the hardware list (from phase H's
 audit).
 
