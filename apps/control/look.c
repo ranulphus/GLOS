@@ -72,16 +72,25 @@ static void draw(struct gui_widget *w, struct gfx_surface *s)
     gfx_frame(s, x - 1, y - 1, PW + 2, PH + 2, GUI_ROLE(GLOS_ROLE_LINE));       /* and the screen's edge */
 }
 
-/* Choose a picture...: the file dialog, from the folder of the one the field has. */
+/* Choose a picture...: the file dialog, from the folder of the one the field has; with none, from GLOS's own
+   wallpapers' (WALLS beside the programs: tools/mkwalls.py), which is also one of its places. */
 static void choose(struct gui_widget *b, int what)
 {
     static const char *const filters[] = { "Pictures|*.PNG;*.JPG;*.JPEG;*.BMP;*.GIF;*.TGA", "Every file|*.*", NULL };
+    static char walls[120];
+    const char *places[2] = { NULL, NULL };
     struct gui_file_opts o;
     char path[200];
     (void)b, (void)what;
     memset(&o, 0, sizeof o);
     o.filters = filters;
+    snprintf(walls, sizeof walls, "%s%sWALLS", su_home, su_home[0] ? "\\" : "");
+    if (gui_is_dir(walls))
+        places[0] = walls;
+    o.recent = places;
     snprintf(path, sizeof path, "%s", gui_get_text(field));
+    if (!path[0] && places[0])
+        snprintf(path, sizeof path, "%s", walls);
     if (gui_file_dialog_ex(owner, GUI_T("Wallpaper"), 0, path, sizeof path, &o) == 1) {
         gui_set_text(field, path);
         still = 99;                             /* (chosen, not typed: shown at once) */

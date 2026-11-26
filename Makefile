@@ -354,6 +354,14 @@ APP_DEPS_help := build/apps/HELP.DAT
 build/apps/HELP.DAT: $(HELP_PAGES) tools/mkhelp.py
 	@mkdir -p build/apps
 	$(Q)python3 tools/mkhelp.py $@ $(HELP_PAGES)
+# GLOS's own wallpapers (owner, 2026-11-26): four synthwave scenes at 1600 by 1200, drawn by tools/mkwalls.py from
+# nothing (no outside picture), into GLOS's WALLS folder; the desktop's default stays the theme's colour.
+WALL_NAMES := SUNSET.PNG NIGHTCTY.PNG NEONROAD.PNG STARGRID.PNG
+WALLS := $(addprefix build/glos/WALLS/,$(WALL_NAMES))
+$(WALLS) &: tools/mkwalls.py
+	@mkdir -p build/glos/WALLS
+	$(Q)python3 tools/mkwalls.py build/glos/WALLS > /dev/null
+apps: $(WALLS)
 # Disk Tools (phase F): FAT volumes read and added to, the sector jobs; new volumes and partition tables by the
 # kernel's own code (kernel/disk: with its boot code, as bytes).
 DISKS_SRCS := apps/shared/fatimg.c apps/shared/diskjob.c kernel/disk/fatfmt.c kernel/disk/mbr.c kernel/disk/fdboot.S \

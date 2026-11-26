@@ -10,7 +10,7 @@ programs you have started.
 - Double-click an icon to open it. With the keyboard: the arrows, Home and End move, a letter jumps to a name,
   Enter opens.
 - Drag an icon to put it where you like. Its place is kept.
-- The picture behind them is chosen on the Control Panel's Desktop page.
+- The picture behind them is chosen on the Control Panel's Desktop page: GLOS's own four are in the WALLS folder beside GLOS.
 
 ## The Start menu
 

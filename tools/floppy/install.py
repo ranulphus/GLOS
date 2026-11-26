@@ -196,6 +196,9 @@ def new_disk(pc, erase):
     pc.put_text("/C/AUTOEXEC.BAT", NEW_AUTOEXEC)
 
 
+WALLS = ["SUNSET.PNG", "NIGHTCTY.PNG", "NEONROAD.PNG", "STARGRID.PNG"]       # (the Makefile's WALL_NAMES)
+
+
 def glos_files(args):
     """(local path, name there under /C/GLOS) for the whole system; what is missing ends the run."""
     files = [("build/ow/GLOS.EXE", "GLOS.EXE"), ("build/kernel/GLOSK.BIN", "GLOSK.BIN"),
@@ -204,6 +207,7 @@ def glos_files(args):
                                                                 #  of a GLOS that DOS starts takes it from here)
     files += [("build/apps/%s.EXE" % a, a + ".EXE") for a in APPS + ["SSH", "SFTP", "SSHKEY"]]
     files += [("build/apps/%s.SCR" % v, v + ".SCR") for v in SAVERS]   # (the savers' programs: phase D)
+    files += [("build/glos/WALLS/%s" % w, "WALLS/" + w) for w in WALLS]     # (GLOS's own wallpapers: make apps)
     files += [("build/glos/CERTS.DAT", "CERTS.DAT"), ("sdk/gui/fonts/SMOOTH.DAT", "SMOOTH.DAT"),
               ("sdk/gui/fonts/FONTS.DAT", "FONTS.DAT"),         # (the UI's small and large fonts: toolkit 2)
               ("sdk/gui/fonts/ICONS.DAT", "ICONS.DAT"),         # (GLOS's colour icons, by name)
@@ -222,12 +226,14 @@ def glos_files(args):
 def put_glos(pc, args, files, drive="C", new_cfg=False):
     total = sum(os.path.getsize(os.path.join(ROOT, src)) for src, _ in files)
     print("GLOS into %s:\\GLOS: %d files, %.1f MB" % (drive, len(files), total / 1e6))
-    pc.sftp(["-mkdir /%s/GLOS" % drive, "-mkdir /%s/GLOS/KEYS" % drive, "-mkdir /%s/GLOS/KEYS/PKG" % drive])
+    pc.sftp(["-mkdir /%s/GLOS" % drive, "-mkdir /%s/GLOS/KEYS" % drive, "-mkdir /%s/GLOS/KEYS/PKG" % drive,
+             "-mkdir /%s/GLOS/WALLS" % drive])
     t0 = time.time()
     rc, out = pc.sftp(["put %s /%s/GLOS/%s" % (os.path.join(ROOT, src), drive, dst) for src, dst in files])
     if rc != 0:
         die("copying failed: %s" % out.strip()[-300:])
-    rc, out = pc.sftp(["ls -l /%s/GLOS" % drive, "ls -l /%s/GLOS/KEYS" % drive, "ls -l /%s/GLOS/KEYS/PKG" % drive])
+    rc, out = pc.sftp(["ls -l /%s/GLOS" % drive, "ls -l /%s/GLOS/KEYS" % drive, "ls -l /%s/GLOS/KEYS/PKG" % drive,
+                       "ls -l /%s/GLOS/WALLS" % drive])
     sizes = {}
     for line in out.split("\n"):
         w = line.split()
