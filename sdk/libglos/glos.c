@@ -260,6 +260,11 @@ static int last_error;
 int glos_error(void) { return last_error; }
 void __glos_error_set(int e) { last_error = e; }       /* (glosthr.c's) */
 
+/* The C library's lock for libglos's own files that use the library's insides outside a wrapped call (socket.c's
+   descriptors): gloswrap.c's, set when the program makes its first thread; until then (and in a program without
+   threads, which isn't linked with the wrapper at all) there is nobody to keep out. 1 takes it, 0 gives it. */
+void (*__glos_lock_hook)(int take);
+
 glos_handle glos_window(const char *title, int x, int y, int w, int h, unsigned kind, unsigned flags, glos_handle owner)
 {
     struct glos_win_create q;

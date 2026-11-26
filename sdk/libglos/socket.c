@@ -244,6 +244,8 @@ glos_handle glos_socket_handle(int fd)
     return k ? k->id : 0;
 }
 
+
+extern void (*__glos_lock_hook)(int take);     /* (glos.c: gloswrap.c's lock once there are threads) */
 int socket(int domain, int type, int protocol)
 {
     struct glos_version v;
@@ -272,11 +274,19 @@ int socket(int domain, int type, int protocol)
         return fail(ENOMEM);
     k->rcv_ms = k->snd_ms = 0xFFFFFFFFu;
     k->dgram = type == SOCK_DGRAM;
-    if ((fd = __FSEXT_alloc_fd(handler)) < 0) {
+    /* (Under the C library's lock, where the program has threads: __FSEXT_alloc_fd opens NUL through the
+       transfer buffer, and the descriptors' table is the library's, read by another thread's read or write.) */
+    if (__glos_lock_hook)
+        __glos_lock_hook(1);
+    fd = __FSEXT_alloc_fd(handler);
+    if (fd >= 0)
+        __FSEXT_set_data(fd, k);
+    if (__glos_lock_hook)
+        __glos_lock_hook(0);
+    if (fd < 0) {
         free(k);
         return -1;
     }
-    __FSEXT_set_data(fd, k);
     return fd;
 }
 

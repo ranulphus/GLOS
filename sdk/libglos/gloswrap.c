@@ -29,6 +29,7 @@
 #include <sys/segments.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <utime.h>
 
 #include <glos/glos.h>
 
@@ -38,6 +39,9 @@ unsigned __glos_self(void);
 static volatile unsigned held, waiters;
 static unsigned owner, depth;           /* owner: the holder (__glos_self() plus 1), written by the holder alone */
 static glos_handle sig;
+
+extern void (*__glos_lock_hook)(int take);     /* (glos.c) */
+static void lock_hook(int take);
 
 static inline unsigned swap(volatile unsigned *p, unsigned v)
 {
@@ -64,6 +68,7 @@ void __glos_lock_start(void)
         && __dpmi_set_segment_limit(__djgpp_ds_alias, data) == 0)
         __djgpp_selector_limit = (int)limit;
     sig = glos_signal(GLOS_SIGNAL_ONE);
+    __glos_lock_hook = lock_hook;
     __glos_threaded = 1;
 }
 
@@ -108,6 +113,14 @@ void glos_libc_unlock(void)
     }
 }
 
+static void lock_hook(int take)
+{
+    if (take)
+        glos_libc_lock();
+    else
+        glos_libc_unlock();
+}
+
 /* ---- the wrapped functions */
 
 #define W(ret, name, params, args) \
@@ -147,6 +160,14 @@ W(char *, fgets, (char *s, int n, FILE *f), (s, n, f))
 W(int, fputs, (const char *s, FILE *f), (s, f))
 W(int, fgetc, (FILE *f), (f))
 W(int, fputc, (int c, FILE *f), (c, f))
+/* (2026-11-26) The single-character ones too: GCC makes printf("\n") a call of putchar('\n'), and a line-buffered
+   stream's newline is where its line is written, through DOS from the transfer buffer: unlocked, another thread's
+   findfirst wrote its pattern over the line between the copy into the buffer and DOS's read (the Games Library's
+   "C:\GAMES\KEEN\*.*" in place of "GAMES playing Blip", gate 46). getc and getchar fill through it as well. */
+W(int, putc, (int c, FILE *f), (c, f))
+W(int, putchar, (int c), (c))
+W(int, getc, (FILE *f), (f))
+W(int, getchar, (void), ())
 W(int, ungetc, (int c, FILE *f), (c, f))
 W(int, puts, (const char *s), (s))
 W(int, fseek, (FILE *f, long off, int whence), (f, off, whence))
@@ -218,6 +239,7 @@ W(int, rmdir, (const char *path), (path))
 W(int, chdir, (const char *path), (path))
 W(char *, getcwd, (char *buf, size_t n), (buf, n))
 W(int, chmod, (const char *path, mode_t mode), (path, mode))
+W(int, utime, (const char *path, const struct utimbuf *t), (path, t))     /* (the toolkit's copies keep dates) */
 W(int, ftruncate, (int fd, off_t n), (fd, n))
 W(int, fsync, (int fd), (fd))
 W(DIR *, opendir, (const char *path), (path))

@@ -16,6 +16,10 @@ fgets
 fputs
 fgetc
 fputc
+putc
+putchar
+getc
+getchar
 ungetc
 puts
 fseek
@@ -59,6 +63,7 @@ rmdir
 chdir
 getcwd
 chmod
+utime
 ftruncate
 fsync
 opendir

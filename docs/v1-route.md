@@ -567,7 +567,8 @@ DOSBench within 3% under native GLOS of plain DOS (the P1 target, kept). Phase H
 - `thr`'s interrupts on a no-VME 486, natively;
 - the GUI scripts' races under load (`term-run`'s MODE done, the Terminal's first keys; `studio-step`'s chord
   mended 2026-11-26);
-- the Games Library's overwritten output, and any `GLOS-WARN pmm-` line (the loose kernel frame);
+- ~~the Games Library's overwritten output~~ (found 2026-11-26: putchar, unwrapped; see Open faults), and any
+  `GLOS-WARN pmm-` line (the loose kernel frame);
 - ~~Crystal's automatic look taking another maker's WSS codec at 534h~~ (closed 2026-11-25: its control port must
   answer too);
 - from the old list: the intermittent direct-mode session failure on the 486, T19 windowed on the G200, the rare
@@ -684,7 +685,18 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
 
 ## Open faults (noted, not yet chased)
 
-- **The Games Library's output overwritten by a folder's pattern** (gate 46, 2026-11-23, local:
+- **The Games Library's output overwritten by a folder's pattern: FOUND 2026-11-26.** `say()` ends with
+  `printf("\n")`, which GCC compiles as `putchar('\n')`; putchar was not in wrap.list, and on the line-buffered
+  stdout that newline is where the line is written (`_flsbuf`, `_write`: the copy into the transfer buffer, then
+  DOS), so the write ran outside the lock and the worker's locked `findfirst` (gui_dir_read's "C:\GAMES\KEEN\*.*")
+  could put its pattern in the buffer between the two: 18 bytes over "GAMES playing Blip"'s 18, the newline kept.
+  Mended: putc, putchar, getc, getchar and utime wrapped (getc/getchar fill through `_filbuf`; the toolkit's
+  copies keep dates with utime); socket() takes the lock round `__FSEXT_alloc_fd` (it opens NUL through the
+  buffer) by a hook libglos's threads set (`__glos_lock_hook`); and `tools/wrapcheck.py` now refuses a program
+  whose own files call one of the library's unwrapped transfer-buffer functions (`UNLOCKED`: `_flsbuf`,
+  `_filbuf`, `_open`, `_read`, `_write`, `_truename`, the `_dos_*` file calls ...), found by a cross-reference
+  walk of the ten threaded apps' maps. The note as it was:
+  (gate 46, 2026-11-23, local:
   `native-486dx2-vbe-8 games-run`; then 3 of 3 alone passed). The second "GAMES playing Blip" was never said:
   in its place the output has `C:\GAMES\KEEN\*.* `, eighteen bytes (the pattern and its NUL) over the line's
   first eighteen, its line end the line's own. A watch-triggered scan (6683f62: the library's folders watched)
