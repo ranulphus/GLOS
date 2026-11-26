@@ -1109,6 +1109,19 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   where the drive gives it. C7 images as drives: `glos cd mount FILE` (ISO, CUE/BIN) through the same iso.c. C8
   the boot CD: `make cd-image`, the setup floppy by floppy emulation, the install with the apps on ISO 9660, the
   text installer copying from it; Loop A starting it (the BIOS's boot order).
+- **N4, EMS (planned 2026-11-25; before v1, the owner's choice): LIM EMS 4.0 for the system VM's programs, GLOS its
+  own expanded memory manager, as EMM386 was under FreeDOS.** E1 the manager's bookkeeping as plain C over
+  callbacks, host-tested (kernel/vm/ems.c: handles and their names, logical pages, the four 16 KB physical pages'
+  mapping, a map saved per handle and as a whole (47h/48h, 4Eh/4Fh), 50h's many at once, 51h's reallocation,
+  57h's move and exchange between conventional memory and handles' pages, 58h's mappable addresses, 59h/5Ah raw
+  pages); E2 the page frame: a free 64 KB of upper memory (GLOS's UMA map, umapage.c, as the UMB work found the
+  free windows), its pages the VM's page tables' (four PTEs a 16 KB page, the TLB flushed), the logical pages
+  frames of GLOS's own (pmm), so mapping is a page table's edit, never a copy; E3 INT 67h for the VM: its vector
+  in a segment whose device header (offset 0Ah) says EMMXXXX0, as programs look for an EMM there, and GLOS's DOS
+  answering 3Dh on the device name EMMXXXX0 (its IOCTL 4400h/4407h as a character device); [memory] ems = auto,
+  off, or the KB; VCPI not offered (DPMI is GLOS's: extenders take it first); E4 a DOS test program (EMSTEST)
+  asking each function with patterns written through the frame and read back, then games that want EMS (Loop A
+  first, the owner's game set where they have them); native machines (N6) later, each its own frame and pages.
 - **N4, the keyboard's layout (2026-11-25, native-dos; KEYB's work):** the system VM's INT 09h is an ARPL of GLOS's
   in front of the BIOS's handler (kernel/vm/vkeyb.c). A key pressed whose character on [region] layout (keymap.h:
   Shift, Caps Lock, Num Lock, AltGr from the BIOS's flags) differs from the US one, and the 102nd key, GLOS answers:
