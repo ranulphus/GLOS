@@ -689,6 +689,12 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
 
 ## Open faults (noted, not yet chased)
 
+- **mempage's agent case on the bf6: 32 KB more of GLOS's in agent mode** (found 2026-11-26; the mem suite is in
+  no gate, so since when is not known). `mempage-ag-bf6-default` and `-himemx`: MEM /C as an SSH job finds GLOS
+  with 37424 bytes (one block of 2048 paragraphs more than the 4640 expected); the 486's agent cases, and every
+  case outside agent mode, pass. The same with the old 256-byte spare stack, so not 3cceae1's. Next: which block
+  it is (MEM /D in the job), and whether the mem suite belongs in a tier.
+
 - **The Games Library's output overwritten by a folder's pattern: FOUND 2026-11-26.** `say()` ends with
   `printf("\n")`, which GCC compiles as `putchar('\n')`; putchar was not in wrap.list, and on the line-buffered
   stdout that newline is where the line is written (`_flsbuf`, `_write`: the copy into the transfer buffer, then
