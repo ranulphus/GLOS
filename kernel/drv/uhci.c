@@ -38,6 +38,7 @@
 #include "sched.h"
 #include "timer.h"
 #include "usb.h"
+#include "usbhc.h"
 #include "usbkbd.h"
 #include "vdos.h"
 #include "vm.h"
@@ -70,39 +71,6 @@
 #define LEGSUP_SMIEN    0x0010
 #define LEGSUP_CLEAR    0x8F00          /* its status bits: a 1 clears them */
 
-#define MAX_HC          2
-#define MAX_DEV         16
-#define NTD             40
-#define NPIPE           8               /* interrupt IN pipes, a controller */
-
-struct hc {
-    struct pci_dev *pci;
-    u16 io;
-    u32 legsup;                         /* as found, for usb_leave */
-    u32 *frames;                        /* the frame list (1024 links) */
-    u32 frames_phys;
-    u8 *pool;                           /* a page: the control QH, the TDs, the setup packet and a data buffer */
-    u32 pool_phys;
-    struct uhci_qh *qh_ctrl, *qh_int;   /* the control QH; the pipes' QHs (NPIPE), in the frames' chain first */
-    struct uhci_td *td, *td_int;        /* a control transfer's TDs; a TD a pipe */
-    u8 *setup, *data, *int_buf;         /* the setup packet, a control transfer's data, 64 bytes a pipe */
-    u8 ports, slow_reset;
-    u8 port_dev[2];                     /* the device on each root port: its index + 1, 0 none */
-    u8 tries[2];                        /* attempts at the device there since it connected (3 at most) */
-    /* (U1) control transfers from more than one thread (the usb thread's, a disk's reader's): one at a time */
-    volatile u8 ctrl_busy, bulk_busy;
-    struct waitq ctrl_q, bulk_q;
-    /* bulk transfers (a mass-storage device's), a block of their own: the QH after the control one, BULK_TDS TDs
-       and a BULK_BUF buffer; one transfer at a time (bulk_busy) */
-    u8 *bulk;
-    u32 bulk_phys;
-    struct uhci_qh *qh_bulk;
-    struct uhci_td *td_bulk;
-    u8 *bulk_buf;
-};
-#define BULK_TDS 256
-#define BULK_BUF 16384                  /* (256 packets of 64) */
-#define BPHYS(h, p) ((h)->bulk_phys + (u32)((const u8 *)(p) - (h)->bulk))
 
 static struct hc hc[MAX_HC];
 static int nhc;
@@ -150,6 +118,8 @@ static void wait_ms(u32 ms)
     }
     thread_sleep_until(timer_ticks() + (ms * 1024 + 999) / 1000 + 1);
 }
+
+void usb_wait_ms(u32 ms) { wait_ms(ms); }
 
 static void port_write(struct hc *h, int p, u16 v) { outw((u16)(h->io + PORTSC(p)), v); }
 static u16 port_read(struct hc *h, int p) { return inw((u16)(h->io + PORTSC(p))); }
@@ -201,22 +171,19 @@ static void give_lock(volatile u8 *busy, struct waitq *q)
     irq_restore(f);
 }
 
-static int control_raw(struct hc *h, u32 addr, u32 maxp, int low, const u8 setup[8], void *data, u32 *got,
-                       u32 *status);
-
 static int control(struct hc *h, u32 addr, u32 maxp, int low, const u8 setup[8], void *data, u32 *got, u32 *status)
 {
     int r;
     if (leaving)
-        return control_raw(h, addr, maxp, low, setup, data, got, status);
+        return h->ops->control(h, addr, maxp, low, setup, data, got, status);
     take_lock(&h->ctrl_busy, &h->ctrl_q);
-    r = control_raw(h, addr, maxp, low, setup, data, got, status);
+    r = h->ops->control(h, addr, maxp, low, setup, data, got, status);
     give_lock(&h->ctrl_busy, &h->ctrl_q);
     return r;
 }
 
-static int control_raw(struct hc *h, u32 addr, u32 maxp, int low, const u8 setup[8], void *data, u32 *got,
-                       u32 *status)
+static int uhci_control(struct hc *h, u32 addr, u32 maxp, int low, const u8 setup[8], void *data, u32 *got,
+                        u32 *status)
 {
     u32 len = setup[6] | (u32)setup[7] << 8, n, i, t0 = timer_ticks(), moved = 0;
     int in = setup[0] & 0x80;
@@ -349,7 +316,7 @@ static char *loc(const struct usb_dev *d, char *b);
    NAKed TD each frame, so a device is asked every millisecond however long its interval); re-armed with the data
    toggle flipped each time it has brought a report */
 
-static void pipe_arm(struct hc *h, struct usb_dev *d)
+static void uhci_intr_arm(struct hc *h, struct usb_dev *d)
 {
     u32 k = d->pipe - 1u;
     struct uhci_td *t = &h->td_int[k];
@@ -361,10 +328,55 @@ static void pipe_arm(struct hc *h, struct usb_dev *d)
     h->qh_int[k].elem = PHYS(h, t);
 }
 
+static int uhci_intr_done(struct hc *h, struct usb_dev *d, const u8 **r, u32 *len, u32 *status)
+{
+    u32 c = h->td_int[d->pipe - 1].ctrl;
+    if (c & UHCI_TD_ACTIVE)
+        return 0;
+    if (c & UHCI_TD_ERRORS) {
+        *status = c;
+        return -1;
+    }
+    *r = h->int_buf + (d->pipe - 1) * 64;
+    *len = UHCI_TD_ACTLEN(c);
+    d->toggle ^= 1;
+    return 1;
+}
+
+static void uhci_intr_off(struct hc *h, struct usb_dev *d) { h->qh_int[d->pipe - 1].elem = UHCI_LP_T; }
+
+/* One report out (the pipe's slot's TD and buffer, while its IN is not armed: the Xbox One pad's power-on), 100 ms
+   at most: 0, or -1 (status: the TD's). */
+static int uhci_intr_out(struct hc *h, struct usb_dev *d, const u8 *data, u32 len, u32 *status)
+{
+    struct uhci_td *t = &h->td_int[d->pipe - 1];
+    u32 t0 = timer_ticks();
+    if (!len || len > 64)
+        return -1;
+    memcpy(h->int_buf + (d->pipe - 1) * 64, data, len);
+    t->link = UHCI_LP_T;
+    t->buf = PHYS(h, h->int_buf + (d->pipe - 1) * 64);
+    t->token = USB_PID_OUT | (u32)d->addr << 8 | (u32)(d->ep_out & 0xF) << 15 | (u32)(d->toggle_out & 1) << 19
+               | (len - 1) << 21;
+    t->ctrl = UHCI_TD_ACTIVE | UHCI_TD_CERR3;
+    h->qh_int[d->pipe - 1].elem = PHYS(h, t);
+    while ((t->ctrl & UHCI_TD_ACTIVE) && timer_ticks() - t0 < 100)
+        thread_sleep_until(timer_ticks() + 1);
+    h->qh_int[d->pipe - 1].elem = UHCI_LP_T;
+    if (t->ctrl & (UHCI_TD_ACTIVE | UHCI_TD_ERRORS)) {
+        *status = t->ctrl;
+        return -1;
+    }
+    d->toggle_out ^= 1;
+    return 0;
+}
+
+static void pipe_arm(struct hc *h, struct usb_dev *d) { h->ops->intr_arm(h, d); }
+
 static void pipe_stop(struct hc *h, struct usb_dev *d)
 {
     if (d->pipe) {
-        h->qh_int[d->pipe - 1].elem = UHCI_LP_T;
+        h->ops->intr_off(h, d);
         d->pipe = 0;
     }
     if (d->pad) {
@@ -406,13 +418,14 @@ static void pipes_poll(struct hc *h)
     int i;
     for (i = 0; i < MAX_DEV; i++) {
         struct usb_dev *d = &dev[i];
-        u32 c;
+        const u8 *r = 0;
+        u32 c = 0, len = 0;
+        int k;
         if (!d->used || !d->pipe || &hc[d->hc_i] != h)
             continue;
-        c = h->td_int[d->pipe - 1].ctrl;
-        if (c & UHCI_TD_ACTIVE)
+        if (!(k = h->ops->intr_done(h, d, &r, &len, &c)))
             continue;
-        if (c & UHCI_TD_ERRORS) {               /* (unplugged, or a stall: the port's change will tell) */
+        if (k < 0) {                            /* (unplugged, or a stall: the port's change will tell) */
             char b[16];
             if (++d->errors == 1)
                 kprintf("GLOS-USB port=%s pipe-error status=%08x\n", loc(d, b), c);
@@ -421,10 +434,7 @@ static void pipes_poll(struct hc *h)
                 continue;
             }
         } else {
-            const u8 *r = h->int_buf + (d->pipe - 1) * 64;
-            u32 len = UHCI_TD_ACTLEN(c);
             d->reports++;
-            d->toggle ^= 1;
             if (d->nports && len)               /* a hub's status pipe: a bit for each port that changed */
                 d->hub_dirty = 1;
             if (d->kind == USB_KIND_MOUSE && len) {             /* (every report counts: no comparing) */
@@ -590,28 +600,16 @@ static void xbox_start(struct hc *h, struct usb_dev *d)
     if (!d->ep_in || pad_take(d) != 0)
         return;
     if (d->kind == XPAD_GIP) {
-        struct uhci_td *t = &h->td_int[d->pipe - 1];
-        u32 t0 = timer_ticks();
+        u32 st = 0;
         if (!d->ep_out) {
             pipe_stop(h, d);
             return;
         }
-        memcpy(h->int_buf + (d->pipe - 1) * 64, power_on, sizeof power_on);
-        t->link = UHCI_LP_T;
-        t->buf = PHYS(h, h->int_buf + (d->pipe - 1) * 64);
-        t->token = USB_PID_OUT | (u32)d->addr << 8 | (u32)(d->ep_out & 0xF) << 15 | (u32)(d->toggle_out & 1) << 19
-                   | (u32)(sizeof power_on - 1) << 21;
-        t->ctrl = UHCI_TD_ACTIVE | UHCI_TD_CERR3;
-        h->qh_int[d->pipe - 1].elem = PHYS(h, t);
-        while ((t->ctrl & UHCI_TD_ACTIVE) && timer_ticks() - t0 < 100)
-            thread_sleep_until(timer_ticks() + 1);
-        h->qh_int[d->pipe - 1].elem = UHCI_LP_T;
-        if ((t->ctrl & (UHCI_TD_ACTIVE | UHCI_TD_ERRORS))) {
-            fail(d, "power-on", t->ctrl);
+        if (h->ops->intr_out(h, d, power_on, sizeof power_on, &st) != 0) {
+            fail(d, "power-on", st);
             pipe_stop(h, d);
             return;
         }
-        d->toggle_out ^= 1;
     }
     d->is = d->kind == XPAD_GIP ? "xbox-gip-pad" : "xbox360-pad";
     pipe_arm(h, d);
@@ -708,7 +706,7 @@ static struct dhandle handles[64];
 static u32 nhandles;
 
 /* The controller's bulk block made, its QH after the control one: 0, or -1 (no memory). */
-static int bulk_ready(struct hc *h)
+static int uhci_bulk_ready(struct hc *h)
 {
     if (h->bulk)
         return 0;
@@ -725,7 +723,7 @@ static int bulk_ready(struct hc *h)
 
 /* A tick's wait in a transfer: on the VM's thread (GLOS's DOS reading the stick for a program) through
    vdos_disk_breathe, which lets the VM's own interrupts run first; on any other thread a sleep. */
-static void nap(void)
+void usb_nap(void)
 {
     if (current == vm.thread)
         vdos_disk_breathe();
@@ -736,7 +734,7 @@ static void nap(void)
 /* One piece, n bytes (at most BULK_BUF) from or into the block's buffer: 0 (got: the bytes moved; a short IN
    packet ends it early), MSC_STALL, or -1 (another error, or nothing for five seconds). The endpoint's toggle
    moves on by the packets done. */
-static int bulk_piece(struct hc *h, struct usb_dev *d, int in, u32 n, u32 *got)
+static int uhci_bulk(struct hc *h, struct usb_dev *d, int in, u32 n, u32 *got)
 {
     u32 maxp = in ? d->ep_bin_maxp : d->ep_bout_maxp, ep = (u32)(in ? d->ep_bin : d->ep_bout) & 0xF;
     u8 *tog = in ? &d->tog_bin : &d->tog_bout;
@@ -770,7 +768,7 @@ static int bulk_piece(struct hc *h, struct usb_dev *d, int in, u32 n, u32 *got)
             r = -1;
             break;
         }
-        nap();
+        usb_nap();
     }
     h->qh_bulk->elem = UHCI_LP_T;
     *tog = (u8)((*tog + done) & 1);
@@ -793,7 +791,7 @@ static int st_bulk(void *ctx, int in, void *buf, u32 len, u32 *got)
         u32 n = len - done < BULK_BUF ? len - done : BULK_BUF, g = 0;
         if (!in)
             memcpy(h->bulk_buf, (u8 *)buf + done, n);
-        r = bulk_piece(h, d, in, n, &g);
+        r = h->ops->bulk(h, d, in, n, &g);
         if (in)
             memcpy((u8 *)buf + done, h->bulk_buf, g);
         done += g;
@@ -863,7 +861,7 @@ static void storage_start(struct hc *h, int i)
             break;
     if (k < MAX_STORE)
         k = (int)((store_next + (u32)k) % MAX_STORE), store_next = (u32)k + 1;
-    if (k == MAX_STORE || !d->ep_bin || !d->ep_bout || !d->ep_bin_maxp || !d->ep_bout_maxp || bulk_ready(h) != 0) {
+    if (k == MAX_STORE || !d->ep_bin || !d->ep_bout || !d->ep_bin_maxp || !d->ep_bout_maxp || h->ops->bulk_ready(h) != 0) {
         kprintf("GLOS-MSC port=%s refused why=%s\n", loc(d, b), k == MAX_STORE ? why : h->bulk ? "endpoints" : "memory");
         return;
     }
@@ -1023,10 +1021,10 @@ static void detach_dev(struct hc *h, int i)
 
 /* ---- root ports */
 
-static void attach(struct hc *h, int p)
+static int uhci_port_reset(struct hc *h, int p, int *low)
 {
     u16 v;
-    int i, low;
+    int i;
     v = port_read(h, p);                        /* the port reset: 50 ms (USB 1.1 §7.1.7.3, a root port's 50) */
     port_write(h, p, (u16)((v & PS_RW & ~PS_PE) | PS_PR));
     wait_ms(50);
@@ -1035,7 +1033,7 @@ static void attach(struct hc *h, int p)
     for (i = 0; i < 10; i++) {                  /* enabled, its change bits cleared */
         v = port_read(h, p);
         if (!(v & PS_CCS))
-            return;
+            return -1;
         if (v & PS_PE)
             break;
         port_write(h, p, (u16)((v & PS_RW) | PS_PE | PS_CSC | PS_PEC));
@@ -1043,10 +1041,29 @@ static void attach(struct hc *h, int p)
     }
     if (!(port_read(h, p) & PS_PE)) {
         kprintf("GLOS-USB port=%d error=enable status=%08x\n", p + 1, port_read(h, p));
-        return;
+        return -1;
     }
     port_write(h, p, (u16)((port_read(h, p) & PS_RW) | PS_CSC | PS_PEC));
-    low = (port_read(h, p) & PS_LSDA) != 0;
+    *low = (port_read(h, p) & PS_LSDA) != 0;
+    return 0;
+}
+
+static int uhci_port_changed(struct hc *h, int p)
+{
+    u16 v = port_read(h, p);
+    if (!(v & PS_CSC))
+        return 0;
+    port_write(h, p, (u16)((v & PS_RW) | PS_CSC));
+    return 1;
+}
+
+static int uhci_port_connected(struct hc *h, int p) { return (port_read(h, p) & PS_CCS) != 0; }
+
+static void attach(struct hc *h, int p)
+{
+    int i, low = 0;
+    if (h->ops->port_reset(h, p, &low) != 0)
+        return;
     wait_ms(10);                                /* (the recovery a reset is owed) */
     if ((i = enumerate(h, p, 0, 0, low)) >= 0)
         h->port_dev[p] = (u8)(i + 1);
@@ -1189,14 +1206,13 @@ static void usb_thread(void *arg)
         }
         last_scan = timer_ticks();
         for (i = 0; i < nhc; i++)
-            for (p = 0; p < hc[i].ports; p++) {
-                u16 v = port_read(&hc[i], p);
-                if (v & PS_CSC) {               /* a change: whatever was there is gone, attempts start again */
-                    port_write(&hc[i], p, (u16)((v & PS_RW) | PS_CSC));
+            for (p = 0; p < hc[i].ports && p < MAX_PORTS; p++) {
+                if (hc[i].ops->port_changed(&hc[i], p)) {   /* a change: whatever was there is gone, attempts
+                                                               start again */
                     detach(&hc[i], p);
                     hc[i].tries[p] = 0;
                 }
-                if ((v & PS_CCS) && !hc[i].port_dev[p] && hc[i].tries[p] < 3) {
+                if (hc[i].ops->port_connected(&hc[i], p) && !hc[i].port_dev[p] && hc[i].tries[p] < 3) {
                     hc[i].tries[p]++;
                     wait_ms(100);               /* (USB 1.1 §7.1.7.3: 100 ms for the power to settle) */
                     attach(&hc[i], p);
@@ -1207,12 +1223,38 @@ static void usb_thread(void *arg)
 
 /* ---- the controllers */
 
+static void uhci_leave(struct hc *h)
+{
+    stop(h);
+    reset(h);
+    outw((u16)(h->io + USBINTR), 0);
+    if (h->legsup != 0xFFFF)
+        pci_write32(h->pci->bus, h->pci->dev, h->pci->fn, UHCI_LEGSUP, h->legsup | LEGSUP_CLEAR);
+}
+
+static u32 uhci_stat(struct hc *h, char *b, u32 room)
+{
+    return (u32)ksnprintf(b, room, "uhci %02x:%02x.%u io=%x ports=%u frame=%u\n", h->pci->bus, h->pci->dev, h->pci->fn,
+                          h->io, h->ports, inw((u16)(h->io + FRNUM)) & 0x7FF);
+}
+
+static u32 uhci_detail(struct hc *h, char *b, u32 room)
+{
+    return (u32)ksnprintf(b, room, "%u ports, its registers at %x\n", h->ports, h->io);
+}
+
+static const struct hcd_ops uhci_ops = {
+    "uhci", uhci_control, uhci_intr_arm, uhci_intr_done, uhci_intr_off, uhci_intr_out, uhci_bulk_ready, uhci_bulk,
+    uhci_port_changed, uhci_port_connected, uhci_port_reset, uhci_leave, uhci_stat, uhci_detail,
+};
+
 static int take(struct pci_dev *pd)
 {
     struct hc *h = &hc[nhc];
     u32 cmd;
     int p;
     memset(h, 0, sizeof *h);
+    h->ops = &uhci_ops;
     h->pci = pd;
     h->io = (pd->bar[4] & 1) ? (u16)(pd->bar[4] & 0xFFE0u) : 0;
     if (!h->io)
@@ -1301,14 +1343,8 @@ void usb_leave(void)
 {
     int i;
     leaving = 1;                                /* (86Box's HCRESET never clears: reset() waits its 10 ms) */
-    for (i = 0; i < nhc; i++) {
-        struct hc *h = &hc[i];
-        stop(h);
-        reset(h);
-        outw((u16)(h->io + USBINTR), 0);
-        if (h->legsup != 0xFFFF)
-            pci_write32(h->pci->bus, h->pci->dev, h->pci->fn, UHCI_LEGSUP, h->legsup | LEGSUP_CLEAR);
-    }
+    for (i = 0; i < nhc; i++)
+        hc[i].ops->leave(&hc[i]);
     ehci_leave();                               /* (the ports back to EHCI, as the BIOS had them) */
 }
 
@@ -1322,7 +1358,7 @@ u32 usb_hc_detail(const struct pci_dev *pd, char *b, u32 room)
     int i;
     for (i = 0; i < nhc; i++)
         if (hc[i].pci == pd)
-            return (u32)ksnprintf(b, room, "%u ports, its registers at %x\n", hc[i].ports, hc[i].io);
+            return hc[i].ops->detail(&hc[i], b, room);
     return 0;
 }
 
@@ -1360,9 +1396,7 @@ int usb_stat(char *b, u32 room)
     if (!started || !nhc)
         return ksnprintf(b, room, "usb %s\n", !started ? "not-started" : "none");
     for (i = 0; i < nhc && n < room; i++)
-        n += (u32)ksnprintf(b + n, room - n, "uhci %02x:%02x.%u io=%x ports=%u frame=%u\n", hc[i].pci->bus,
-                            hc[i].pci->dev, hc[i].pci->fn, hc[i].io, hc[i].ports,
-                            inw((u16)(hc[i].io + FRNUM)) & 0x7FF);
+        n += hc[i].ops->stat(&hc[i], b + n, room - n);
     for (i = 0; i < MAX_DEV && n < room; i++)
         if (dev[i].used) {
             char w[16];
