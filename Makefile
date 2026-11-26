@@ -1453,6 +1453,11 @@ build/dj/DIRTEST.EXE: tests/dos/dirtest.c
 	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
 # How fast a DJGPP program reads the disk (docs/disk-cache.md: the bench's numbers, the cache suite).
 # Whether GLOS can place a display card's ranges where the BIOS couldn't (bench C's PCI G450, 2026-11-26).
+# ... and the card started from DOS: its BIOS run (the first try, before GLOS does it itself).
+build/dj/CARD2.EXE: tests/dos/card2.c kernel/drv/pcialloc.c kernel/drv/pcialloc.h
+	@mkdir -p $(dir $@)
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O2 -Wall -Werror -o $@ $< kernel/drv/pcialloc.c
 build/dj/PCIPLACE.EXE: tests/dos/pciplace.c
 	@mkdir -p $(dir $@)
 	$(Q)echo "  DJCC    $<"

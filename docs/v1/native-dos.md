@@ -1209,6 +1209,15 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   take D1's path, the desktop's shot from it. D5 bench C: the G450 as GLOS's display; then DOS-GL's Glide and GL
   there (asked). Unknowns: what the card's BIOS asks of a 1995 BIOS at its start (a POST memory manager it may not
   find), and whether every board lets the VGA ranges move.
+  **First try on the real PC (2026-11-26, the owner's "why don't we just try it on the real hardware"):**
+  tests/dos/card2.c (CARD2, DJGPP, under GLOS M3 hosted on bench C) does D1 and D3 from DOS: the frame buffer
+  placed at FA000000 (the bridge's prefetchable window moved there) and ILOAD at FE000000 by kernel/drv/pcialloc.c,
+  the ROM read into a DOS block (34,816 bytes, checksum 0), the ViRGE's decode off and the bridge's VGA Enable on,
+  the image's entry called in real mode (DPMI 0301h, a stack of its own): it returned, INT 10h is the card's
+  (2999:0B60, was C000:1EF8), mode 3 set, VBE 3.0 "Matrox Graphics Inc." with 16 MB. Then `glos display on
+  640x480x8`: mode 101h with its LFB at FA000000, GLOS's Matrox driver on the G450 ("accel idle MGA-G450"), the
+  desktop's screenshot read back from it. All first time. What GLOS's own D1-D3 add: done natively at the start,
+  the image at C0000h (not a DOS block), the setting, the PC left as the BIOS had it when the setting is auto.
 - **N4, the keyboard's layout (2026-11-25, native-dos; KEYB's work):** the system VM's INT 09h is an ARPL of GLOS's
   in front of the BIOS's handler (kernel/vm/vkeyb.c). A key pressed whose character on [region] layout (keymap.h:
   Shift, Caps Lock, Num Lock, AltGr from the BIOS's flags) differs from the US one, and the 102nd key, GLOS answers:
