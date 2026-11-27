@@ -1334,8 +1334,10 @@ def dpmi_hello(boot):
             return sorted(re.sub(r" crc=\w+", "", l.strip()) for l in t.splitlines()
                           if l.startswith("HX-TEST") or l.startswith("HX-IMG"))
         imgs = re.findall(r"^HX-IMG (\S+)", base, re.M)
-        same = all(same_screen(os.path.join(ROOT, "out", "hello-%s-base-%s" % (kind, boot), i + ".png"),
-                               os.path.join(ROOT, "out", "hello-%s-glos-%s" % (kind, boot), i + ".png")) for i in imgs)
+        sfx = os.environ.get("LOOPA_SUFFIX", "")   # (run() puts each run's files under its name and the suffix)
+        same = all(same_screen(os.path.join(ROOT, "out", "hello-%s-base-%s%s" % (kind, boot, sfx), i + ".png"),
+                               os.path.join(ROOT, "out", "hello-%s-glos-%s%s" % (kind, boot, sfx), i + ".png"))
+                   for i in imgs)
         unimpl = set(re.findall(r"GLOS-DPMI-UNIMPL \S+ ax=(\w+)", gl))
         res[kind] = (st0 == "PASS" and st1 == "PASS" and lines(gl) == lines(base) and lines(base) != [] and same
                      and "GLOS-DPMI start" in gl and "GLOS-PANIC" not in gl and "GLOS-CRASH" not in gl
@@ -1345,6 +1347,25 @@ def dpmi_hello(boot):
     bad = [k for k, v in res.items() if not v]
     return "  %-22s %s%s" % ("hello-bf6-" + boot, "PASS" if not bad else "FAIL",
                              "" if not bad else " failed: " + " ".join(bad) + info), not bad
+
+
+def lazy_oom(profile, boot):
+    """LAZYCHK OOM: a client that touches more lazily backed memory than there is gets its page fault (DJGPP's
+    SIGSEGV), GLOS says GLOS-WARN dpmi-no-memory once for it (the client retries nothing, but the line is once a
+    context whatever it does), and GLOS goes on: the batch's next line runs, nothing panics."""
+    tag = "%s-%s" % (profile, boot)
+    st, gl = run("lazyoom-" + tag, ["--machine", profile, "--boot-cfg", boot,
+                                    "--file", "build/dj/LAZYCHK.EXE=/TEST/LAZYCHK.EXE", "--timeout", "300",
+                                    "--cmd", "SERSAY HX-START lazyoom"] + GLOS_FILES + [
+        "--cmd", "C:\\TEST\\GLOS.EXE /RUN C:\\TEST\\LAZYCHK.EXE OOM", "--cmd", "SERSAY HX-DONE 0"])
+    warns = re.findall(r"GLOS-WARN dpmi-no-memory lin=[0-9a-f]{8} psp=[0-9a-f]{4} free_kb=\d+ held_kb=\d+ "
+                       r"unbacked_kb=\d+", gl)
+    checks = {"status": st == "PASS", "touched": "HX-LAZY oom-touch" in gl and "HX-LAZY oom-survived" not in gl,
+              "warned": len(warns) == 1 and gl.count("GLOS-WARN dpmi-no-memory") == 1,
+              "clean": "GLOS-PANIC" not in gl and "GLOS-CRASH" not in gl and "HX-DONE 0" in gl}
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % ("lazyoom-" + tag, "PASS" if not bad else "FAIL", " " + warns[0][9:] if warns else "",
+                               "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
 def lazy(profile, boot):
@@ -14431,6 +14452,7 @@ def main():
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "dpmi":
         res = matrix(dpmi, combos, a.jobs) + matrix(dpmiconf, combos, a.jobs) + matrix(lazy, combos, a.jobs)
+        res += matrix(lazy_oom, combos, a.jobs)
         res += matrix(cachewc, combos, a.jobs) + matrix(rmdeep, combos, a.jobs)
         res += matrix(dpmi_hello, [(b,) for b in a.boot or BOOTS], a.jobs)
         return 0 if all(r[1] for r in res) else 1
