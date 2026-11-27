@@ -62,11 +62,41 @@ static u32 bar_size(int b, int d, int f, int r, int rom)
 
 static int present(int b, int d, int f) { return (cfg(b, d, f, 0) & 0xFFFF) != 0xFFFF; }
 
+/* Ranges the BIOS placed (keep) that its bridge's window doesn't hold: the window widened to hold them, in 1 MB
+   steps, where nothing else is (busy, and other the card's own bridge's other window). 1 if the window changed.
+   Bench C after the G450 moved to slot 1 (2026-11-27): the BIOS put its 32 MB frame buffer at FC000000 and opened
+   its bridge's prefetchable window to FC8FFFFF alone, so past 9 MB nothing of it was reachable (GLOS's Matrox
+   driver found 9 MB of 16). */
+static int fit(struct pa_range *win, const struct pa_range *keep, int n, const struct pa_range *busy, int nbusy,
+               const struct pa_range *other)
+{
+    unsigned long lo = win->base, hi = win->last;
+    int k, empty = win->base > win->last;
+    for (k = 0; k < n; k++)
+        if (empty)
+            lo = keep[k].base & ~0xFFFFFul, hi = keep[k].last | 0xFFFFF, empty = 0;
+        else {
+            if (keep[k].base < lo)
+                lo = keep[k].base & ~0xFFFFFul;
+            if (keep[k].last > hi)
+                hi = keep[k].last | 0xFFFFF;
+        }
+    if (empty || (lo == win->base && hi == win->last))
+        return 0;
+    for (k = 0; k < nbusy; k++)
+        if (busy[k].base <= hi && busy[k].last >= lo)
+            return 0;                           /* (taken: as it was, and what's past it unreachable) */
+    if (other->base <= other->last && other->base <= hi && other->last >= lo)
+        return 0;
+    win->base = lo, win->last = hi;
+    return 1;
+}
+
 void pcicard_place(const struct bootinfo *bi)
 {
     struct pa_range busy[48], keep_pf[6];
     u32 bar[6], size[6], np, pf, top = 0, i;
-    int nbusy = 0, npf = 0, b, d, f, k, unplaced = 0;
+    int nbusy = 0, npf = 0, b, d, f, k, unplaced = 0, widened = 0;
     char why[48];
 
     if (!(bi->display_card & BI_CARD_SET))
@@ -151,8 +181,10 @@ void pcicard_place(const struct bootinfo *bi)
             }
         memcpy(busy_kept, busy, sizeof busy[0] * (u32)nbusy);
         nbusy_kept = nbusy;
+        widened = bd >= 0 && (fit(&win_np, keep_np, nkeep_np, busy, nbusy, &win_pf)
+                              | fit(&win_pf, keep_pf, npf, busy, nbusy, &win_np));
         card_np_lo = (u32)win_np.base, card_np_hi = (u32)win_np.last;
-        if (!unplaced) {                        /* (all placed by the BIOS: only its BIOS to run) */
+        if (!unplaced && !widened) {            /* (all placed by the BIOS, its windows holding them: its BIOS to run) */
             kprintf("GLOS-CARD placed card=%02x:%02x.%u by=bios\n", cb, cd, cf);
             on = 1;
             return;
@@ -191,8 +223,9 @@ void pcicard_place(const struct bootinfo *bi)
             wcfg(0, bd, bf, 4, cfg(0, bd, bf, 4) | 6);
         wcfg(cb, cd, cf, 4, (cfg(cb, cd, cf, 4) & ~0x400u) | 6);
         card_np_lo = (u32)win_np.base, card_np_hi = (u32)win_np.last;
-        kprintf("GLOS-CARD placed card=%02x:%02x.%u by=glos bridge=%s mem=%08x-%08x prefetch=%08x-%08x\n", cb, cd, cf,
-                bd >= 0 ? "yes" : "none", (u32)win_np.base, (u32)win_np.last, (u32)win_pf.base, (u32)win_pf.last);
+        kprintf("GLOS-CARD placed card=%02x:%02x.%u by=%s bridge=%s mem=%08x-%08x prefetch=%08x-%08x\n", cb, cd, cf,
+                unplaced ? "glos" : "bios windows=glos", bd >= 0 ? "yes" : "none", (u32)win_np.base, (u32)win_np.last,
+                (u32)win_pf.base, (u32)win_pf.last);
     }
     on = 1;
 }
