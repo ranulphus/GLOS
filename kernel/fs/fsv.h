@@ -102,4 +102,16 @@ int fsv_opendir(struct fsv_vol *v, const char *path, struct fat_dir *d);
 int fsv_readdir(struct fsv_vol *v, struct fat_dir *d, struct fat_ent *e);
 int fsv_free(struct fsv_vol *v, unsigned long *clusters);
 
+/* The volume's label (fat.h's label calls under the lock). fsv_setlabel, as MS-DOS 7.1's LABEL.EXE sets one (the
+   old label deleted, then the new one made: the root folder's entry and the boot sector's copy), from a string of
+   the code page's bytes: 11 at most, spaces allowed, a-z made upper case, none of * ? / \ | . , ; : + = < > [ ] "
+   nor control characters (FAT_EINVAL); "" deletes it. 0, or an error (FAT_EROFS read-only, FAT_EIO, ...). */
+int fsv_label_get(struct fsv_vol *v, unsigned char out[11], unsigned char entry[32]);
+int fsv_label_make(struct fsv_vol *v, const unsigned char name11[11]);
+int fsv_label_rename(struct fsv_vol *v, const unsigned char name11[11]);
+int fsv_label_delete(struct fsv_vol *v);
+int fsv_set_media(struct fsv_vol *v, unsigned long serial, const unsigned char label[11],
+                  const unsigned char fstype[8]);
+int fsv_setlabel(struct fsv_vol *v, const char *label);
+
 #endif

@@ -718,6 +718,61 @@ static int write_test(const char *image, const char *mirror_dir, unsigned long c
     return 0;
 }
 
+/* label IMAGE: the volume's label through fat.c's calls, as DOS's FCB calls (16h, 17h, 13h), 440Dh 0846h and
+   LABEL.EXE change it, ending with "GLOS LABEL" in the root folder and the boot sector and serial number
+   1234-ABCD: fat_test.sh then asks mtools and fsck.fat what they make of the volume. */
+static int label_test(const char *image)
+{
+    struct fat_vol v;
+    struct fat_dir d;
+    struct fat_ent e;
+    unsigned char n[11];
+    int r, seen = 0;
+
+    img = fopen(image, "r+b");
+    if (!img) {
+        fail("image", image);
+        return 1;
+    }
+    if ((r = fat_mount_rw(&v, rd, wr, fixed_now, 0, 850)) != 0) {
+        printf("FAIL mount: %d\n", r);
+        return 1;
+    }
+    r = fat_label_delete(&v);                   /* (the volume's own, if it has one) */
+    if (r && r != FAT_ENOENT)
+        printf("FAIL delete the first: %d\n", r), fails++;
+    if (fat_label_get(&v, n, 0) != 0 || fat_label_delete(&v) != FAT_ENOENT)
+        fail("label", "one left after deleting");
+    if (!r && strcmp(v.label, "NO NAME"))
+        printf("FAIL boot sector after deleting: \"%s\"\n", v.label), fails++;
+    if (fat_label_make(&v, (const unsigned char *)"FIRST      ") != 0 || fat_label_get(&v, n, 0) != 1
+        || memcmp(n, "FIRST      ", 11) || strcmp(v.label, "FIRST"))
+        printf("FAIL make: \"%s\"\n", v.label), fails++;
+    if (fat_label_make(&v, (const unsigned char *)"SECOND     ") != FAT_EEXIST)
+        fail("make", "a second label");
+    if (fat_label_rename(&v, (const unsigned char *)"RENAMED    ") != 0 || fat_label_get(&v, n, 0) != 1
+        || memcmp(n, "RENAMED    ", 11) || strcmp(v.label, "FIRST"))
+        printf("FAIL rename: \"%.11s\" boot \"%s\"\n", n, v.label), fails++;
+    if (fat_label_rename(&v, (const unsigned char *)"BAD?NAME   ") != FAT_EINVAL
+        || fat_label_rename(&v, (const unsigned char *)"           ") != FAT_EINVAL)
+        fail("rename", "a '?' or blanks taken");
+    if (fat_set_media(&v, 0x1234ABCDUL, (const unsigned char *)"MEDIA ID   ", 0) != 0 || v.serial != 0x1234ABCDUL
+        || strcmp(v.label, "MEDIA ID") || fat_label_get(&v, n, 0) != 1 || memcmp(n, "RENAMED    ", 11))
+        printf("FAIL set media: \"%s\" %08lx\n", v.label, v.serial), fails++;
+    if (fat_label_delete(&v) != 0 || fat_label_make(&v, (const unsigned char *)"GLOS LABEL ") != 0)
+        fail("label", "the last made");
+    if (fat_opendir(&v, "\\", &d) == 0)         /* (no folder listing shows it) */
+        while (fat_readdir(&d, &e) == 1)
+            seen += (e.attr & FAT_A_LABEL) != 0;
+    if (seen)
+        fail("readdir", "the label listed");
+    if ((r = fat_flush(&v)) != 0)
+        printf("FAIL flush: %d\n", r), fails++;
+    fclose(img);
+    printf("LABEL fat=%d\n", v.fat);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     if (argc == 5 && !strcmp(argv[1], "format"))
@@ -732,6 +787,12 @@ int main(int argc, char **argv)
         printf("fat_test: %d failures\n", fails);
         return fails != 0;
     }
-    fprintf(stderr, "fat_test format IMAGE SECTORS FAT | check IMAGE MANIFEST CP LABEL | write IMAGE MIRROR [CUT]\n");
+    if (argc == 3 && !strcmp(argv[1], "label")) {
+        label_test(argv[2]);
+        printf("fat_test: %d failures\n", fails);
+        return fails != 0;
+    }
+    fprintf(stderr, "fat_test format IMAGE SECTORS FAT | check IMAGE MANIFEST CP LABEL | write IMAGE MIRROR [CUT]"
+            " | label IMAGE\n");
     return 2;
 }

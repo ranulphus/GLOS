@@ -437,6 +437,35 @@ static void t_later(void)
     fsv_flush(&vol);
 }
 
+/* fsv_setlabel, as LABEL.EXE sets a label: the old one gone, the new one made in capitals (both places), names
+   LABEL refuses refused with the label left as it was, "" for none; a file named as the label is still a file. */
+static void t_label(void)
+{
+    unsigned char n[11];
+    struct fsv_file f;
+    struct fat_ent e;
+
+    fresh();
+    CHECK(fsv_label_get(&vol, n, 0) == 1 && !memcmp(n, "FSV TEST   ", 11), "the formatter's label");
+    CHECK(fsv_setlabel(&vol, "new disk") == 0, "set");
+    CHECK(fsv_label_get(&vol, n, 0) == 1 && !memcmp(n, "NEW DISK   ", 11), "set: \"%.11s\"", n);
+    CHECK(!memcmp(disk + 43, "NEW DISK   ", 11) && !strcmp(vol.fat.label, "NEW DISK"), "set: the boot sector's");
+    CHECK(fsv_setlabel(&vol, "bad.name") == FAT_EINVAL && fsv_setlabel(&vol, "twelve chars") == FAT_EINVAL
+          && fsv_setlabel(&vol, "a*b") == FAT_EINVAL && fsv_setlabel(&vol, "tab\there") == FAT_EINVAL,
+          "names LABEL refuses");
+    CHECK(fsv_label_get(&vol, n, 0) == 1 && !memcmp(n, "NEW DISK   ", 11), "a refused name changed it");
+    CHECK(fsv_setlabel(&vol, "ELEVEN CHRS") == 0 && fsv_label_get(&vol, n, 0) == 1 && !memcmp(n, "ELEVEN CHRS", 11),
+          "eleven characters");
+    CHECK(fsv_label_make(&vol, (const unsigned char *)"ANOTHER    ") == FAT_EEXIST, "a second label made");
+    CHECK(fsv_create(&vol, "\\ELEVEN", 0, 0, FSV_RW, FSV_DENY_NONE, &f) == 0, "a file named as the label");
+    fsv_close(&f);
+    CHECK(fsv_lookup(&vol, "\\ELEVEN", &e) == 0 && !(e.attr & FAT_A_LABEL), "the file is a file");
+    CHECK(fsv_setlabel(&vol, "") == 0 && fsv_label_get(&vol, n, 0) == 0, "deleted");
+    CHECK(!memcmp(disk + 43, "NO NAME    ", 11), "deleted: the boot sector's");
+    CHECK(fsv_setlabel(&vol, "") == 0, "deleted again");
+    CHECK(fsv_lookup(&vol, "\\ELEVEN", &e) == 0, "the file left");
+}
+
 int main(void)
 {
     disk = malloc(SECTORS * 512);
@@ -448,6 +477,7 @@ int main(void)
     t_limit();
     t_listing();
     t_later();
+    t_label();
     CHECK(!held, "the lock left held");
     CHECK(takes > 100, "the lock taken %d times", takes);
     printf("fsv_test: %d failures\n", fails);

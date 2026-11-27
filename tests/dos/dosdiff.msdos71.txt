@@ -1,4 +1,4 @@
-DOSDIFF 4
+DOSDIFF 5
 30h00 ax=0A07 bh=FF
 30h01 ax=0A07 bh=00
 3306h bx=0A07 dx=0000
@@ -146,6 +146,32 @@ F13h FCB*.DAT al=00 new=4294967295 read-only=9 hidden=6
 F13h again al=FF
 F13h hidden too al=00 hidden=4294967295
 F13h no file al=FF
+L 0846h init cf=0
+L start        al=FF root=none boot="DDIFF INIT " 4Eh=none
+L 13h none al=FF
+L 16h make     al=00 close=00
+L made         al=00 root="DDIFF LABEL"28 boot="DDIFF LABEL" 4Eh="DDIFF LA.BEL"
+L made entry res=00 c10=0 ctime=0 cdate=0 adate=0 hi=0000 wtime=set wdate=set cl=0000 size=0
+L 4Eh label cf=0 name="DDIFF LA.BEL" attr=28
+L 16h another  al=FF
+L another      al=00 root="DDIFF LABEL"28 boot="DDIFF LABEL" 4Eh="DDIFF LA.BEL"
+L 17h rename al=00
+L renamed      al=00 root="DDIFF REN  "28 boot="DDIFF LABEL" 4Eh="DDIFF RE.N"
+L 13h delete al=00
+L deleted      al=FF root=none boot="NO NAME    " 4Eh=none
+L 16h lower    al=00 close=00
+L lower        al=00 root="DDIFF LOWER"28 boot="DDIFF LOWER" 4Eh="DDIFF LO.WER"
+L 16h wild     al=FF
+L wild         al=FF root=none boot="NO NAME    " 4Eh=none
+L 16h dot      al=00 close=00
+L dot          al=00 root="DD      IFF"28 boot="DD      IFF" 4Eh="DD.IFF"
+L 16h blank    al=FF
+L blank        al=FF root=none boot="NO NAME    " 4Eh=none
+L 16h root     al=00 close=00
+L 0846h set cf=0
+L set          al=00 root="DDIFF ROOT "28 boot="DDIFF SET  " 4Eh="DDIFF RO.OT"
+L 13h last al=00
+L last         al=FF root=none boot="NO NAME    " 4Eh=none
 S3700h al=00 dl=2F
 S3701h al=01 then dl=2F
 S3702h al=02 dl=FF

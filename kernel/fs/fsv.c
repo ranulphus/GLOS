@@ -494,3 +494,82 @@ int fsv_free(struct fsv_vol *v, unsigned long *clusters)
     unlock(v);
     return r;
 }
+
+/* ---- the volume's label (fat.c's, under the lock) */
+
+int fsv_label_get(struct fsv_vol *v, unsigned char out[11], unsigned char entry[32])
+{
+    int r;
+
+    lock(v);
+    r = fat_label_get(&v->fat, out, entry);
+    unlock(v);
+    return r;
+}
+
+int fsv_label_make(struct fsv_vol *v, const unsigned char name11[11])
+{
+    int r;
+
+    lock(v);
+    r = fat_label_make(&v->fat, name11);
+    unlock(v);
+    return r;
+}
+
+int fsv_label_rename(struct fsv_vol *v, const unsigned char name11[11])
+{
+    int r;
+
+    lock(v);
+    r = fat_label_rename(&v->fat, name11);
+    unlock(v);
+    return r;
+}
+
+int fsv_label_delete(struct fsv_vol *v)
+{
+    int r;
+
+    lock(v);
+    r = fat_label_delete(&v->fat);
+    unlock(v);
+    return r;
+}
+
+int fsv_set_media(struct fsv_vol *v, unsigned long serial, const unsigned char label[11],
+                  const unsigned char fstype[8])
+{
+    int r;
+
+    lock(v);
+    r = fat_set_media(&v->fat, serial, label, fstype);
+    unlock(v);
+    return r;
+}
+
+int fsv_setlabel(struct fsv_vol *v, const char *label)
+{
+    unsigned char n11[11];
+    size_t i, n = strlen(label);
+    int r;
+
+    if (n > 11)
+        return FAT_EINVAL;
+    memset(n11, ' ', 11);
+    for (i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)label[i];
+
+        if (c < 0x20 || strchr("*?/\\|.,;:+=<>[]\"", c))
+            return FAT_EINVAL;
+        n11[i] = (unsigned char)(c >= 'a' && c <= 'z' ? c - 32 : c);
+    }
+    lock(v);
+    r = fat_label_delete(&v->fat);              /* (LABEL.EXE's own way: the old one deleted, the new one made) */
+    if (r == FAT_ENOENT)
+        r = FAT_OK;
+    if (!r && n)
+        r = fat_label_make(&v->fat, n11);
+    unlock(v);
+    return r;
+}
