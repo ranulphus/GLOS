@@ -81,7 +81,10 @@ struct sconn {
     struct ssh_conn *conn;                      /* the ssh thread's */
     struct ring rx, tx;
     u32 since;
+    u32 done_at;                                /* the net thread's: when it first saw ssh_done (0: not yet) */
 };
+
+#define LINGER     (3 * 1024)                   /* ticks a done session's output may take to drain: then dropped */
 
 static struct sconn conns[NCONN];
 static struct ssh_server srv;
@@ -196,6 +199,7 @@ static err_t on_accept(void *arg, struct tcp_pcb *pcb, err_t err)
     conns[i].rx.head = conns[i].rx.tail = conns[i].tx.head = conns[i].tx.tail = 0;
     conns[i].pcb = pcb;
     conns[i].since = timer_ticks();
+    conns[i].done_at = 0;
     tcp_arg(pcb, &conns[i]);
     tcp_recv(pcb, on_recv);
     tcp_sent(pcb, on_sent);
@@ -306,6 +310,20 @@ void sshd_net_poll(void)
            the peer's reset, a client killed with `glos log --follow` still writing) leaves no pcb to drain the
            ring by, and the slot was kept for ever: four such and every new connection refused, reason=busy
            (bench C, 2026-11-27, found by ROSS). What is left in the ring goes with it. */
+        /* A session that is over may not keep its slot past LINGER for output nobody takes: a peer that closed its
+           side and reads no more leaves tcp_sndbuf at 0 and the ring full for ever, its pcb still there (bench C,
+           2026-11-27, ROSS: slots kept after graceful closes with `glos log --follow`'s bytes queued, then busy). */
+        if (s->ssh_done && !s->done_at)
+            s->done_at = timer_ticks() | 1;
+        if (s->ssh_done && s->pcb && ring_used(&s->tx) && timer_ticks() - s->done_at > LINGER) {
+            kprintf("GLOS-SSH freed slot=%u why=stuck-close bytes=%u\n", (u32)i, ring_used(&s->tx));
+            tcp_arg(s->pcb, NULL);
+            tcp_recv(s->pcb, NULL);
+            tcp_sent(s->pcb, NULL);
+            tcp_err(s->pcb, NULL);
+            tcp_abort(s->pcb);
+            s->pcb = NULL;
+        }
         if (s->ssh_done && (!ring_used(&s->tx) || !s->pcb)) {
             s->tx.head = s->tx.tail = 0;
             s->rx.head = s->rx.tail = 0;
