@@ -92,6 +92,29 @@ static int fit(struct pa_range *win, const struct pa_range *keep, int n, const s
     return 1;
 }
 
+/* Is every range of keep inside win (an empty window holds none)? */
+static int held(const struct pa_range *win, const struct pa_range *keep, int n)
+{
+    int k;
+    for (k = 0; k < n; k++)
+        if (win->base > win->last || keep[k].base < win->base || keep[k].last > win->last)
+            return 0;
+    return 1;
+}
+
+/* Do any two of the card's ranges overlap? */
+static int overlap(const struct pa_range *a, int na, const struct pa_range *b, int nb)
+{
+    int i, j;
+    for (i = 0; i < na + nb; i++)
+        for (j = i + 1; j < na + nb; j++) {
+            const struct pa_range *x = i < na ? &a[i] : &b[i - na], *y = j < na ? &a[j] : &b[j - na];
+            if (x->base <= y->last && y->base <= x->last)
+                return 1;
+        }
+    return 0;
+}
+
 void pcicard_place(const struct bootinfo *bi)
 {
     struct pa_range busy[48], keep_pf[6];
@@ -183,6 +206,22 @@ void pcicard_place(const struct bootinfo *bi)
         nbusy_kept = nbusy;
         widened = bd >= 0 && (fit(&win_np, keep_np, nkeep_np, busy, nbusy, &win_pf)
                               | fit(&win_pf, keep_pf, npf, busy, nbusy, &win_np));
+        if (bd >= 0 && !(cfg(0, bd, bf, 0x3C) >> 16 & 8)     /* (its bridge's VGA Enable off: not the BIOS's display) */
+            && (overlap(keep_np, nkeep_np, keep_pf, npf) || !held(&win_np, keep_np, nkeep_np)
+                || !held(&win_pf, keep_pf, npf))) {
+            /* the BIOS's placing unusable: its ranges on one another (bench C, the G450 in slot 1: the frame buffer
+               at FC000000, 32 MB, its registers at FD000000 inside it), or out of reach through the bridge. The card
+               isn't the BIOS's display (that one's ranges are never moved), so all of it placed again, the bridge's
+               windows anew */
+            kprintf("GLOS-CARD bios-placing refused card=%02x:%02x.%u why=%s\n", cb, cd, cf,
+                    overlap(keep_np, nkeep_np, keep_pf, npf) ? "overlap" : "out-of-window");
+            for (k = 0; k < 6; k++)
+                if (size[k] && (bar[k] & 0xFFFFFFF0u))
+                    bar[k] &= 0xF, unplaced++;
+            nkeep_np = npf = 0;
+            win_np.base = win_pf.base = 1, win_np.last = win_pf.last = 0;
+            widened = 0;
+        }
         card_np_lo = (u32)win_np.base, card_np_hi = (u32)win_np.last;
         if (!unplaced && !widened) {            /* (all placed by the BIOS, its windows holding them: its BIOS to run) */
             kprintf("GLOS-CARD placed card=%02x:%02x.%u by=bios\n", cb, cd, cf);
