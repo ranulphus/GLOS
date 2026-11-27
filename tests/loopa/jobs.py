@@ -4287,7 +4287,7 @@ def display_case(profile, vcard, card, cfg_mode, accel="on"):
         "--cmd", "VECCHK check", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"], timeout=1800)
     agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
                    "-o", "ControlPersist=600"]
-    out = os.path.join(ROOT, "out", "display-" + tag)
+    out = os.path.join(ROOT, "out", agent.proc.run_name)   # (LOOPA_SUFFIX: the run's own folder)
     checks, info = {"listen": agent.listening()}, ""
 
     def state(want, limit=60):                  # glos display's line once it starts with `want`
