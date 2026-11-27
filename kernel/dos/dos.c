@@ -154,6 +154,8 @@ static void get_regs(u32 lin, struct dos_regs *r)
     r->dx = vm_rd16(lin + 6);
     r->si = vm_rd16(lin + 8);
     r->di = vm_rd16(lin + 10);
+    r->ds = vm_rd16(lin + 12);                  /* (the stub stores them back too: INT 21h 52h's ES:BX, MEM's chain) */
+    r->es = vm_rd16(lin + 14);
     r->flags = vm_rd16(lin + 16);
 }
 
@@ -242,9 +244,7 @@ int dos_vm_next_for(void *via, int ran, u32 regs_lin, u16 seg, u32 paras)
             xfer_seg = 0;
             xfer_paras = 0;
         } else if (state == ST_CALLS && cur) {
-            r.ds = cur->r[step].ds;
-            r.es = cur->r[step].es;
-            cur->r[step] = r;
+            cur->r[step] = r;                   /* (DS and ES as DOS left them too: 52h's ES:BX, 2Fh's DTA) */
             cur->ran = step + 1;
             if ((r.flags & 1) || ++step == cur->n) {
                 cur->error = (r.flags & 1) ? r.ax : 0;

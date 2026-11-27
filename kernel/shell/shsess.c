@@ -652,7 +652,9 @@ static int mcb_chain(struct shsess *s, struct sh_mem_block *b, int max)
     call(s, 0, 0x5200, 0, 0, 0);
     if (made(s) != 0)
         return -1;
-    seg = vm_rd16(vm_lin(s->q.r[0].es, (u16)(s->q.r[0].bx - 2)));
+    /* The first block's segment, the word before the List of Lists: FreeDOS keeps that list in the high memory
+       area (FFFF:0026), which the VM's view wraps to the interrupt table while its A20 is off. */
+    seg = vm_rd16_a20(vm_lin(s->q.r[0].es, (u16)(s->q.r[0].bx - 2)));
     req(s);
     call(s, 0, 0x5802, 0, 0, 0);
     if (made(s) == 0 && !(was = s->q.r[0].ax & 0xFF)) {

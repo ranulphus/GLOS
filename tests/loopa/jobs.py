@@ -2135,6 +2135,73 @@ def killed_case(profile, card):
     return "  %-22s %s%s" % (tag, "PASS" if not bad else "FAIL", " failed: " + " ".join(bad) if bad else ""), not bad
 
 
+def cli_case(profile, card):
+    """The command-line tools of C1 (docs/v1/cli.md, 2026-11-27) on a real GLOS, over SSH: what the host tests can't
+    show, the kernel's side. MEM's figures from DOS's own MCB chain and GLOS's XMS (640K conventional, a free block
+    that is most of it), MEM /C's program list; CHKDSK's summary from the volume's figures; TREE, LABEL (shown),
+    KEYB and MODE's status; FIND, SORT and FC through pipes and files; DISK C: (the partition behind a letter); and
+    FORMAT C:, SYS C: and FDISK, which must refuse or only say what they would do on the disk GLOS runs from.
+    Everything said goes to out/ssh-cli-*/cli.txt for the eye."""
+    tag = "cli-%s-%s" % (profile, card)
+    agent = Agent("ssh-" + tag, profile, card, ["--cmd", "SERSAY HX-START cli", "--cmd", "C:\\TEST\\GLOS.EXE",
+                                                "--cmd", "SERSAY HX-DONE 0"], timeout=900)
+    checks = {"listen": agent.listening()}
+    said = []
+
+    def run(cmd):
+        rc, out, err = agent.ssh(cmd, timeout=120)
+        said.append("> %s  (exit %d)\n%s%s" % (cmd, rc, out, err))
+        return rc, out + err
+    try:
+        rc, out = run("mem")
+        m = re.search(r"Conventional\s+(\d+)K", out)
+        big = re.search(r"Largest executable program size\s+(\d+)K", out)
+        checks["mem"] = rc == 0 and m is not None and int(m.group(1)) == 640 and big is not None \
+            and 400 <= int(big.group(1)) <= 640
+        rc, out = run("mem /c")
+        checks["mem-c"] = rc == 0 and "COMMAND" in out.upper()
+        rc, out = run("chkdsk c:")
+        checks["chkdsk"] = rc == 0 and "bytes total disk space" in out and "bytes available on disk" in out
+        rc, out = run("tree c:\\test")
+        checks["tree"] = rc in (0, 1) and ("Folder PATH listing" in out or "Directory PATH listing" in out
+                                           or "No subdirectories exist" in out)
+        rc, out = run("label c:")
+        checks["label"] = "Volume Serial Number is" in out
+        rc, out = run("keyb")
+        checks["keyb"] = "Current keyboard code" in out
+        rc, out = run("mode con")
+        checks["mode"] = "Columns=" in out and "Lines=" in out
+        run("echo pear> c:\\test\\f1.txt")
+        run("echo apple>> c:\\test\\f1.txt")
+        run("echo pear> c:\\test\\f2.txt")
+        rc, out = run("type c:\\test\\f1.txt | sort")
+        checks["sort"] = rc == 0 and out.replace("\r", "").startswith("apple\npear")
+        rc, out = run("find /c \"pear\" c:\\test\\f1.txt")
+        checks["find"] = rc == 0 and re.search(r"F1\.TXT: 1", out.upper()) is not None
+        rc, out = run("fc c:\\test\\f1.txt c:\\test\\f2.txt")
+        checks["fc"] = "Comparing files" in out and "*****" in out
+        rc, out = run("disk c:")
+        checks["disk-letter"] = rc == 0 and "partition" in out.lower()
+        rc, out = run("format c:")
+        checks["format-refused"] = rc != 0 or "would" in out.lower() or "refuse" in out.lower() or "/y" in out.lower()
+        rc, out = run("sys c:")
+        checks["sys-refused"] = rc != 0 or "would" in out.lower() or "/y" in out.lower()
+        rc, out = run("fdisk")
+        checks["fdisk"] = "DISK" in out
+        checks["net"] = agent.ssh("glos ver")[0] == 0
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    finally:
+        with open(os.path.join(ROOT, "out", "ssh-" + tag, "cli.txt"), "w") as f:
+            f.write("\n".join(said))
+    text = agent.wait()
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text)
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % (tag, "PASS" if not bad else "FAIL", " failed: " + " ".join(bad) if bad else ""), not bad
+
+
 def idle_case(profile, card):
     """The prompt on the PC's own screen (GLOS with no desktop; kernel/shell/lcon.c, docs/v1/shell.md S2d), the
     screen read as text (glos shot --text) and typed at as at its keyboard (glos type): the start-up lines (how
@@ -14229,6 +14296,8 @@ def main():
                 print("    %s-%s XMSTEST: %s" % (p, b, "; ".join(l[11:] for l in r[2])))
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "ssh":
+        if os.environ.get("SSH_ONLY") == "cli":         # (SSH_ONLY=cli: the command-line tools' cases alone)
+            return 0 if all(r[1] for r in matrix(cli_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)) else 1
         if os.environ.get("SSH_ONLY") == "batch":       # (SSH_ONLY=batch: the batch files' cases alone; SSH_PROFILE)
             cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")]
                      if not os.environ.get("SSH_PROFILE") or c[0] == os.environ["SSH_PROFILE"]]
@@ -14244,6 +14313,7 @@ def main():
             res += matrix(devices_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
             res += matrix(idle_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
             res += matrix(killed_case, [("bf6", "ne2kpci")], a.jobs)
+            res += matrix(cli_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
             res += matrix(shell_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
             res += matrix(cable_case, [("bf6", "ne2kpci"), ("486dx2", "none"), ("bf6", "off")], a.jobs)
             res += matrix(batch_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)

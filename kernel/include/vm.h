@@ -128,6 +128,7 @@ void vm_kill_now(struct trapframe *tf);         /* the kill (Ctrl-Alt-Shift-Esc'
 int vm_restore_child(void);                     /* after DOS aborted the current PSP's child: as a kill leaves it */
 void vm_idle(u32 until);                        /* block until a deliverable IRQ, a kill or tick `until` (0: none) */
 void vm_set_a20(int on);
+u16 vm_rd16_a20(u32 lin);                       /* a word of the VM's memory, the HMA's as with A20 on (any context) */
 void vm_sync_mask(void);                        /* the physical IMR from the virtual one */
 void vm_direct(int on);                         /* a direct-mode session begins (1) or ends (0) */
 void vm_claim_irq(int irq, void (*fn)(struct trapframe *));    /* the line becomes the kernel's */

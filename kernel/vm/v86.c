@@ -463,6 +463,23 @@ void vm_set_a20(int on)
     mm_set_a20(vm.a20);
 }
 
+/* A word of the system VM's memory, the high memory area's as it is with A20 on, whatever the VM's A20 is now: DOS's
+   tables kept high (FreeDOS's List of Lists, INT 21h 52h's FFFF:0026, for MEM's chain). A20 is on for the read
+   alone, with interrupts off, and as the VM had it again after. */
+u16 vm_rd16_a20(u32 lin)
+{
+    u32 f;
+    u16 v;
+    if (lin < 0x100000 || vm.a20)
+        return vm_rd16(lin);
+    f = irq_save();
+    mm_set_a20(1);
+    v = vm_rd16(lin);
+    mm_set_a20(vm.a20);
+    irq_restore(f);
+    return v;
+}
+
 /* The idle screen: GLOS with no desktop and nothing running, the stub waiting for a command. The screen says
    so (vcon_notice) and Ctrl-Alt-Del restarts the PC, as it would under DOS, so that a PC in that state is not
    taken for one that has stopped (the 486 bench, 2026-11-12). A temporary rule: GLOS's shell has that screen
