@@ -32,6 +32,10 @@
 #define MAXBUS 8
 
 static int on;                                  /* placed: the card is to be started */
+/* What pcicard_start changed that DOS must have back when a hosted GLOS leaves (pcicard_leave): the PC's INT 10h
+   (the old display's BIOS) and INT 6Dh, the old display's command word and its place, the card's bridge's control
+   word. started: there is something to give back. */
+static struct { int started, ob, od, of; u32 v10, v6d, ocmd, bctl; } was = { 0, -1, 0, 0, 0, 0, 0, 0 };
 static int cb, cd, cf, bd = -1, bf;             /* the card; its bridge on bus 0 (bd -1: none, the card on bus 0) */
 static u32 rom_size;
 static u32 card_np_lo, card_np_hi;              /* (the bridge's memory window, for the ROM's reading) */
@@ -331,9 +335,14 @@ int pcicard_start(u32 stack_seg, u32 stack_bytes)
                     break;
                 }
             }
-    if (ob >= 0)
+    was.started = 1, was.ob = ob, was.od = od, was.of = of;
+    was.v10 = vec(0x10), was.v6d = vec(0x6D);
+    if (ob >= 0) {
+        was.ocmd = cfg(ob, od, of, 4) & 0xFFFF;
         wcfg(ob, od, of, 4, cfg(ob, od, of, 4) & ~3u);
+    }
     if (bd >= 0) {
+        was.bctl = cfg(0, bd, bf, 0x3C) >> 16 & 0xFFFF;
         wcfg(0, bd, bf, 0x3C, cfg(0, bd, bf, 0x3C) | (8u << 16));
         wcfg(0, bd, bf, 4, cfg(0, bd, bf, 4) | 7);
     }
@@ -372,4 +381,24 @@ int pcicard_start(u32 stack_seg, u32 stack_bytes)
         kprintf("GLOS-CARD mode3 by=bios\n");
     }
     return 0;
+}
+
+/* A hosted GLOS leaves (v86.c's vm_leave, after display_leave): DOS gets the PC back as its BIOS had it. The card's
+   BIOS was in GLOS's own pages at C0000h, which go with GLOS: left as it was, INT 10h would point into the middle
+   of the old display's BIOS, which is what C0000h holds without GLOS (bench C, 2026-11-27: the next GLOS.EXE hung
+   at its first line on the screen). So INT 10h and INT 6Dh as they were before the card's start, the card's
+   bridge's VGA Enable off again, and the old display's decode on: it shows DOS's screen as before. */
+void pcicard_leave(void)
+{
+    if (!was.started)
+        return;
+    set_vec(0x10, was.v10);
+    set_vec(0x6D, was.v6d);
+    if (bd >= 0)
+        wcfg(0, bd, bf, 0x3C, (cfg(0, bd, bf, 0x3C) & 0xFFFFu) | was.bctl << 16);
+    if (was.ob >= 0)
+        wcfg(was.ob, was.od, was.of, 4, (cfg(was.ob, was.od, was.of, 4) & ~0xFFFFu) | was.ocmd);
+    kprintf("GLOS-CARD left card=%02x:%02x.%u int10=%04x:%04x old=%02x:%02x.%u\n", cb, cd, cf, was.v10 >> 16,
+            was.v10 & 0xFFFF, was.ob < 0 ? 0 : was.ob, was.od, was.of);
+    was.started = 0;
 }

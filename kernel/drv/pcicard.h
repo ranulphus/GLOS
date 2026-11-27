@@ -7,6 +7,7 @@
 struct bootinfo;
 void pcicard_place(const struct bootinfo *bi);  /* kmain, before display_init: its ranges placed */
 int pcicard_named(void);                        /* 1: a card to start (pcicard_start) */
-int pcicard_start(u32 stack_seg, u32 stack_bytes);      /* the system VM's thread: its BIOS run; 0 when it is up */
+int pcicard_start(u32 stack_seg, u32 stack_bytes);     /* the system VM's thread: its BIOS run; 0 when it is up */
+void pcicard_leave(void);                       /* a hosted GLOS's leave: DOS's INT 10h and VGA as before */
 
 #endif

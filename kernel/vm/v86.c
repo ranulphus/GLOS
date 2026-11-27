@@ -698,6 +698,7 @@ static void vm_leave(u32 code)
     kprintf_direct();                           /* (no more traps to write the log from) */
     vsbdev_leave();                             /* (the virtual Sound Blaster off: the mixer stops the real card below) */
     display_leave();
+    pcicard_leave();                            /* ([display] card's: DOS's INT 10h and VGA as its BIOS had them) */
     mga_clocks_leave();                         /* (a G400's clocks as the BIOS had them: gfx/mga.c) */
     int2f_unhook();
     slip_leave();                               /* the cable link's port as it was found, and its interrupt line
