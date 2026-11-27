@@ -1,0 +1,178 @@
+GLOS shell 1.0. HELP lists its commands.
+
+[[C:\>]]
+mode
+
+Status for device LPT1:
+-----------------------
+LPT1: not rerouted
+
+Status for device LPT2:
+-----------------------
+LPT2: not rerouted
+
+Status for device LPT3:
+-----------------------
+LPT3: not rerouted
+
+Status for device CON:
+----------------------
+Columns=80
+Lines=25
+
+Code page operation not supported on this device
+[[C:\>]]
+mode con
+
+Status for device CON:
+----------------------
+Columns=80
+Lines=25
+
+Code page operation not supported on this device
+[[C:\>]]
+echo %errorlevel%
+1
+[[C:\>]]
+mode con: /status
+
+Status for device CON:
+----------------------
+Columns=80
+Lines=25
+
+Code page operation not supported on this device
+[[C:\>]]
+mode lpt1
+
+LPT1: not rerouted
+[[C:\>]]
+mode lpt2 /status
+
+Status for device LPT2:
+-----------------------
+LPT2: not rerouted
+[[C:\>]]
+mode com1
+
+Status for device COM1:
+-----------------------
+Retry=NONE
+[[C:\>]]
+mode /status
+
+Status for device LPT1:
+-----------------------
+LPT1: not rerouted
+
+Status for device LPT2:
+-----------------------
+LPT2: not rerouted
+
+Status for device LPT3:
+-----------------------
+LPT3: not rerouted
+
+Status for device CON:
+----------------------
+Columns=80
+Lines=25
+
+Code page operation not supported on this device
+[[C:\>]]
+mode con
+
+Status for device CON:
+----------------------
+Columns=132
+Lines=50
+
+Code page operation not supported on this device
+[[C:\>]]
+mode con rate=32 delay=1
+(SETTING [input] repeat_rate = 30)
+(SETTING [input] repeat_delay = 250)
+[[C:\>]]
+echo %errorlevel%
+0
+[[C:\>]]
+mode con rate=1 delay=4
+(SETTING [input] repeat_rate = 2)
+(SETTING [input] repeat_delay = 1000)
+[[C:\>]]
+mode con rate=32
+
+Rate and delay must be specified together
+[[C:\>]]
+mode con delay=2
+
+Rate and delay must be specified together
+[[C:\>]]
+mode con rate=40 delay=1
+
+Invalid parameter - rate=40
+[[C:\>]]
+mode con cols=80 lines=25
+[[C:\>]]
+echo %errorlevel%
+0
+[[C:\>]]
+mode 80,25
+[[C:\>]]
+mode co80
+[[C:\>]]
+mode con lines=50
+<<MODE: GLOS can't change this terminal's size (its window, or the SSH client, sets it)
+>>[[C:\>]]
+echo %errorlevel%
+1
+[[C:\>]]
+mode 80,50
+<<MODE: GLOS can't change this terminal's size (its window, or the SSH client, sets it)
+>>[[C:\>]]
+mode 40
+<<MODE: GLOS can't change this terminal's size (its window, or the SSH client, sets it)
+>>[[C:\>]]
+mode con cols=132
+
+Invalid parameter - cols=132
+[[C:\>]]
+mode con cp
+
+Code page operation not supported on this device
+[[C:\>]]
+mode com1 9600,n,8,1
+<<MODE: GLOS doesn't set serial ports this way (NETWORK SERVER|CLIENT COMn speed, for a cable)
+>>[[C:\>]]
+mode com1: baud=9600 parity=n data=8 stop=1
+<<MODE: GLOS doesn't set serial ports this way (NETWORK SERVER|CLIENT COMn speed, for a cable)
+>>[[C:\>]]
+mode com1 baud=12345
+
+Invalid parameter - baud=12345
+[[C:\>]]
+mode com1 9600,x,8,1
+
+Invalid parameter - x
+[[C:\>]]
+mode lpt1=com1
+<<MODE: GLOS doesn't set printers' lines or reroute them
+>>[[C:\>]]
+mode lpt1 cols=80
+<<MODE: GLOS doesn't set printers' lines or reroute them
+>>[[C:\>]]
+mode /x
+
+Invalid switch - /x
+[[C:\>]]
+mode xyz
+
+Invalid parameter - xyz
+[[C:\>]]
+echo %errorlevel%
+1
+[[C:\>]]
+exit
+(QUIT 0)
+[[C:\>]]
+

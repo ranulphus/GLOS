@@ -1,0 +1,19 @@
+# KEYB (sdk/shell, 2026-11-27): as MS-DOS 7.1's KEYB.COM, asked of the reference disk; GLOS's layouts are its own
+# ([region] layout: us, uk), set at once and saved.
+> keyb
+> keyb uk
+> echo %errorlevel%
+> keyb
+> keyb us,437
+> keyb
+> keyb uk,850,c:\nosuch\keyboard.sys
+> keyb
+# what it refuses
+> keyb gr
+> echo %errorlevel%
+> keyb xx
+> keyb uk,999
+> keyb uk,437,c:\keyboard.sys,x
+> keyb /x
+> keyb uk us
+> exit

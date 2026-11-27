@@ -1,0 +1,29 @@
+# TREE (sdk/shell, 2026-11-27): MS-DOS 6.22's TREE.COM as it was documented (MS-DOS 7.1 has none to ask): the
+# folders under one, drawn with code page 437's lines (/A: + - \ |), /F their files too.
+mkdir C:\A
+mkdir C:\A\A1
+mkdir C:\A\A2
+mkdir C:\A\A2\DEEP
+mkdir C:\B
+mkdir C:\EMPTY
+mkdir C:\EMPTY\NONE
+line C:\ROOT.TXT x
+line C:\A\IN-A.TXT x
+line C:\A\A2\DEEP\D.TXT x
+line C:\B\B1.TXT x
+line C:\B\B2.TXT x
+> tree
+> tree /a
+> tree /f /a
+> tree c:\a /a
+> cd a
+> tree /a
+> tree .. /a
+> cd \
+> tree empty\none
+> tree /f
+> tree nosuch
+> echo %errorlevel%
+> tree /x
+> tree a b
+> exit

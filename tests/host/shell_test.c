@@ -18,6 +18,9 @@
  *   keys            from here somebody is again
  *   tree PATH       a folder's files and folders, all the way down, by name
  *   cat PATH        a file's bytes shown (CR and LF as \r and \n)
+ *   mem PROFILE     what MEM is told: none (nothing), plain, high or ems (MS-DOS 7.1's own figures on the reference
+ *                   disk: no HIMEM; HIMEM, EMM386 NOEMS and DOS=HIGH,UMB; the same with EMS)
+ *   termsize C L    the terminal's size MODE is told (80 by 25 until then; 0 0: none)
  *   # ...           a comment
  * In the transcript: errors are in <<...>>, the prompt in [[...]], a file's own text (TYPE) in {{...}};
  * RUN lines are programs handed to the host (A.COM under way, B.COM too; anything else is refused with -1
@@ -212,12 +215,15 @@ static int h_extra(void *ctx, int argc, char **argv, const char *line)
 static void *h_alloc(void *ctx, unsigned n) { (void)ctx; return malloc(n); }
 static void h_free(void *ctx, void *p) { (void)ctx; free(p); }
 
-/* Two drives: C: of 100 MB with a quarter free and a label, and a floppy with none; D: of 20 GB, nearly full. */
+/* Two drives: C: of 100 MB with a quarter free and a label (LABEL's to change), and a floppy with none; D: of 20 GB,
+   nearly full. */
+static char c_label[12] = "TESTDISK";
+
 static int h_space(void *ctx, int drive, unsigned long *total, unsigned long *left, char label[12])
 {
     (void)ctx;
     if (drive == 2)
-        *total = 102400, *left = 25600, strcpy(label, "TESTDISK");
+        *total = 102400, *left = 25600, strcpy(label, c_label);
     else if (drive == 0)
         *total = 1424, *left = 1000, label[0] = 0;
     else if (drive == 3)
@@ -306,10 +312,116 @@ static int h_setattr(void *ctx, const char *path, unsigned attr)
     return 0;
 }
 
+/* LABEL's and TREE's: C:'s serial number (A: has none) and its label set */
+static int h_serial(void *ctx, int drive, unsigned long *serial)
+{
+    (void)ctx;
+    if (drive != 2 && drive != 3)
+        return -1;
+    *serial = drive == 2 ? 0x71071071ul : 0x0BADF00Dul;
+    return 0;
+}
+
+static int h_setlabel(void *ctx, int drive, const char *label)
+{
+    (void)ctx;
+    printf("(SETLABEL %c: \"%s\")\n", 'A' + drive, label);
+    if (drive != 2)
+        return -1;
+    snprintf(c_label, sizeof c_label, "%s", label);
+    return 0;
+}
+
+/* MEM's: MS-DOS 7.1's figures (its MEM, on the reference disk) and blocks like its, by profile */
+static int mem_profile;                         /* 0 none, 1 plain, 2 high, 3 ems */
+
+static int h_mem(void *ctx, struct sh_mem *m)
+{
+    (void)ctx;
+    if (!mem_profile)
+        return -1;
+    m->conv_total = 655360;
+    m->conv_free = mem_profile == 1 ? 564576 : 629840;
+    m->umb_total = mem_profile == 2 ? 125456 : mem_profile == 3 ? 59920 : 0;
+    m->umb_free = mem_profile == 2 ? 106464 : mem_profile == 3 ? 40928 : 0;
+    m->xms_total = mem_profile == 1 ? 65994752ul : mem_profile == 2 ? 65869296ul : 65934832ul;
+    m->xms_free = mem_profile == 1 ? 0 : mem_profile == 2 ? 65552384ul : 65388544ul;
+    m->ems_total = mem_profile == 3 ? 4587520ul : 0;
+    m->ems_free = mem_profile == 3 ? 4194304ul : 0;
+    m->largest = mem_profile == 1 ? 563440 : 628800;
+    m->largest_umb = mem_profile == 2 ? 73712 : mem_profile == 3 ? 27168 : 0;
+    m->hma = mem_profile != 1;
+    return 0;
+}
+
+static int h_mem_blocks(void *ctx, struct sh_mem_block **out)
+{
+    static const struct sh_mem_block plain[] = {
+        { 0x0070, 80096, "MSDOS", SH_MB_SYSDATA, 0 }, { 0x13A6, 80, "", SH_MB_FREE, 0 },
+        { 0x13AC, 32, "COMMAND", SH_MB_DATA, 0 }, { 0x13AF, 16, "", SH_MB_FREE, 0 },
+        { 0x13B1, 90464, "", SH_MB_FREE, 0 }, { 0x29C0, 472992, "", SH_MB_FREE, 0 },
+        { 0x9D3A, 8816, "COMMAND", SH_MB_PROGRAM, 0 }, { 0x9F61, 80, "COMMAND", SH_MB_DATA, 0 },
+        { 0x9F66, 1440, "COMMAND", SH_MB_ENV, 0 }, { 0x9FC0, 1024, "", SH_MB_FREE, 0 },
+        { 0x0000, 0, "", 0, 0 } };
+    static const struct sh_mem_block high[] = {
+        { 0x0070, 9552, "SYSTEM", SH_MB_SYSDATA, 0 }, { 0x02C6, 1120, "HIMEM", SH_MB_DEVICE, 0 },
+        { 0x030D, 4320, "EMM386", SH_MB_DEVICE, 0 }, { 0x03A7, 32, "COMMAND", SH_MB_DATA, 0 },
+        { 0x03B4, 90464, "", SH_MB_FREE, 0 }, { 0x19CA, 538352, "", SH_MB_FREE, 0 },
+        { 0x9D39, 8816, "COMMAND", SH_MB_PROGRAM, 0 }, { 0x9F60, 80, "COMMAND", SH_MB_DATA, 0 },
+        { 0x9F65, 1440, "COMMAND", SH_MB_ENV, 0 }, { 0x9FBF, 1024, "", SH_MB_FREE, 0 },
+        { 0xC95C, 18992, "SYSTEM", SH_MB_SYSDATA, 1 }, { 0xCDFF, 73712, "", SH_MB_FREE, 1 },
+        { 0xE801, 32752, "", SH_MB_FREE, 2 },
+        { 0x0000, 0, "", 0, 0 } };
+    const struct sh_mem_block *from = mem_profile == 1 ? plain : high;
+    int n = 0;
+    (void)ctx;
+    if (!mem_profile)
+        return -1;
+    while (from[n].bytes)
+        n++;
+    *out = malloc((size_t)n * sizeof **out);
+    memcpy(*out, from, (size_t)n * sizeof **out);
+    return n;
+}
+
+/* MODE's terminal; KEYB's and MODE's settings, a few of GLOS.CFG's */
+static int term_cols = 80, term_lines = 25;
+
+static int h_term_size(void *ctx, int *cols, int *lines)
+{
+    (void)ctx;
+    if (!term_cols)
+        return -1;
+    *cols = term_cols, *lines = term_lines;
+    return 0;
+}
+
+static struct { const char *section, *key; char value[16]; } settings[] = {
+    { "region", "layout", "us" }, { "region", "codepage", "437" }, { "input", "repeat_rate", "10" },
+    { "input", "repeat_delay", "500" } };
+
+static int h_setting(void *ctx, const char *section, const char *key, const char *value, char *out, unsigned room)
+{
+    size_t i;
+    (void)ctx;
+    for (i = 0; i < sizeof settings / sizeof *settings; i++)
+        if (!strcmp(settings[i].section, section) && !strcmp(settings[i].key, key)) {
+            if (!value) {
+                snprintf(out, room, "%s", settings[i].value);
+                return 0;
+            }
+            printf("(SETTING [%s] %s = %s)\n", section, key, value);
+            snprintf(settings[i].value, sizeof settings[i].value, "%s", value);
+            return 0;
+        }
+    snprintf(out, room, "no such setting: [%s] %s", section, key);
+    return -1;
+}
+
 static const struct sh_host host = {
     0, h_write, h_clear, h_prompted, h_input, h_quit, h_dir_read, h_dir_free, h_is_dir, h_stat, h_open, h_read, h_put,
     h_close, h_mkdir, h_rmdir, h_unlink, h_rename, h_space, h_run, 0, extra_names, extra_help, h_extra, h_alloc, h_free,
-    h_seek, h_key, h_stop, h_io, h_setattr };
+    h_seek, h_key, h_stop, h_io, h_setattr, h_serial, h_setlabel, h_mem, h_mem_blocks, h_term_size, h_setting };
 
 int main(int argc, char **argv)
 {
@@ -409,6 +521,11 @@ int main(int argc, char **argv)
             keys = 0;
         } else if (!strcmp(line, "keys")) {
             keys = 1;
+        } else if (!strncmp(line, "mem ", 4)) {
+            mem_profile = !strcmp(arg, "plain") ? 1 : !strcmp(arg, "high") ? 2 : !strcmp(arg, "ems") ? 3 : 0;
+        } else if (!strncmp(line, "termsize ", 9)) {
+            if (sscanf(arg, "%d %d", &term_cols, &term_lines) != 2)
+                term_cols = 0;
         } else if (!strncmp(line, "tree ", 5)) {
             native(arg, p, sizeof p);
             printf("(TREE %s:", arg);

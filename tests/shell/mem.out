@@ -1,0 +1,266 @@
+GLOS shell 1.0. HELP lists its commands.
+
+[[C:\>]]
+mem
+<<MEM: GLOS can't tell what DOS's memory is here (SYSMEM shows GLOS's own)
+>>[[C:\>]]
+mem
+
+Memory Type        Total       Used       Free
+----------------  --------   --------   --------
+Conventional          640K        89K       551K
+Upper                   0K         0K         0K
+Reserved                0K         0K         0K
+Extended (XMS)     64,448K    64,448K         0K
+----------------  --------   --------   --------
+Total memory       65,088K    64,537K       551K
+
+Total under 1 MB      640K        89K       551K
+
+Largest executable program size       550K (563,440 bytes)  
+Largest free upper memory block         0K       (0 bytes)  
+[[C:\>]]
+mem /c
+
+Modules using memory below 1 MB:
+
+  Name           Total           Conventional       Upper Memory
+  --------  ----------------   ----------------   ----------------
+  MSDOS       80,096   (78K)     80,096   (78K)          0    (0K)
+  COMMAND     10,368   (10K)     10,368   (10K)          0    (0K)
+  Free       564,576  (551K)    564,576  (551K)          0    (0K)
+
+Memory Summary:
+
+  Type of Memory       Total         Used          Free
+  ----------------  -----------   -----------   -----------
+  Conventional          655,360        90,784       564,576
+  Upper                       0             0             0
+  Reserved                    0             0             0
+  Extended (XMS)     65,994,752    65,994,752             0
+  ----------------  -----------   -----------   -----------
+  Total memory       66,650,112    66,085,536       564,576
+
+  Total under 1 MB      655,360        90,784       564,576
+
+  Largest executable program size         563,440   (550K)
+  Largest free upper memory block               0     (0K)
+[[C:\>]]
+mem /f
+
+Free Conventional Memory:
+
+  Segment         Total
+  -------   -----------------
+   013A6           80    (0K)
+   013AF           16    (0K)
+   013B1       90,464   (88K)
+   029C0      472,992  (462K)
+   09FC0        1,024    (1K)
+
+  Total Free: 564,576  (551K)
+
+No upper memory available
+[[C:\>]]
+mem
+
+Memory Type        Total       Used       Free
+----------------  --------   --------   --------
+Conventional          640K        25K       615K
+Upper                 123K        19K       104K
+Reserved                0K         0K         0K
+Extended (XMS)     64,325K       309K    64,016K
+----------------  --------   --------   --------
+Total memory       65,088K       353K    64,735K
+
+Total under 1 MB      763K        43K       719K
+
+Largest executable program size       614K (628,800 bytes)  
+Largest free upper memory block        72K  (73,712 bytes)  
+MS-DOS is resident in the high memory area.
+[[C:\>]]
+mem /c
+
+Modules using memory below 1 MB:
+
+  Name           Total           Conventional       Upper Memory
+  --------  ----------------   ----------------   ----------------
+  SYSTEM      28,544   (28K)      9,552    (9K)     18,992   (19K)
+  HIMEM        1,120    (1K)      1,120    (1K)          0    (0K)
+  EMM386       4,320    (4K)      4,320    (4K)          0    (0K)
+  COMMAND     10,368   (10K)     10,368   (10K)          0    (0K)
+  Free       736,304  (719K)    629,840  (615K)    106,464  (104K)
+
+Memory Summary:
+
+  Type of Memory       Total         Used          Free
+  ----------------  -----------   -----------   -----------
+  Conventional          655,360        25,520       629,840
+  Upper                 125,456        18,992       106,464
+  Reserved                    0             0             0
+  Extended (XMS)     65,869,296       316,912    65,552,384
+  ----------------  -----------   -----------   -----------
+  Total memory       66,650,112       361,424    66,288,688
+
+  Total under 1 MB      780,816        44,512       736,304
+
+  Largest executable program size         628,800   (614K)
+  Largest free upper memory block          73,712    (72K)
+  MS-DOS is resident in the high memory area.
+[[C:\>]]
+mem /f
+
+Free Conventional Memory:
+
+  Segment         Total
+  -------   -----------------
+   003B4       90,464   (88K)
+   019CA      538,352  (526K)
+   09FBF        1,024    (1K)
+
+  Total Free: 629,840  (615K)
+
+Free Upper Memory:
+
+  Region   Largest Free     Total Free      Total Size
+  ------  --------------  --------------  --------------
+      1    73,712  (72K)   73,712  (72K)   92,704  (91K)
+      2    32,752  (32K)   32,752  (32K)   32,752  (32K)
+[[C:\>]]
+mem /m command
+
+COMMAND is using the following memory:
+
+  Segment  Region       Total        Type
+  -------  ------  ----------------  --------
+   003A7                 32    (0K)  Data
+   09D39              8,816    (9K)  Program
+   09F60                 80    (0K)  Data
+   09F65              1,440    (1K)  Environment
+                   ----------------
+  Total Size:        10,368   (10K)
+[[C:\>]]
+mem /module emm386
+
+EMM386 is using the following memory:
+
+  Segment  Region       Total        Type
+  -------  ------  ----------------  --------
+   0030D              4,320    (4K)  Installed Device=EMM386
+                   ----------------
+  Total Size:         4,320    (4K)
+[[C:\>]]
+mem /m nosuch
+NOSUCH is not currently in memory.
+[[C:\>]]
+mem /d
+
+Conventional Memory Detail:
+
+  Segment               Total        Name         Type
+  -------          ----------------  -----------  --------
+   00070              9,552    (9K)  SYSTEM       System Data
+   002C6              1,120    (1K)  HIMEM        Installed Device=HIMEM
+   0030D              4,320    (4K)  EMM386       Installed Device=EMM386
+   003A7                 32    (0K)  COMMAND      Data
+   003B4             90,464   (88K)  MSDOS        -- Free --
+   019CA            538,352  (526K)  MSDOS        -- Free --
+   09D39              8,816    (9K)  COMMAND      Program
+   09F60                 80    (0K)  COMMAND      Data
+   09F65              1,440    (1K)  COMMAND      Environment
+   09FBF              1,024    (1K)  MSDOS        -- Free --
+
+Upper Memory Detail:
+
+  Segment  Region       Total        Name         Type
+  -------  ------  ----------------  -----------  --------
+   0C95C       1     18,992   (19K)  SYSTEM       System Data
+   0CDFF       1     73,712   (72K)  MSDOS        -- Free --
+
+   0E801       2     32,752   (32K)  MSDOS        -- Free --
+
+Memory Summary:
+
+  Type of Memory       Total         Used          Free
+  ----------------  -----------   -----------   -----------
+  Conventional          655,360        25,520       629,840
+  Upper                 125,456        18,992       106,464
+  Reserved                    0             0             0
+  Extended (XMS)     65,869,296       316,912    65,552,384
+  ----------------  -----------   -----------   -----------
+  Total memory       66,650,112       361,424    66,288,688
+
+  Total under 1 MB      780,816        44,512       736,304
+
+  Largest executable program size         628,800   (614K)
+  Largest free upper memory block          73,712    (72K)
+  MS-DOS is resident in the high memory area.
+[[C:\>]]
+mem /c /p
+
+Modules using memory below 1 MB:
+
+  Name           Total           Conventional       Upper Memory
+  --------  ----------------   ----------------   ----------------
+  SYSTEM      28,544   (28K)      9,552    (9K)     18,992   (19K)
+  HIMEM        1,120    (1K)      1,120    (1K)          0    (0K)
+  EMM386       4,320    (4K)      4,320    (4K)          0    (0K)
+  COMMAND     10,368   (10K)     10,368   (10K)          0    (0K)
+  Free       736,304  (719K)    629,840  (615K)    106,464  (104K)
+
+Memory Summary:
+
+  Type of Memory       Total         Used          Free
+  ----------------  -----------   -----------   -----------
+  Conventional          655,360        25,520       629,840
+  Upper                 125,456        18,992       106,464
+  Reserved                    0             0             0
+  Extended (XMS)     65,869,296       316,912    65,552,384
+  ----------------  -----------   -----------   -----------
+  Total memory       66,650,112       361,424    66,288,688
+
+  Total under 1 MB      780,816        44,512       736,304
+
+  Largest executable program size         628,800   (614K)
+  Largest free upper memory block          73,712    (72K)
+  MS-DOS is resident in the high memory area.
+[[C:\>]]
+mem
+
+Memory Type        Total       Used       Free
+----------------  --------   --------   --------
+Conventional          640K        25K       615K
+Upper                  59K        19K        40K
+Reserved                0K         0K         0K
+Extended (XMS)     64,389K       533K    63,856K
+----------------  --------   --------   --------
+Total memory       65,088K       577K    64,511K
+
+Total under 1 MB      699K        43K       655K
+
+Total Expanded (EMS)                4,480K (4,587,520 bytes)  
+Free Expanded (EMS)                 4,096K (4,194,304 bytes)  
+
+Largest executable program size       614K (628,800 bytes)  
+Largest free upper memory block        27K  (27,168 bytes)  
+MS-DOS is resident in the high memory area.
+[[C:\>]]
+mem /x
+<<Invalid switch - /x
+>>[[C:\>]]
+echo %errorlevel%
+1
+[[C:\>]]
+mem x
+<<Invalid keyword - x
+>>[[C:\>]]
+mem /c /f
+<<Too many parameters - /f
+>>[[C:\>]]
+mem /m
+<<Required parameter missing - module name
+>>[[C:\>]]
+exit
+(QUIT 0)
+[[C:\>]]
+

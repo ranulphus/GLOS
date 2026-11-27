@@ -1,0 +1,43 @@
+# MODE (sdk/shell, 2026-11-27): MS-DOS 7.1's MODE.COM's status lines and checks, asked of the reference disk; what
+# GLOS does: the keyboard's repeat ([input] repeat_rate, repeat_delay), and a screen size the terminal already has.
+> mode
+> mode con
+> echo %errorlevel%
+> mode con: /status
+> mode lpt1
+> mode lpt2 /status
+> mode com1
+> mode /status
+termsize 132 50
+> mode con
+termsize 80 25
+# the keyboard's repeat: both, at once and saved
+> mode con rate=32 delay=1
+> echo %errorlevel%
+> mode con rate=1 delay=4
+> mode con rate=32
+> mode con delay=2
+> mode con rate=40 delay=1
+# a screen's size: the terminal's own
+> mode con cols=80 lines=25
+> echo %errorlevel%
+> mode 80,25
+> mode co80
+> mode con lines=50
+> echo %errorlevel%
+> mode 80,50
+> mode 40
+> mode con cols=132
+> mode con cp
+# serial ports and printers: checked, then said
+> mode com1 9600,n,8,1
+> mode com1: baud=9600 parity=n data=8 stop=1
+> mode com1 baud=12345
+> mode com1 9600,x,8,1
+> mode lpt1=com1
+> mode lpt1 cols=80
+# what it refuses
+> mode /x
+> mode xyz
+> echo %errorlevel%
+> exit

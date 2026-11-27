@@ -1,0 +1,123 @@
+GLOS shell 1.0. HELP lists its commands.
+
+[[C:\>]]
+tree
+Directory PATH listing for Volume TESTDISK
+Volume Serial Number is 7107-1071
+C:.
+ÃÄÄÄA
+³   ÃÄÄÄA1
+³   ÀÄÄÄA2
+³       ÀÄÄÄDEEP
+ÃÄÄÄB
+ÀÄÄÄEMPTY
+    ÀÄÄÄNONE
+[[C:\>]]
+tree /a
+Directory PATH listing for Volume TESTDISK
+Volume Serial Number is 7107-1071
+C:.
++---A
+|   +---A1
+|   \---A2
+|       \---DEEP
++---B
+\---EMPTY
+    \---NONE
+[[C:\>]]
+tree /f /a
+Directory PATH listing for Volume TESTDISK
+Volume Serial Number is 7107-1071
+C:.
+|   ROOT.TXT
+|   
++---A
+|   |   IN-A.TXT
+|   |   
+|   +---A1
+|   \---A2
+|       \---DEEP
+|               D.TXT
+|               
++---B
+|       B1.TXT
+|       B2.TXT
+|       
+\---EMPTY
+    \---NONE
+[[C:\>]]
+tree c:\a /a
+Directory PATH listing for Volume TESTDISK
+Volume Serial Number is 7107-1071
+C:\A
++---A1
+\---A2
+    \---DEEP
+[[C:\>]]
+cd a
+[[C:\A>]]
+tree /a
+Directory PATH listing for Volume TESTDISK
+Volume Serial Number is 7107-1071
+C:.
++---A1
+\---A2
+    \---DEEP
+[[C:\A>]]
+tree .. /a
+Directory PATH listing for Volume TESTDISK
+Volume Serial Number is 7107-1071
+C:\
++---A
+|   +---A1
+|   \---A2
+|       \---DEEP
++---B
+\---EMPTY
+    \---NONE
+[[C:\A>]]
+cd \
+[[C:\>]]
+tree empty\none
+Directory PATH listing for Volume TESTDISK
+Volume Serial Number is 7107-1071
+C:\EMPTY\NONE
+No subdirectories exist
+[[C:\>]]
+tree /f
+Directory PATH listing for Volume TESTDISK
+Volume Serial Number is 7107-1071
+C:.
+³   ROOT.TXT
+³   
+ÃÄÄÄA
+³   ³   IN-A.TXT
+³   ³   
+³   ÃÄÄÄA1
+³   ÀÄÄÄA2
+³       ÀÄÄÄDEEP
+³               D.TXT
+³               
+ÃÄÄÄB
+³       B1.TXT
+³       B2.TXT
+³       
+ÀÄÄÄEMPTY
+    ÀÄÄÄNONE
+[[C:\>]]
+tree nosuch
+<<Invalid path - nosuch
+>>[[C:\>]]
+echo %errorlevel%
+1
+[[C:\>]]
+tree /x
+<<Invalid switch - /x
+>>[[C:\>]]
+tree a b
+<<Too many parameters - b
+>>[[C:\>]]
+exit
+(QUIT 0)
+[[C:\>]]
+

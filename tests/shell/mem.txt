@@ -1,0 +1,25 @@
+# MEM (sdk/shell, 2026-11-27): MS-DOS 7.1's MEM's tables. The test host gives it MS-DOS 7.1's own figures from the
+# reference disk (its plain boot; HIMEM, EMM386 NOEMS and DOS=HIGH,UMB; the same with EMS), and blocks like its.
+> mem
+mem plain
+> mem
+> mem /c
+> mem /f
+mem high
+> mem
+> mem /c
+> mem /f
+> mem /m command
+> mem /module emm386
+> mem /m nosuch
+> mem /d
+> mem /c /p
+mem ems
+> mem
+# what it refuses
+> mem /x
+> echo %errorlevel%
+> mem x
+> mem /c /f
+> mem /m
+> exit

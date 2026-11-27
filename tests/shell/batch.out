@@ -44,7 +44,7 @@ ifs
 no argument
 done
 [[C:\BAT>]]
-label
+labels
 eight characters count
 <<Label not found
 >>[[C:\BAT>]]

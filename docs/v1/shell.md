@@ -702,3 +702,80 @@ to the byte, exit codes too. MS-DOS 7.1 has no COMP (6.22 had), so GLOS's is mod
     same, 1 different, 2 a file not found or a command that can't be run.
   - *A pattern's matches come in name order* (the host's listing), where MS-DOS's FC takes them in the folder's.
   - *The code page:* `/C` is code page 437's, whatever the PC's (as FIND /I).
+
+## TREE, LABEL, MEM, MODE and KEYB (2026-11-27)
+
+Built-ins for C1 ([cli.md](cli.md)). LABEL's, MEM's, MODE's and KEYB's output was asked of MS-DOS 7.1's LABEL.EXE,
+MEM.EXE (plain, with HIMEM, EMM386 NOEMS and DOS=HIGH,UMB, and with EMS), MODE.COM and KEYB.COM on the reference
+disk (some 130 cases); MS-DOS 7.1 has no TREE, so GLOS's is MS-DOS 6.22's as that was documented. What each needs of
+its host is a new call of `struct sh_host`'s, each optional: without it the command says plainly what it can't do.
+
+- **TREE [drive:][path] [/F] [/A]** draws a folder's folders all the way down with code page 437's lines
+  (`├───`, `└───`, `│`; `/A`: `+---`, `\---`, `|`), `/F` each folder's files before its folders (and a line of its
+  lead after them), under `Directory PATH listing for Volume LABEL` (no label: `Directory PATH listing`) and
+  `Volume Serial Number is XXXX-XXXX`; the top is `C:.` for the current folder, else the path in full; `No
+  subdirectories exist`; `Invalid path - X`, `Invalid switch - /X`, `Too many parameters - X`, exit code 1. Folders
+  in the order the host lists them (by name); hidden and system files left out of /F. Modelled, not compared: no
+  reference has TREE.
+- **LABEL [drive:][label]**, as MS-DOS 7.1's: a label given (in capitals, eleven characters at most, spaces allowed)
+  is set at once and nothing said; none given, `Volume in drive C is LABEL` (padded to eleven) or `... has no
+  label` and `Volume Serial Number is XXXX-XXXX`, then `Volume label (11 characters, ENTER for none)? ` (eleven
+  characters typed at most; Backspace); Enter alone then asks `Delete current volume label (Y/N)? ` if there is a
+  label. A bad label (`Too many characters in volume label`, and an empty line, as MS-DOS's; `Invalid characters in
+  volume label` for `* ? / \ | . , ; : + = < > [ ] "`) is said and the question asked, as MS-DOS does with one given
+  on its command line too. `Invalid drive specification`. With nobody at a keyboard nothing is asked: the label is
+  shown and left (exit code 1 if the one given was bad). The host's `serial` (the kernel's: INT 21h 6900h) gives the
+  serial number, `setlabel` sets the label (`""` takes it away).
+  - *Not done in the kernel:* `setlabel`. A hosted DOS would do it through extended FCBs (delete, then create with
+    attribute 08h) and the boot sector's copy through 440Dh 0846h; a native GLOS's own DOS has neither yet (its
+    label is the boot sector's alone, kernel/ndos/find.c). So a label is shown everywhere, and changed only where a
+    host gives `setlabel` (the tests'); elsewhere `LABEL: GLOS can't change a volume's label here`.
+  - *Differences:* the questions go to the terminal (MS-DOS writes its first to standard error and its second to
+    standard output); exit codes 0 and 1 (MS-DOS's gives 4 after a failed question).
+- **MEM [/C] [/F] [/D] [/M name] [/P]**, MS-DOS 7.1's tables to the byte when given MS-DOS's own figures (the tests
+  give it the reference disk's, and the summary, `/C`, `/M` and the no-HMA ending come out the same): the summary
+  (`Memory Type  Total  Used  Free`, each figure rounded to the nearest K, `Total under 1 MB`, `Total Expanded (EMS)`
+  and `Free Expanded (EMS)` when there is EMS, `Largest executable program size`, `Largest free upper memory block`,
+  `MS-DOS is resident in the high memory area.`); `/C` (`/CLASSIFY`) each program's conventional and upper memory and
+  the summary in bytes; `/F` (`/FREE`) the free blocks and each upper region's largest, free and size, or `No upper
+  memory available`; `/M name` (`/MODULE`) that program's blocks, or `NAME is not currently in memory.`; `/D`
+  (`/DEBUG`) every block, conventional then each upper region, and the summary. `Invalid switch - /X`, `Invalid
+  keyword - X`, `Too many parameters - /F` (a second of /C /F /D /M), `Required parameter missing - module name`, exit
+  code 1. The host's `mem` gives the figures (`struct sh_mem`), `mem_blocks` the blocks (`struct sh_mem_block`).
+  - *Not done in the kernel:* `mem` and `mem_blocks`. They want DOS's MCB chain (INT 21h 52h's list, then the
+    blocks read in the DOS machine's memory: the system VM's on a hosted GLOS, a native machine's on a native one),
+    GLOS's upper memory, XMS (kernel/vm/xms.c's handles and the frames left) and EMS figures, and the HMA's state
+    (xms.c's `hma_taken`): more than this step's. Until then MEM says `MEM: GLOS can't tell what DOS's memory is
+    here (SYSMEM shows GLOS's own)`.
+  - *Left out:* `/D`'s parts of DOS's own (the interrupt vectors, its devices, FILES=, BUFFERS=: what MS-DOS 7.1
+    reads inside its own blocks), `/D`'s `Memory accessible using Int 15h` and `XMS version` lines, EMM386's note
+    and its `*` on `Extended (XMS)` (GLOS's EMS is its own, not EMM386's); `/P` is taken and doesn't wait (`MEM /D
+    | MORE` pages it); MS-DOS's MEM counts its own blocks as free, GLOS's has none.
+- **MODE**, MS-DOS 7.1's texts: `MODE` and `MODE /STATUS` give `Status for device LPT1:` ... `LPT1: not rerouted`
+  for LPT1 to LPT3 and `Status for device CON:` with `Columns=` and `Lines=` (the host's `term_size`: the
+  terminal's), and `Code page operation not supported on this device` (MS-DOS's with no DISPLAY.SYS; `MODE CON`'s
+  exit code is 1 for it, as MS-DOS's); `MODE LPTn [/STATUS]`, `MODE COMn [/STATUS]` (`Retry=NONE`). What GLOS does:
+  `MODE CON RATE=r DELAY=d` (both, as MS-DOS wants them: `Rate and delay must be specified together`), the
+  keyboard's repeat, `[input] repeat_rate` (RATE 1 to 32 as 2 to 30 a second) and `repeat_delay` (DELAY 1 to 4 as
+  250 to 1000 ms), at once and saved (the host's `setting`); a screen's size asked for (`MODE CON COLS=c LINES=n`,
+  `MODE 80,50`, `CO80`, `BW40` ...) that the terminal already has. What it checks as MS-DOS does, then says it can't:
+  another size (`MODE: GLOS can't change this terminal's size`), a serial port's speed and the rest (`MODE COMn
+  9600,n,8,1`, `BAUD=`: GLOS's serial ports are its own, NETWORK SERVER|CLIENT COMn for a cable), a printer's
+  lines or rerouting (`MODE LPT1=COM1`). `Invalid parameter - X`, `Invalid switch - /X`, exit code 1. Not shown:
+  MS-DOS's status of the COM ports the BIOS has (GLOS's host doesn't say which there are); MS-DOS's messages' odd
+  ends (some with two trailing spaces, some with no line end) are lines here.
+- **KEYB [xx[,[yyy][,file]]]**, MS-DOS 7.1's texts: with nothing, `Current keyboard code: UK  code page: 850` and
+  `Current CON code page: 850` (the session's code page; MS-DOS with no DISPLAY.SYS says `Active code page not
+  available from CON device`, and with no KEYB `KEYB has not been installed`, which GLOS's says when the host has no
+  `setting`); with a code, GLOS's layout of that name (`[region] layout`: `us`, `uk`, GLOS's keymap table's), at
+  once and saved. `Invalid keyboard code specified` (MS-DOS's codes GLOS has no layout for: GR, FR ...), `Invalid
+  code page specified` (a page not 437 or 850), `Too many parameters - X`, `Invalid switch - /X`, exit code 1. A code
+  page given changes nothing (`[region] codepage` is CONFIG's); the file is not read (GLOS's layouts are its own: a
+  file that isn't there is no error, where MS-DOS says `Bad or missing Keyboard Definition File`); `/E` and `/ID:n`
+  are taken.
+- **Built-ins answer first:** a batch file or program named TREE, LABEL, MEM, MODE or KEYB in the current folder is
+  no longer run by its name (cli.md's rule; `tests/shell/batch.txt`'s LABEL.BAT became LABELS.BAT).
+
+Tests: `tests/shell/tree.txt`, `label.txt`, `mem.txt` (the test host's `mem PROFILE`: MS-DOS 7.1's figures from the
+reference disk), `mode.txt` (`termsize C L`), `keyb.txt`. The kernel's host (kernel/shell/shsess.c) gives `serial`,
+`term_size` and `setting`.

@@ -1,8 +1,8 @@
 /* GLOS's shell (shell.h; docs/v1/shell.md; PRD D50): DOS's commands and syntax, modernised.
  *
  * Built in: CD (CHDIR), a drive's letter, DIR [/W] [/B], COPY, MOVE, XCOPY, REN (RENAME), DEL (ERASE), DELTREE, CHOICE,
- * MD (MKDIR), RD (RMDIR), TYPE, MORE, FIND, SORT, FC, COMP, ECHO, SET, PATH, PROMPT, CLS, VER, EXIT, HISTORY, HELP, WHERE, START, and
- * what the host adds. A built-in's output goes to a file with > or >>.
+ * MD (MKDIR), RD (RMDIR), TYPE, MORE, FIND, SORT, FC, COMP, TREE, LABEL, MEM, MODE, KEYB, ECHO, SET, PATH, PROMPT,
+ * CLS, VER, EXIT, HISTORY, HELP, WHERE, START, and what the host adds. A built-in's output goes to a file with > or >>.
  *
  * Anything else is a program: found here and along PATH (.COM, .EXE, .BAT) and run by the host, in this
  * shell's folder, with the variables this shell has set. A .BAT file is run here, a line at a time (S4a: IF,
@@ -2517,6 +2517,824 @@ static int cmd_comp(struct sh *s, int argc, char **argv)
     return s->level = r;
 }
 
+/* ---- TREE, LABEL, MEM, MODE and KEYB (2026-11-27, C1c of docs/v1/cli.md)
+ *
+ * MS-DOS 7.1's LABEL, MEM, MODE and KEYB were asked on the reference disk; 7.1 has no TREE, so it is MS-DOS 6.22's
+ * as that was documented. What GLOS's host can't do, each says. */
+
+/* A drive's label and serial number, as LABEL and TREE show them: 0, or -1 (no such drive). */
+static int volume_of(struct sh *s, int d, char label[12], unsigned long *serial, int *has_serial)
+{
+    unsigned long total, left;
+    if (!s->h->space || s->h->space(s->h->ctx, d, &total, &left, label) != 0)
+        return -1;
+    *has_serial = s->h->serial && s->h->serial(s->h->ctx, d, serial) == 0;
+    return 0;
+}
+
+static void serial_text(char *b, unsigned room, unsigned long v)
+{
+    char hi[8], lo[8];
+    hex_text(hi, sizeof hi, v >> 16, 4);
+    hex_text(lo, sizeof lo, v & 0xFFFF, 4);
+    sh_fmt(b, room, "%s-%s", hi, lo);
+}
+
+/* TREE [drive:][path] [/F] [/A]: a folder's folders, all the way down (/F: their files too), drawn with the code
+   page's lines (/A: + - \ |), under "Directory PATH listing for Volume LABEL" and the serial number, as MS-DOS
+   6.22's TREE.COM; "No subdirectories exist" if there are none. In the order the host lists them. */
+struct tree {
+    int files, ascii, dirs;
+    char lead[160];                     /* what goes before a line at this depth */
+    char line[SH_PATH + 200];           /* (one for every depth: the walk's frames stay small on a kernel stack) */
+};
+
+static void tree_walk(struct sh *s, struct tree *t, char *path, int depth)
+{
+    static const char *const draw[2][4] = { { "\xC3\xC4\xC4\xC4", "\xC0\xC4\xC4\xC4", "\xB3   ", "\xB3" },
+                                            { "+---", "\\---", "|   ", "|" } };
+    const char *const *d = draw[t->ascii != 0];
+    struct sh_dirent *e;
+    size_t len = strlen(path), lead = strlen(t->lead);
+    char *line = t->line;
+    int n, i, last = -1, files = 0;
+    if ((n = s->h->dir_read(s->h->ctx, path, &e)) < 0)
+        return;
+    for (i = 0; i < n; i++)
+        if (e[i].dir)
+            last = i;
+    for (i = 0; t->files && i < n; i++)
+        if (!e[i].dir && !(e[i].attr & 0x06)) {
+            sh_fmt(line, sizeof t->line, "%s%s%s\r\n", t->lead, last >= 0 ? d[2] : "    ", e[i].name);
+            say(s, line);
+            files++;
+        }
+    if (files) {                                /* (after a folder's files, a line of its lead alone) */
+        sh_fmt(line, sizeof t->line, "%s%s\r\n", t->lead, last >= 0 ? d[2] : "    ");
+        say(s, line);
+    }
+    for (i = 0; i <= last; i++) {
+        if (!e[i].dir)
+            continue;
+        t->dirs++;
+        sh_fmt(line, sizeof t->line, "%s%s%s\r\n", t->lead, i == last ? d[1] : d[0], e[i].name);
+        say(s, line);
+        if (depth < 32 && len + strlen(e[i].name) + 2 < SH_PATH && lead + 5 < sizeof t->lead) {
+            sh_fmt(t->lead + lead, (unsigned)(sizeof t->lead - lead), "%s", i == last ? "    " : d[2]);
+            du_join(path, len, e[i].name);
+            tree_walk(s, t, path, depth + 1);
+            path[len] = 0;
+            t->lead[lead] = 0;
+        }
+    }
+    s->h->dir_free(s->h->ctx, e);
+}
+
+static int cmd_tree(struct sh *s, int argc, char **argv)
+{
+    struct tree t;
+    char path[SH_PATH], label[12], line[SH_PATH + 40], ser[12];
+    const char *where = 0;
+    unsigned long serial = 0;
+    int i, has = 0, d;
+    memset(&t, 0, sizeof t);
+    for (i = 1; i < argc; i++) {
+        if (same(argv[i], "/F")) {
+            t.files = 1;
+        } else if (same(argv[i], "/A")) {
+            t.ascii = 1;
+        } else if (argv[i][0] == '/') {
+            sh_fmt(line, sizeof line, "Invalid switch - %s\r\n", argv[i]);
+            err(s, line);
+            return 1;
+        } else if (where) {
+            sh_fmt(line, sizeof line, "Too many parameters - %s\r\n", argv[i]);
+            err(s, line);
+            return 1;
+        } else {
+            where = argv[i];
+        }
+    }
+    full_path(s, where ? where : ".", path, sizeof path);
+    if (!s->h->is_dir(s->h->ctx, path)) {
+        sh_fmt(line, sizeof line, "Invalid path - %s\r\n", where ? where : path);
+        err(s, line);
+        return 1;
+    }
+    d = path[0] - 'A';
+    if (volume_of(s, d, label, &serial, &has) == 0 && label[0])
+        sh_fmt(line, sizeof line, "Directory PATH listing for Volume %s\r\n", label);
+    else
+        sh_fmt(line, sizeof line, "Directory PATH listing\r\n");
+    say(s, line);
+    if (has) {
+        serial_text(ser, sizeof ser, serial);
+        sh_fmt(line, sizeof line, "Volume Serial Number is %s\r\n", ser);
+        say(s, line);
+    }
+    if (where)
+        sh_fmt(line, sizeof line, "%s\r\n", path);
+    else
+        sh_fmt(line, sizeof line, "%c:.\r\n", path[0]);
+    say(s, line);
+    tree_walk(s, &t, path, 0);
+    if (!t.dirs)
+        say(s, "No subdirectories exist\r\n");
+    return 0;
+}
+
+/* LABEL [drive:][label], as MS-DOS 7.1's LABEL.EXE: a label given is the drive's at once (in capitals, eleven
+   characters at most, spaces allowed, none of * ? / \ | . , ; : + = < > [ ] "); none given, the volume's label and
+   serial number are shown and a new one is asked for ("Volume label (11 characters, ENTER for none)? "): Enter alone
+   then asks "Delete current volume label (Y/N)? " if there is one. With nobody at a keyboard nothing is asked: the
+   label is shown and left. The questions go to the terminal, as MS-DOS's go to its standard error. */
+static const char *label_bad(const char *l)
+{
+    size_t i, n = strlen(l);
+    if (n > 11)
+        return "Too many characters in volume label\r\n\r\n";
+    for (i = 0; i < n; i++)
+        if ((unsigned char)l[i] < 32 || strchr("*?/\\|.,;:+=<>[]\"", l[i]))
+            return "Invalid characters in volume label\r\n";
+    return 0;
+}
+
+static int label_set(struct sh *s, int d, const char *l)
+{
+    char up[16];
+    sh_fmt(up, sizeof up, "%s", l);
+    upper_all(up);
+    if (!s->h->setlabel) {
+        err(s, "LABEL: GLOS can't change a volume's label here\r\n");
+        return 1;
+    }
+    if (s->h->setlabel(s->h->ctx, d, up) != 0) {
+        err(s, l[0] ? "Cannot make directory entry\r\n" : "Error deleting old volume label\r\n");
+        return 1;
+    }
+    return 0;
+}
+
+static int label_step(struct sh *s, int key);
+
+/* (LABEL's question asked again, or for the first time) */
+static int label_ask(struct sh *s)
+{
+    s->tool.nedit = 0;
+    s->tool.def = 0;
+    if (!s->h->key || s->h->key(s->h->ctx) != SH_UNDER_WAY)
+        return 0;                               /* (nobody at a keyboard: nothing asked) */
+    out(s, "Volume label (11 characters, ENTER for none)? ");
+    s->tool.step = label_step;
+    s->key_for = 3;
+    return SH_UNDER_WAY;
+}
+
+static int label_step(struct sh *s, int key)
+{
+    char e[2];
+    if (s->tool.def) {                          /* Delete current volume label (Y/N)? */
+        if (upper(key) == 'Y' || upper(key) == 'N' || key == 3) {
+            out(s, key == 3 ? "^C\r\n" : upper(key) == 'Y' ? "Y\r\n" : "N\r\n");
+            return upper(key) == 'Y' ? label_set(s, s->tool.code, "") : 0;
+        }
+        out(s, "\a");
+    } else if (key == 13) {
+        const char *bad;
+        out(s, "\r\n");
+        s->tool.edit[s->tool.nedit] = 0;
+        if (s->tool.nedit) {
+            if ((bad = label_bad(s->tool.edit)) != 0) {
+                err(s, bad);
+                return label_ask(s);
+            }
+            return label_set(s, s->tool.code, s->tool.edit);
+        }
+        if (!s->tool.yes)
+            return 0;
+        out(s, "\r\nDelete current volume label (Y/N)? ");
+        s->tool.def = 1;
+    } else if (key == 3) {
+        out(s, "^C\r\n");
+        return 1;
+    } else if (key == 8 && s->tool.nedit) {
+        s->tool.nedit--;
+        out(s, "\b \b");
+    } else if (key >= 32 && key != 127 && s->tool.nedit < 11) {
+        s->tool.edit[s->tool.nedit++] = (char)key;
+        e[0] = (char)key, e[1] = 0;
+        out(s, e);
+    } else {
+        out(s, "\a");
+    }
+    if (s->h->key && s->h->key(s->h->ctx) == SH_UNDER_WAY)
+        return SH_UNDER_WAY;
+    out(s, "\r\n");                             /* (nobody at a keyboard any more: as it was) */
+    return 0;
+}
+
+static int cmd_label(struct sh *s, const char *raw)
+{
+    char label[12], want[SH_LINE], line[80], ser[12];
+    const char *t = raw, *bad = 0;
+    unsigned long serial = 0;
+    int d = s->drive, has = 0, r;
+    size_t n;
+    while (*t == ' ' || *t == '\t')
+        t++;
+    while (*t && *t != ' ' && *t != '\t')       /* (LABEL itself) */
+        t++;
+    while (*t == ' ' || *t == '\t')
+        t++;
+    if (t[0] && t[1] == ':') {
+        d = upper((unsigned char)t[0]) - 'A';
+        for (t += 2; *t == ' ' || *t == '\t'; t++)
+            ;
+    }
+    sh_fmt(want, sizeof want, "%s", t);
+    for (n = strlen(want); n && (want[n - 1] == ' ' || want[n - 1] == '\t'); n--)
+        want[n - 1] = 0;
+    if (d < 0 || d > 25 || volume_of(s, d, label, &serial, &has) != 0) {
+        err(s, "Invalid drive specification\r\n");
+        return 1;
+    }
+    if (want[0] && !(bad = label_bad(want)))
+        return label_set(s, d, want);
+    if (label[0])
+        sh_fmt(line, sizeof line, "Volume in drive %c is %-11s\r\n", 'A' + d, label);
+    else
+        sh_fmt(line, sizeof line, "Volume in drive %c has no label\r\n", 'A' + d);
+    say(s, line);
+    if (has) {
+        serial_text(ser, sizeof ser, serial);
+        sh_fmt(line, sizeof line, "Volume Serial Number is %s\r\n", ser);
+        say(s, line);
+    }
+    if (bad)
+        err(s, bad);
+    s->tool.code = d;
+    s->tool.yes = label[0] != 0;
+    r = label_ask(s);
+    return r == SH_UNDER_WAY ? r : bad != 0;
+}
+
+/* MEM [/C] [/F] [/D] [/M name] [/P]: MS-DOS 7.1's MEM's tables, from the host's figures (struct sh_mem) and blocks.
+   The summary; /C (/CLASSIFY) the programs, each one's conventional and upper memory; /F (/FREE) the free blocks;
+   /D (/DEBUG) every block, but not the parts of DOS's own (its devices, FILES=, BUFFERS=); /M (/MODULE) one
+   program's blocks. /P (/PAGE) is taken, and doesn't wait (MEM /D | MORE does). */
+static unsigned long mem_k(unsigned long b) { return (b + 512) / 1024; }
+
+static void mem_kt(char *b, unsigned room, unsigned long bytes, int suffix)
+{
+    char t[24];
+    size_text(mem_k(bytes), t, sizeof t);
+    sh_fmt(b, room, suffix ? "(%sK)" : "%sK", t);
+}
+
+static void mem_row_k(struct sh *s, const char *name, unsigned long total, unsigned long free)
+{
+    char a[24], u[24], f[24], line[96];
+    mem_kt(a, sizeof a, total, 0);
+    mem_kt(u, sizeof u, total - free, 0);
+    mem_kt(f, sizeof f, free, 0);
+    sh_fmt(line, sizeof line, "%-16s%10s%11s%11s\r\n", name, a, u, f);
+    say(s, line);
+}
+
+static void mem_row_b(struct sh *s, const char *name, unsigned long total, unsigned long free)
+{
+    char a[24], u[24], f[24], line[96];
+    size_text(total, a, sizeof a);
+    size_text(total - free, u, sizeof u);
+    size_text(free, f, sizeof f);
+    sh_fmt(line, sizeof line, "  %-16s%13s%14s%14s\r\n", name, a, u, f);
+    say(s, line);
+}
+
+/* "Largest executable program size" and the like: in K first (the summary's), or in bytes (the others'). */
+static void mem_size(struct sh *s, const char *what, unsigned long bytes, int in_bytes)
+{
+    char a[24], k[24], b[32], line[120];
+    mem_kt(k, sizeof k, bytes, in_bytes);
+    size_text(bytes, a, sizeof a);
+    if (in_bytes) {
+        sh_fmt(line, sizeof line, "  %-31s%16s%9s\r\n", what, a, k);
+    } else {
+        sh_fmt(b, sizeof b, "(%s bytes)", a);
+        sh_fmt(line, sizeof line, "%-31s%11s %15s  \r\n", what, k, b);
+    }
+    say(s, line);
+}
+
+static void mem_summary(struct sh *s, const struct sh_mem *m, int in_bytes)
+{
+    unsigned long total = m->conv_total + m->umb_total + m->reserved + m->xms_total;
+    unsigned long free = m->conv_free + m->umb_free + m->xms_free;
+    void (*row)(struct sh *, const char *, unsigned long, unsigned long) = in_bytes ? mem_row_b : mem_row_k;
+    const char *dash = in_bytes ? "  ----------------  -----------   -----------   -----------\r\n"
+                                : "----------------  --------   --------   --------\r\n";
+    say(s, in_bytes ? "Memory Summary:\r\n\r\n  Type of Memory       Total         Used          Free\r\n"
+                    : "Memory Type        Total       Used       Free\r\n");
+    say(s, dash);
+    row(s, "Conventional", m->conv_total, m->conv_free);
+    row(s, "Upper", m->umb_total, m->umb_free);
+    row(s, "Reserved", m->reserved, 0);
+    row(s, "Extended (XMS)", m->xms_total, m->xms_free);
+    say(s, dash);
+    row(s, "Total memory", total, free);
+    say(s, "\r\n");
+    row(s, "Total under 1 MB", m->conv_total + m->umb_total, m->conv_free + m->umb_free);
+    say(s, "\r\n");
+    if (m->ems_total) {
+        mem_size(s, "Total Expanded (EMS)", m->ems_total, in_bytes);
+        mem_size(s, "Free Expanded (EMS)", m->ems_free, in_bytes);
+        say(s, "\r\n");
+    }
+    mem_size(s, "Largest executable program size", m->largest, in_bytes);
+    mem_size(s, "Largest free upper memory block", m->largest_umb, in_bytes);
+    if (m->hma)
+        say(s, &"  MS-DOS is resident in the high memory area.\r\n"[in_bytes ? 0 : 2]);
+}
+
+static const char *mem_type(const struct sh_mem_block *b)
+{
+    static const char *const types[] = { "-- Free --", "Program", "Environment", "Data", "System Data",
+                                         "System Program", "Installed Device=" };
+    return b->type < sizeof types / sizeof *types ? types[b->type] : "Data";
+}
+
+/* (a block's line of /D's or /M's: the segment, the region if upper, the size, the owner, the type) */
+static void mem_block_line(struct sh *s, const struct sh_mem_block *b, int with_name)
+{
+    char seg[8], rg[8], a[24], k[24], ty[32], line[120];
+    hex_text(seg, sizeof seg, b->seg, 5);
+    sh_fmt(rg, sizeof rg, b->region ? "%u" : "", (unsigned)b->region);
+    size_text(b->bytes, a, sizeof a);
+    mem_kt(k, sizeof k, b->bytes, 1);
+    sh_fmt(ty, sizeof ty, b->type == SH_MB_DEVICE ? "%s%s" : "%s", mem_type(b), b->name);
+    if (with_name)
+        sh_fmt(line, sizeof line, "   %s%8s%11s%8s  %-11s  %s\r\n", seg, rg, a, k,
+               b->type == SH_MB_FREE ? "MSDOS" : b->name, ty);
+    else
+        sh_fmt(line, sizeof line, "   %s%8s%11s%8s  %s\r\n", seg, rg, a, k, ty);
+    say(s, line);
+}
+
+static int cmd_mem(struct sh *s, int argc, char **argv)
+{
+    struct sh_mem m;
+    struct sh_mem_block *b = 0;
+    char line[160], a[24], k[24], c[24], ck[24], u[24], uk[24], name[16];
+    const char *module = 0;
+    int i, j, n = 0, what = 0, r = 0;           /* (what: 'C' 'F' 'D' 'M', or 0 the summary) */
+    for (i = 1; i < argc; i++) {
+        const char *w = argv[i];
+        int x = 0;
+        if (same(w, "/C") || same(w, "/CLASSIFY"))
+            x = 'C';
+        else if (same(w, "/F") || same(w, "/FREE"))
+            x = 'F';
+        else if (same(w, "/D") || same(w, "/DEBUG"))
+            x = 'D';
+        else if (same(w, "/M") || same(w, "/MODULE"))
+            x = 'M';
+        else if (same(w, "/P") || same(w, "/PAGE"))
+            continue;
+        if (x && what) {
+            sh_fmt(line, sizeof line, "Too many parameters - %s\r\n", w);
+            err(s, line);
+            return 1;
+        }
+        if (x) {
+            what = x;
+            if (x == 'M' && i + 1 < argc && argv[i + 1][0] != '/')
+                module = argv[++i];
+            continue;
+        }
+        sh_fmt(line, sizeof line, w[0] == '/' ? "Invalid switch - %s\r\n" : "Invalid keyword - %s\r\n", w);
+        err(s, line);
+        return 1;
+    }
+    if (what == 'M' && !module) {
+        err(s, "Required parameter missing - module name\r\n");
+        return 1;
+    }
+    memset(&m, 0, sizeof m);
+    if (!s->h->mem || s->h->mem(s->h->ctx, &m) != 0) {
+        err(s, "MEM: GLOS can't tell what DOS's memory is here (SYSMEM shows GLOS's own)\r\n");
+        return 1;
+    }
+    if (what && (!s->h->mem_blocks || (n = s->h->mem_blocks(s->h->ctx, &b)) < 0)) {
+        err(s, "MEM: GLOS can't list DOS's memory blocks here (MEM alone shows the summary)\r\n");
+        return 1;
+    }
+    if (what != 'M')
+        say(s, "\r\n");
+    if (what == 'C') {                          /* the programs: each name's conventional and upper memory */
+        say(s, "Modules using memory below 1 MB:\r\n\r\n  Name           Total           Conventional       Upper "
+               "Memory\r\n  --------  ----------------   ----------------   ----------------\r\n");
+        for (i = 0; i <= n; i++) {
+            unsigned long conv = 0, up = 0;
+            if (i < n) {
+                if (b[i].type == SH_MB_FREE)
+                    continue;
+                for (j = 0; j < i && (b[j].type == SH_MB_FREE || strcmp(b[j].name, b[i].name)); j++)
+                    ;
+                if (j < i)
+                    continue;                   /* (a name's blocks are counted at its first) */
+            }
+            for (j = 0; j < n; j++)
+                if (i < n ? b[j].type != SH_MB_FREE && !strcmp(b[j].name, b[i].name) : b[j].type == SH_MB_FREE) {
+                    if (b[j].region)
+                        up += b[j].bytes;
+                    else
+                        conv += b[j].bytes;
+                }
+            sh_fmt(name, sizeof name, "%s", i < n ? b[i].name : "Free");
+            size_text(conv + up, a, sizeof a), mem_kt(k, sizeof k, conv + up, 1);
+            size_text(conv, c, sizeof c), mem_kt(ck, sizeof ck, conv, 1);
+            size_text(up, u, sizeof u), mem_kt(uk, sizeof uk, up, 1);
+            sh_fmt(line, sizeof line, "  %-8s%10s%8s%11s%8s%11s%8s\r\n", name, a, k, c, ck, u, uk);
+            say(s, line);
+        }
+        say(s, "\r\n");
+        mem_summary(s, &m, 1);
+    } else if (what == 'F') {                   /* the free blocks: conventional memory's, then each region's */
+        unsigned long all = 0;
+        int regions = 0;
+        say(s, "Free Conventional Memory:\r\n\r\n  Segment         Total\r\n  -------   -----------------\r\n");
+        for (i = 0; i < n; i++)
+            if (b[i].type == SH_MB_FREE && !b[i].region) {
+                hex_text(c, sizeof c, b[i].seg, 5);
+                size_text(b[i].bytes, a, sizeof a), mem_kt(k, sizeof k, b[i].bytes, 1);
+                sh_fmt(line, sizeof line, "   %s%13s%8s\r\n", c, a, k);
+                say(s, line);
+                all += b[i].bytes;
+            } else if (b[i].region > regions) {
+                regions = b[i].region;
+            }
+        size_text(all, a, sizeof a), mem_kt(k, sizeof k, all, 1);
+        sh_fmt(line, sizeof line, "\r\n  Total Free:%8s%8s\r\n\r\n", a, k);
+        say(s, line);
+        if (!regions)
+            say(s, "No upper memory available\r\n");
+        else
+            say(s, "Free Upper Memory:\r\n\r\n  Region   Largest Free     Total Free      Total Size\r\n"
+                   "  ------  --------------  --------------  --------------\r\n");
+        for (j = 1; j <= regions; j++) {
+            unsigned long big = 0, fr = 0, size = 0;
+            for (i = 0; i < n; i++)
+                if (b[i].region == j) {
+                    size += b[i].bytes;
+                    if (b[i].type == SH_MB_FREE) {
+                        fr += b[i].bytes;
+                        if (b[i].bytes > big)
+                            big = b[i].bytes;
+                    }
+                }
+            size_text(big, a, sizeof a), mem_kt(k, sizeof k, big, 1);
+            size_text(fr, c, sizeof c), mem_kt(ck, sizeof ck, fr, 1);
+            size_text(size, u, sizeof u), mem_kt(uk, sizeof uk, size, 1);
+            sh_fmt(line, sizeof line, "%7d%10s%7s%9s%7s%9s%7s\r\n", j, a, k, c, ck, u, uk);
+            say(s, line);
+        }
+    } else if (what == 'D') {                   /* every block: conventional memory's, then each region's */
+        int region = 0;
+        say(s, "Conventional Memory Detail:\r\n\r\n  Segment               Total        Name         Type\r\n"
+               "  -------          ----------------  -----------  --------\r\n");
+        for (i = 0; i < n; i++) {
+            if (b[i].region != region) {
+                say(s, region ? "\r\n" : "\r\nUpper Memory Detail:\r\n\r\n  Segment  Region       Total        Name"
+                                         "         Type\r\n"
+                                         "  -------  ------  ----------------  -----------  --------\r\n");
+                region = b[i].region;
+            }
+            mem_block_line(s, &b[i], 1);
+        }
+        say(s, "\r\n");
+        mem_summary(s, &m, 1);
+    } else if (what == 'M') {                   /* one program's blocks */
+        unsigned long all = 0;
+        sh_fmt(name, sizeof name, "%s", module);
+        upper_all(name);
+        for (i = 0, j = 0; i < n; i++)
+            if (b[i].type != SH_MB_FREE && same(b[i].name, name)) {
+                if (!j++) {
+                    sh_fmt(line, sizeof line, "\r\n%s is using the following memory:\r\n\r\n  Segment  Region"
+                           "       Total        Type\r\n  -------  ------  ----------------  --------\r\n", name);
+                    say(s, line);
+                }
+                mem_block_line(s, &b[i], 0);
+                all += b[i].bytes;
+            }
+        if (!j) {
+            sh_fmt(line, sizeof line, "%s is not currently in memory.\r\n", name);
+            say(s, line);
+        } else {
+            size_text(all, a, sizeof a), mem_kt(k, sizeof k, all, 1);
+            sh_fmt(line, sizeof line, "                   ----------------\r\n  Total Size:%14s%8s\r\n", a, k);
+            say(s, line);
+        }
+    } else {
+        mem_summary(s, &m, 0);
+    }
+    if (b)
+        s->h->free(s->h->ctx, b);
+    return r;
+}
+
+/* MODE: MS-DOS 7.1's status lines (MODE, MODE /STATUS, MODE CON, MODE LPTn, MODE COMn) and its checks of what is
+   asked; what GLOS does: the keyboard's repeat (MODE CON RATE=r DELAY=d: [input] repeat_rate and repeat_delay, now
+   and saved), and a screen's size asked for that it already has. A terminal's size is its own, a serial port is
+   GLOS's (NETWORK ... COMn), a printer isn't rerouted: those are said, exit code 1. */
+static void mode_lpt(struct sh *s, int n, int status)
+{
+    char line[96];
+    if (status)
+        sh_fmt(line, sizeof line, "\r\nStatus for device LPT%d:\r\n-----------------------\r\nLPT%d: not rerouted\r\n",
+               n, n);
+    else
+        sh_fmt(line, sizeof line, "\r\nLPT%d: not rerouted\r\n", n);
+    say(s, line);
+}
+
+static void mode_con(struct sh *s)
+{
+    char line[200];
+    int cols = 80, lines = 25;
+    if (s->h->term_size)
+        s->h->term_size(s->h->ctx, &cols, &lines);
+    sh_fmt(line, sizeof line, "\r\nStatus for device CON:\r\n----------------------\r\nColumns=%d\r\nLines=%d\r\n\r\n"
+           "Code page operation not supported on this device\r\n", cols, lines);
+    say(s, line);
+}
+
+static int mode_num(const char *t, long *v)
+{
+    long n = 0;
+    if (!*t)
+        return -1;
+    for (; *t; t++) {
+        if (*t < '0' || *t > '9' || n > 100000)
+            return -1;
+        n = n * 10 + (*t - '0');
+    }
+    *v = n;
+    return 0;
+}
+
+static int mode_bad(struct sh *s, const char *what)
+{
+    char line[SH_LINE + 40];
+    sh_fmt(line, sizeof line, "\r\nInvalid parameter - %s\r\n", what);
+    say(s, line);
+    return 1;
+}
+
+/* (a screen's size asked for: 40 or 80 columns, 25, 43 or 50 lines) */
+static int mode_screen(struct sh *s, long cols, long lines)
+{
+    int c = 80, l = 25;
+    if (s->h->term_size)
+        s->h->term_size(s->h->ctx, &c, &l);
+    if ((cols < 0 || cols == c) && (lines < 0 || lines == l))
+        return 0;
+    err(s, "MODE: GLOS can't change this terminal's size (its window, or the SSH client, sets it)\r\n");
+    return 1;
+}
+
+static int mode_com(struct sh *s, int n, int argc, char **argv)
+{
+    static const long bauds[] = { 11, 110, 15, 150, 30, 300, 60, 600, 12, 1200, 24, 2400, 48, 4800, 96, 9600, 19,
+                                  19200 };
+    char parts[SH_LINE], *p[5];
+    int i, k = 0;
+    if (argc == 0 || (argc == 1 && same(argv[0], "/STATUS"))) {
+        char line[96];
+        sh_fmt(line, sizeof line, "\r\nStatus for device COM%d:\r\n-----------------------\r\nRetry=NONE\r\n", n);
+        say(s, line);
+        return 0;
+    }
+    for (i = 0; i < argc; i++) {                /* BAUD= PARITY= DATA= STOP= RETRY=, or b[,p[,d[,s[,r]]]] */
+        const char *a = argv[i], *eq = strchr(a, '=');
+        long v;
+        if (eq) {
+            const char *val = eq + 1;
+            char key[8];
+            size_t j;
+            int ok = 0;
+            sh_fmt(key, sizeof key, "%.*s", (int)(eq - a), a);
+            if (same(key, "BAUD")) {
+                for (j = 0; mode_num(val, &v) == 0 && j < sizeof bauds / sizeof *bauds; j++)
+                    ok |= v == bauds[j];
+            } else if (same(key, "PARITY")) {
+                ok = strlen(val) == 1 && strchr("NEOMSneoms", val[0]);
+            } else if (same(key, "DATA")) {
+                ok = mode_num(val, &v) == 0 && v >= 5 && v <= 8;
+            } else if (same(key, "STOP")) {
+                ok = !strcmp(val, "1") || !strcmp(val, "1.5") || !strcmp(val, "2");
+            } else if (same(key, "RETRY")) {
+                ok = strlen(val) == 1 && strchr("EBPRNebprn", val[0]);
+            }
+            if (!ok)
+                return mode_bad(s, a);
+            continue;
+        }
+        sh_fmt(parts, sizeof parts, "%s", a);
+        for (p[k = 0] = parts; k < 4 && (p[k + 1] = strchr(p[k], ',')) != 0; k++)
+            *p[k + 1]++ = 0;
+        if (p[0][0]) {
+            size_t j;
+            int ok = 0;
+            for (j = 0; mode_num(p[0], &v) == 0 && j < sizeof bauds / sizeof *bauds; j++)
+                ok |= v == bauds[j];
+            if (!ok)
+                return mode_bad(s, p[0]);
+        }
+        if (k >= 1 && p[1][0] && !(strlen(p[1]) == 1 && strchr("NEOMSneoms", p[1][0])))
+            return mode_bad(s, p[1]);
+        if (k >= 2 && p[2][0] && (mode_num(p[2], &v) != 0 || v < 5 || v > 8))
+            return mode_bad(s, p[2]);
+        if (k >= 3 && p[3][0] && strcmp(p[3], "1") && strcmp(p[3], "1.5") && strcmp(p[3], "2"))
+            return mode_bad(s, p[3]);
+        if (k >= 4 && p[4][0] && !(strlen(p[4]) == 1 && strchr("EBPRNebprn", p[4][0])))
+            return mode_bad(s, p[4]);
+    }
+    err(s, "MODE: GLOS doesn't set serial ports this way (NETWORK SERVER|CLIENT COMn speed, for a cable)\r\n");
+    return 1;
+}
+
+static int cmd_mode(struct sh *s, int argc, char **argv)
+{
+    char dev[16];
+    size_t n;
+    int i;
+    for (i = 1; i < argc; i++)
+        if (argv[i][0] == '/' && !same(argv[i], "/STATUS") && !same(argv[i], "/STA")) {
+            char line[SH_LINE + 40];
+            sh_fmt(line, sizeof line, "\r\nInvalid switch - %s\r\n", argv[i]);
+            say(s, line);
+            return 1;
+        }
+    if (argc == 1 || (argc == 2 && argv[1][0] == '/')) {
+        for (i = 1; i <= 3; i++)
+            mode_lpt(s, i, 1);
+        mode_con(s);
+        return 0;
+    }
+    sh_fmt(dev, sizeof dev, "%s", argv[1]);
+    upper_all(dev);
+    n = strlen(dev);
+    if (n && dev[n - 1] == ':')
+        dev[--n] = 0;
+    if (!strcmp(dev, "CON")) {
+        long rate = -1, delay = -1, cols = -1, lines = -1, v;
+        for (i = 2; i < argc; i++) {
+            const char *a = argv[i], *eq = strchr(a, '=');
+            if (same(a, "/STATUS") || same(a, "/STA"))
+                continue;
+            if (same(a, "CP") || same(a, "CODEPAGE")) {
+                say(s, "\r\nCode page operation not supported on this device\r\n");
+                return 1;
+            }
+            if (!eq || mode_num(eq + 1, &v) != 0)
+                return mode_bad(s, a);
+            if (eq - a == 4 && (a[0] | 32) == 'r' && (a[1] | 32) == 'a' && (a[2] | 32) == 't' && (a[3] | 32) == 'e'
+                && v >= 1 && v <= 32)
+                rate = v;
+            else if (eq - a == 5 && (a[0] | 32) == 'd' && (a[1] | 32) == 'e' && (a[2] | 32) == 'l' && v >= 1 && v <= 4)
+                delay = v;
+            else if (eq - a == 4 && (a[0] | 32) == 'c' && (a[1] | 32) == 'o' && (v == 40 || v == 80))
+                cols = v;
+            else if (eq - a == 5 && (a[0] | 32) == 'l' && (a[1] | 32) == 'i' && (v == 25 || v == 43 || v == 50))
+                lines = v;
+            else
+                return mode_bad(s, a);
+        }
+        if ((rate < 0) != (delay < 0)) {
+            say(s, "\r\nRate and delay must be specified together\r\n");
+            return 1;
+        }
+        /* the keyboard's repeat: MODE's 1 to 32, 2 to 30 a second; its delay a quarter of a second each */
+        if (rate > 0) {
+            static const char *const ms[] = { "250", "500", "750", "1000" };
+            char r[8], why[120];
+            if (!s->h->setting) {
+                err(s, "MODE: GLOS can't set the keyboard's repeat here\r\n");
+                return 1;
+            }
+            sh_fmt(r, sizeof r, "%ld", 2 + (rate - 1) * 28 / 31);
+            if (s->h->setting(s->h->ctx, "input", "repeat_rate", r, why, sizeof why) != 0
+                || s->h->setting(s->h->ctx, "input", "repeat_delay", ms[delay - 1], why, sizeof why) != 0) {
+                err(s, why);
+                err(s, "\r\n");
+                return 1;
+            }
+        }
+        if (cols > 0 || lines > 0)
+            return mode_screen(s, cols, lines);
+        if (rate < 0)
+            mode_con(s);
+        return rate < 0;                        /* (MS-DOS's MODE CON gives 1: its code page line) */
+    }
+    if (n == 4 && !strncmp(dev, "LPT", 3) && dev[3] >= '1' && dev[3] <= '3') {
+        if (argc == 2 || (argc == 3 && argv[2][0] == '/')) {
+            mode_lpt(s, dev[3] - '0', argc == 3);
+            return 0;
+        }
+        err(s, "MODE: GLOS doesn't set printers' lines or reroute them\r\n");
+        return 1;
+    }
+    if (n > 4 && !strncmp(dev, "LPT", 3) && dev[4] == '=') {
+        err(s, "MODE: GLOS doesn't set printers' lines or reroute them\r\n");
+        return 1;
+    }
+    if (n == 4 && !strncmp(dev, "COM", 3) && dev[3] >= '1' && dev[3] <= '4')
+        return mode_com(s, dev[3] - '0', argc - 2, argv + 2);
+    {                                           /* a screen: 40, 80, BW40, BW80, CO40, CO80, MONO; ",lines" */
+        static const char *const modes[] = { "40", "80", "BW40", "BW80", "CO40", "CO80", "MONO" };
+        char *comma = strchr(dev, ','), *m = dev;
+        long lines = -1, v;
+        size_t j;
+        if (comma) {
+            *comma = 0;
+            if (mode_num(comma + 1, &v) != 0 || (v != 25 && v != 43 && v != 50))
+                return mode_bad(s, argv[1]);
+            lines = v;
+        }
+        for (j = 0; j < sizeof modes / sizeof *modes; j++)
+            if (!strcmp(m, modes[j]))
+                return mode_screen(s, !strcmp(m, "MONO") || strstr(m, "80") ? 80 : 40, lines);
+    }
+    return mode_bad(s, argv[1]);
+}
+
+/* KEYB [xx[,[yyy][,file]]]: as MS-DOS 7.1's KEYB: with nothing, "Current keyboard code: UK  code page: 850" (and the
+   terminal's: "Current CON code page: 850"); with a code, GLOS's layout of that name ([region] layout: us, uk), at
+   once and saved. A code page must be one the layouts have (437, 850) and changes nothing ([region] codepage is
+   CONFIG's); a file is not needed, GLOS's layouts are its own. */
+static int cmd_keyb(struct sh *s, int argc, char **argv)
+{
+    char parts[SH_LINE], *p[4], why[120], line[120], cp[16];
+    int i, k = 0, word = 0;
+    for (i = 1; i < argc; i++) {
+        if (argv[i][0] == '/') {
+            /* (an enhanced keyboard; a keyboard's ID: GLOS's layouts have one each) */
+            if (same(argv[i], "/E")
+                || (upper((unsigned char)argv[i][1]) == 'I' && upper((unsigned char)argv[i][2]) == 'D'))
+                continue;
+            sh_fmt(line, sizeof line, "Invalid switch - %s\r\n", argv[i]);
+            say(s, line);
+            return 1;
+        }
+        if (word) {
+            sh_fmt(line, sizeof line, "Too many parameters - %s\r\n", argv[i]);
+            say(s, line);
+            return 1;
+        }
+        word = i;
+    }
+    if (!word) {
+        if (!s->h->setting || s->h->setting(s->h->ctx, "region", "layout", 0, why, sizeof why) != 0) {
+            say(s, "KEYB has not been installed\r\nActive code page not available from CON device\r\n");
+            return 0;
+        }
+        upper_all(why);
+        if (s->h->setting(s->h->ctx, "region", "codepage", 0, cp, sizeof cp) != 0)
+            sh_fmt(cp, sizeof cp, "437");
+        sh_fmt(line, sizeof line, "Current keyboard code: %s  code page: %s\r\nCurrent CON code page: %s\r\n", why, cp,
+               cp);
+        say(s, line);
+        return 0;
+    }
+    sh_fmt(parts, sizeof parts, "%s", argv[word]);
+    for (p[k = 0] = parts; k < 3 && (p[k + 1] = strchr(p[k], ',')) != 0; k++)
+        *p[k + 1]++ = 0;
+    if (k == 3) {
+        sh_fmt(line, sizeof line, "Too many parameters - %s\r\n", p[3]);
+        say(s, line);
+        return 1;
+    }
+    if (!same(p[0], "US") && !same(p[0], "UK")) {
+        say(s, "Invalid keyboard code specified\r\n");
+        return 1;
+    }
+    if (k >= 1 && p[1][0] && strcmp(p[1], "437") && strcmp(p[1], "850")) {
+        say(s, "Invalid code page specified\r\n");
+        return 1;
+    }
+    if (!s->h->setting) {
+        err(s, "KEYB: GLOS can't change the keyboard's layout here\r\n");
+        return 1;
+    }
+    if (s->h->setting(s->h->ctx, "region", "layout", same(p[0], "UK") ? "uk" : "us", why, sizeof why) != 0) {
+        err(s, why);
+        err(s, "\r\n");
+        return 1;
+    }
+    return 0;
+}
+
 static int cmd_cd(struct sh *s, int argc, char **argv)
 {
     char p[SH_PATH], line[300];
@@ -2768,7 +3586,7 @@ static const char *const builtins[] = { "CD", "CHDIR", "DIR", "COPY", "MOVE", "R
     "MKDIR", "RD", "RMDIR", "TYPE", "ECHO", "SET", "PATH", "PROMPT", "CLS", "VER", "EXIT", "HISTORY", "HELP", "WHERE",
     "START", "DF", "DU", "CALL", "FOR", "GOTO", "IF", "PAUSE", "REM", "SHIFT", "VOL", "TRUENAME", "BREAK", "VERIFY",
     "LH", "LOADHIGH", "CTTY", "ATTRIB", "XCOPY", "MORE", "DELTREE", "CHOICE", "FIND", "SORT",
-    "FC", "COMP", 0 };
+    "FC", "COMP", "TREE", "LABEL", "MEM", "MODE", "KEYB", 0 };
 
 static const char *const helps[] = {
     "CD [path]           the folder (of a drive: CD X:); X: changes drive",
@@ -2784,6 +3602,11 @@ static const char *const helps[] = {
     "SORT [/R] [/+n] [files]  the lines in order (also: command | SORT)",
     "FC [/A /C /L /LBn /N /T /W /nnnn] file1 file2, FC /B file1 file2  where two files differ",
     "COMP file1 file2 [/D] [/A] [/L] [/N=n] [/C]  two files' bytes compared",
+    "TREE [path] [/F] [/A]  the folders under one (/F: their files too)",
+    "LABEL [drive:][label]  a drive's label shown, set or taken away",
+    "MEM [/C] [/F] [/D] [/M name]  DOS's memory: the summary, the programs, what is free",
+    "MODE [CON|LPTn|COMn] [...]  the devices' state; MODE CON RATE=r DELAY=d the keyboard's repeat",
+    "KEYB [us|uk]        the keyboard's layout shown, or set (and saved)",
     "ATTRIB [+R|-R] [+A|-A] [+S|-S] [+H|-H] [path]  attributes changed, or listed",
     "MD path, RD path    a folder made, removed",
     "DF [drive: ...]     the drives: their size, what is used and free",
@@ -3579,6 +4402,17 @@ static int run_line(struct sh *s, char *line)
         r = cmd_fc(s, argc, argv);
     } else if (same(argv[0], "COMP")) {
         r = cmd_comp(s, argc, argv);
+    } else if (same(argv[0], "TREE")) {
+        r = s->level = cmd_tree(s, argc, argv);
+    } else if (same(argv[0], "LABEL")) {
+        if ((r = cmd_label(s, line)) != SH_UNDER_WAY)
+            s->level = r;
+    } else if (same(argv[0], "MEM")) {
+        r = s->level = cmd_mem(s, argc, argv);
+    } else if (same(argv[0], "MODE")) {
+        r = s->level = cmd_mode(s, argc, argv);
+    } else if (same(argv[0], "KEYB")) {
+        r = s->level = cmd_keyb(s, argc, argv);
     } else if (same(argv[0], "DELTREE")) {
         r = cmd_deltree(s, argc, argv);
     } else if (same(argv[0], "CHOICE")) {

@@ -1,0 +1,74 @@
+# LABEL (sdk/shell, 2026-11-27): as MS-DOS 7.1's LABEL.EXE, asked of the reference disk. The test host's C: is
+# TESTDISK, serial number 7107-1071.
+> label
+key ENTER
+key n
+> label c:newlab
+> vol
+> label new lab2
+> vol
+> label
+key T
+key Y
+key P
+key E
+key D
+key ENTER
+> vol
+# too long, characters it can't have: said, then asked
+> label abcdefghijkl
+key O
+key K
+key ENTER
+> vol
+> label a*b
+key ENTER
+key y
+> vol
+# typed: eleven at most; Backspace; a bad one asked again
+> label
+key A
+key B
+key C
+key D
+key E
+key F
+key G
+key H
+key I
+key J
+key K
+key L
+key ENTER
+> vol
+> label
+key A
+key :
+key ENTER
+key X
+key BS
+key Z
+key ENTER
+> vol
+# Enter alone: whether to take the label away is asked (n, then y); with no label, nothing more
+> label
+key ENTER
+key n
+> label c:
+key ENTER
+key y
+> label
+key ENTER
+> label c: testdisk
+> vol
+# nobody at a keyboard: shown, nothing asked; a label given is still set
+nokeys
+> label
+> label a.b
+> echo %errorlevel%
+> label c:testdisk
+keys
+> label q:
+> echo %errorlevel%
+> label a:x
+> exit

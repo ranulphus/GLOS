@@ -228,6 +228,11 @@ FIND [/V] [/C] [/N] [/I] "text" [files]  the lines with the text (also: command 
 SORT [/R] [/+n] [files]  the lines in order (also: command | SORT)
 FC [/A /C /L /LBn /N /T /W /nnnn] file1 file2, FC /B file1 file2  where two files differ
 COMP file1 file2 [/D] [/A] [/L] [/N=n] [/C]  two files' bytes compared
+TREE [path] [/F] [/A]  the folders under one (/F: their files too)
+LABEL [drive:][label]  a drive's label shown, set or taken away
+MEM [/C] [/F] [/D] [/M name]  DOS's memory: the summary, the programs, what is free
+MODE [CON|LPTn|COMn] [...]  the devices' state; MODE CON RATE=r DELAY=d the keyboard's repeat
+KEYB [us|uk]        the keyboard's layout shown, or set (and saved)
 ATTRIB [+R|-R] [+A|-A] [+S|-S] [+H|-H] [path]  attributes changed, or listed
 MD path, RD path    a folder made, removed
 DF [drive: ...]     the drives: their size, what is used and free

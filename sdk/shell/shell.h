@@ -31,6 +31,27 @@ struct sh_dirent {
 
 enum { SH_OUT, SH_ERR, SH_PROMPT, SH_TEXT };    /* what is written: output, an error, the prompt, a file's own bytes */
 
+/* MEM's figures (C1c, 2026-11-27): DOS's memory as a program started now would find it, in bytes (0: none). */
+struct sh_mem {
+    unsigned long conv_total, conv_free;        /* conventional memory (640 KB) and what of it is free */
+    unsigned long umb_total, umb_free;          /* upper memory blocks DOS has */
+    unsigned long reserved;                     /* upper memory set aside (MS-DOS 7.1's MEM says 0) */
+    unsigned long xms_total, xms_free;          /* extended memory through XMS */
+    unsigned long ems_total, ems_free;          /* expanded memory (ems_total 0: no EMS) */
+    unsigned long largest, largest_umb;         /* the largest free conventional block (a program's room), and upper */
+    int hma;                                    /* DOS is in the high memory area */
+};
+
+/* A block of DOS's memory (an MCB's, MEM /C /D /F /M): conventional memory's first, then upper memory's. */
+enum { SH_MB_FREE, SH_MB_PROGRAM, SH_MB_ENV, SH_MB_DATA, SH_MB_SYSDATA, SH_MB_SYSPROG, SH_MB_DEVICE };
+struct sh_mem_block {
+    unsigned seg;                               /* its memory's segment */
+    unsigned long bytes;
+    char name[9];                               /* its owner's name ("MSDOS" DOS's own; "" free) */
+    unsigned char type;                         /* SH_MB_* */
+    unsigned char region;                       /* 0 conventional memory, n: upper memory's n-th region */
+};
+
 #define SH_NOT_MINE  (-3)               /* extra(): not a command of the host's */
 #define SH_UNDER_WAY (-2)               /* extra(): it goes on; sh_ended() when it has ended */
 
@@ -94,6 +115,19 @@ struct sh_host {
     /* ATTRIB (2026-11-24): a file's or a folder's attributes set (DOS's 01h, 02h, 04h, 20h). 0, or -1. May be 0:
        ATTRIB then only lists. */
     int (*setattr)(void *ctx, const char *path, unsigned attr);
+    /* (C1c, 2026-11-27: TREE, LABEL, MEM, MODE, KEYB; each may be 0, and the command then says what it can't do)
+       A drive's volume serial number (drive 0: A:), and its label set ("": none). 0, or -1. */
+    int (*serial)(void *ctx, int drive, unsigned long *serial);
+    int (*setlabel)(void *ctx, int drive, const char *label);
+    /* MEM: DOS's memory (0, or -1); its blocks, conventional memory's then upper memory's (how many, or -1; the
+       list is free()d after) */
+    int (*mem)(void *ctx, struct sh_mem *m);
+    int (*mem_blocks)(void *ctx, struct sh_mem_block **out);
+    /* MODE CON: the terminal's size in characters. 0, or -1 */
+    int (*term_size)(void *ctx, int *cols, int *lines);
+    /* KEYB, MODE CON RATE= DELAY=: a setting of GLOS.CFG's ([region] layout, [input] repeat_rate ...) read into
+       out (value 0: as it applies now, "codepage" as a number) or set, at once and saved. 0, or -1 with why in out */
+    int (*setting)(void *ctx, const char *section, const char *key, const char *value, char *out, unsigned room);
 };
 
 /* A batch file being run (S4): where it is, how far it has got, what it was given. */

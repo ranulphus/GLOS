@@ -43,14 +43,14 @@ line C:\BAT\IFS.BAT echo done
 > ifs no
 > ifs
 # a label of more than eight characters, and one that is not there
-file C:\BAT\LABEL.BAT @echo off
-line C:\BAT\LABEL.BAT goto longlabelname
-line C:\BAT\LABEL.BAT echo skipped
-line C:\BAT\LABEL.BAT :longlabelother
-line C:\BAT\LABEL.BAT echo eight characters count
-line C:\BAT\LABEL.BAT goto nowhere
-line C:\BAT\LABEL.BAT echo not reached
-> label
+file C:\BAT\LABELS.BAT @echo off
+line C:\BAT\LABELS.BAT goto longlabelname
+line C:\BAT\LABELS.BAT echo skipped
+line C:\BAT\LABELS.BAT :longlabelother
+line C:\BAT\LABELS.BAT echo eight characters count
+line C:\BAT\LABELS.BAT goto nowhere
+line C:\BAT\LABELS.BAT echo not reached
+> labels
 # a program among the lines, and IF ERRORLEVEL (the program's exit code, which a command of the shell's leaves)
 file C:\BAT\PROG.BAT @echo off
 line C:\BAT\PROG.BAT a first

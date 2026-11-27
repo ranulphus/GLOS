@@ -794,6 +794,48 @@ static int h_setattr(void *ctx, const char *path, unsigned attr)    /* (INT 21h 
     return made(s);
 }
 
+/* (C1c, LABEL and TREE) A drive's volume serial number: INT 21h 6900h, DS:DX a buffer whose first word, the info
+   level, is 0 (the paths' buffer, zeroed); the serial is its dword at 2. */
+static int h_serial(void *ctx, int drive, unsigned long *serial)
+{
+    struct shsess *s = ctx;
+    u8 b[0x19];
+    if (paths(s, "", 0) != 0)
+        return -1;
+    call(s, 0, 0x6900, (u16)(drive + 1), 0, PATH2_AT);
+    s->q.out = b, s->q.out_len = sizeof b, s->q.out_at = PATH2_AT;
+    if (made(s) != 0)
+        return -1;
+    *serial = b[2] | (u32)b[3] << 8 | (u32)b[4] << 16 | (u32)b[5] << 24;
+    return 0;
+}
+
+/* (MODE CON) The terminal's size; -1 with none (a line run for SSH alone). */
+static int h_term_size(void *ctx, int *cols, int *lines)
+{
+    struct shsess *s = ctx;
+    if (!s->tty)
+        return -1;
+    *cols = (int)s->cols, *lines = (int)s->rows;
+    return 0;
+}
+
+/* (KEYB, MODE CON RATE= DELAY=) A setting of GLOS.CFG's: read (as it applies now: [region] codepage "dos" is the
+   session's page), or set at once and saved, as CONFIG SET does. */
+static int h_setting(void *ctx, const char *section, const char *key, const char *value, char *out, unsigned room)
+{
+    struct shsess *s = ctx;
+    if (value)
+        return kcfg_set(section, key, value, out, room) < 0 ? -1 : 0;
+    if (kcfg_get(section, key, out, room) < 0) {
+        sh_fmt(out, room, "no such setting: [%s] %s", section, key);
+        return -1;
+    }
+    if (!strcmp(section, "region") && !strcmp(key, "codepage") && (out[0] < '0' || out[0] > '9'))
+        sh_fmt(out, room, "%u", (unsigned)s->page);
+    return 0;
+}
+
 static int h_rename(void *ctx, const char *from, const char *to)
 {
     struct shsess *s = ctx;
@@ -1782,7 +1824,8 @@ static struct shsess *make(u32 cols, u32 rows, const char *line, const char *dir
     static const struct sh_host host = { 0, h_write, h_clear, h_prompted, h_input, h_quit, h_dir_read, h_dir_free,
         h_is_dir, h_stat, h_open, h_read, h_put, h_close, h_mkdir, h_rmdir, h_unlink, h_rename, h_space,
         h_run, h_as_typed,
-        own_names, own_help, h_extra, h_alloc, h_free, h_seek, h_key, h_stop, h_io, h_setattr };
+        own_names, own_help, h_extra, h_alloc, h_free, h_seek, h_key, h_stop, h_io, h_setattr, h_serial, 0, 0, 0,
+        h_term_size, h_setting };
     struct shsess *s;
     if (!(vm.bi->flags & BI_F_AGENT) || !(s = kmalloc(sizeof *s)))
         return 0;

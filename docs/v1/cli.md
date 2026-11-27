@@ -35,15 +35,15 @@ GLOS the DOS's own commands still run, but the shell's built-ins answer first fo
 | ATTRIB, XCOPY, MOVE, DELTREE, MORE, CHOICE, START | built-in | as is |
 | FIND, SORT | built-in (C1a, 2026-11-27: [shell.md](shell.md)) | FIND's /V /C /N /I; SORT's /R /+n, pipe-friendly |
 | FC, COMP | built-in (C1b, 2026-11-27: [shell.md](shell.md)) | FC (text: /C /N /W; binary /B), COMP as FC /B's other face |
-| TREE | missing | built-in (/F, /A) |
-| LABEL | missing | built-in (FAT volume label) |
+| TREE | built-in (C1c, 2026-11-27: [shell.md](shell.md)) | built-in (/F, /A) |
+| LABEL | built-in (C1c; setting a label needs the kernel's host's `setlabel`) | built-in (FAT volume label) |
 | SUBST | missing | built-in, if GLOS's drive table can map a letter to a folder (native first) |
-| MEM | SYSMEM | MEM as a name for SYSMEM, MS-DOS's /C /F output where it makes sense |
+| MEM | built-in (C1c; its figures need the kernel's host's `mem`, `mem_blocks`), SYSMEM | MEM as a name for SYSMEM, MS-DOS's /C /F output where it makes sense |
 | CHKDSK, SCANDISK | Disk Tools only | CHKDSK [d:] [/F] on the kernel's checker; SCANDISK an alias |
 | FORMAT, FDISK, SYS | DISK | the DOS names lead to DISK's verbs (DISK n FORMAT, DISK n PARTITIONS, DISK n INSTALL), with the same "what it will destroy" questions |
 | DISKCOPY, DISKCOMP | missing | via DD and FC /B on floppies, or small built-ins |
-| MODE | missing | MODE CON (columns/lines), MODE COMn (baud), MODE LPT; the rest says so |
-| KEYB | CONFIG region | KEYB xx (layout now and saved) |
+| MODE | built-in (C1c) | MODE CON (columns/lines), MODE COMn (baud), MODE LPT; the rest says so |
+| KEYB | built-in (C1c), CONFIG region | KEYB xx (layout now and saved) |
 | DOSKEY | HISTORY | macros (DOSKEY name=text), /HISTORY |
 | EDIT | missing | the editor (section 3) |
 | EXPAND, EXTRACT | missing | EXPAND for single .CAB/compressed files; ZIP/UNZIP (section 2) cover archives |

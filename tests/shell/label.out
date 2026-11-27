@@ -1,0 +1,205 @@
+GLOS shell 1.0. HELP lists its commands.
+
+[[C:\>]]
+label
+Volume in drive C is TESTDISK   
+Volume Serial Number is 7107-1071
+(KEY?)
+Volume label (11 characters, ENTER for none)? (KEY ENTER)
+
+
+Delete current volume label (Y/N)? (KEY?)
+(KEY n)
+N
+[[C:\>]]
+label c:newlab
+(SETLABEL C: "NEWLAB")
+[[C:\>]]
+vol
+ Volume in drive C is NEWLAB
+[[C:\>]]
+label new lab2
+(SETLABEL C: "NEW LAB2")
+[[C:\>]]
+vol
+ Volume in drive C is NEW LAB2
+[[C:\>]]
+label
+Volume in drive C is NEW LAB2   
+Volume Serial Number is 7107-1071
+(KEY?)
+Volume label (11 characters, ENTER for none)? (KEY T)
+T(KEY?)
+(KEY Y)
+Y(KEY?)
+(KEY P)
+P(KEY?)
+(KEY E)
+E(KEY?)
+(KEY D)
+D(KEY?)
+(KEY ENTER)
+
+(SETLABEL C: "TYPED")
+[[C:\>]]
+vol
+ Volume in drive C is TYPED
+[[C:\>]]
+label abcdefghijkl
+Volume in drive C is TYPED      
+Volume Serial Number is 7107-1071
+<<Too many characters in volume label
+
+>>(KEY?)
+Volume label (11 characters, ENTER for none)? (KEY O)
+O(KEY?)
+(KEY K)
+K(KEY?)
+(KEY ENTER)
+
+(SETLABEL C: "OK")
+[[C:\>]]
+vol
+ Volume in drive C is OK
+[[C:\>]]
+label a*b
+Volume in drive C is OK         
+Volume Serial Number is 7107-1071
+<<Invalid characters in volume label
+>>(KEY?)
+Volume label (11 characters, ENTER for none)? (KEY ENTER)
+
+
+Delete current volume label (Y/N)? (KEY?)
+(KEY y)
+Y
+(SETLABEL C: "")
+[[C:\>]]
+vol
+ Volume in drive C has no label
+[[C:\>]]
+label
+Volume in drive C has no label
+Volume Serial Number is 7107-1071
+(KEY?)
+Volume label (11 characters, ENTER for none)? (KEY A)
+A(KEY?)
+(KEY B)
+B(KEY?)
+(KEY C)
+C(KEY?)
+(KEY D)
+D(KEY?)
+(KEY E)
+E(KEY?)
+(KEY F)
+F(KEY?)
+(KEY G)
+G(KEY?)
+(KEY H)
+H(KEY?)
+(KEY I)
+I(KEY?)
+(KEY J)
+J(KEY?)
+(KEY K)
+K(KEY?)
+(KEY L)
+(KEY?)
+(KEY ENTER)
+
+(SETLABEL C: "ABCDEFGHIJK")
+[[C:\>]]
+vol
+ Volume in drive C is ABCDEFGHIJK
+[[C:\>]]
+label
+Volume in drive C is ABCDEFGHIJK
+Volume Serial Number is 7107-1071
+(KEY?)
+Volume label (11 characters, ENTER for none)? (KEY A)
+A(KEY?)
+(KEY :)
+:(KEY?)
+(KEY ENTER)
+
+<<Invalid characters in volume label
+>>(KEY?)
+Volume label (11 characters, ENTER for none)? (KEY X)
+X(KEY?)
+(KEY BS)
+ (KEY?)
+(KEY Z)
+Z(KEY?)
+(KEY ENTER)
+
+(SETLABEL C: "Z")
+[[C:\>]]
+vol
+ Volume in drive C is Z
+[[C:\>]]
+label
+Volume in drive C is Z          
+Volume Serial Number is 7107-1071
+(KEY?)
+Volume label (11 characters, ENTER for none)? (KEY ENTER)
+
+
+Delete current volume label (Y/N)? (KEY?)
+(KEY n)
+N
+[[C:\>]]
+label c:
+Volume in drive C is Z          
+Volume Serial Number is 7107-1071
+(KEY?)
+Volume label (11 characters, ENTER for none)? (KEY ENTER)
+
+
+Delete current volume label (Y/N)? (KEY?)
+(KEY y)
+Y
+(SETLABEL C: "")
+[[C:\>]]
+label
+Volume in drive C has no label
+Volume Serial Number is 7107-1071
+(KEY?)
+Volume label (11 characters, ENTER for none)? (KEY ENTER)
+
+[[C:\>]]
+label c: testdisk
+(SETLABEL C: "TESTDISK")
+[[C:\>]]
+vol
+ Volume in drive C is TESTDISK
+[[C:\>]]
+label
+Volume in drive C is TESTDISK   
+Volume Serial Number is 7107-1071
+[[C:\>]]
+label a.b
+Volume in drive C is TESTDISK   
+Volume Serial Number is 7107-1071
+<<Invalid characters in volume label
+>>[[C:\>]]
+echo %errorlevel%
+1
+[[C:\>]]
+label c:testdisk
+(SETLABEL C: "TESTDISK")
+[[C:\>]]
+label q:
+<<Invalid drive specification
+>>[[C:\>]]
+echo %errorlevel%
+1
+[[C:\>]]
+label a:x
+(SETLABEL A: "X")
+<<Cannot make directory entry
+>>[[C:\>]]
+exit
+(QUIT 0)
+[[C:\>]]
+
