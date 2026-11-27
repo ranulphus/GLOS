@@ -7,7 +7,10 @@
  * zero when first touched (one in 16 of the first block, all of the
  * second); kept, whether what was written there reads back; huge, whether
  * 0501h hands over four times the largest block besides (GLOS: no, it
- * caps what isn't backed yet at three times the memory there is). */
+ * caps what isn't backed yet at three times the memory there is).
+ * LAZYCHK OOM then writes every page of both blocks, more than there is: the
+ * page that can't be backed is the program's page fault (DJGPP: SIGSEGV),
+ * after HX-LAZY oom-touch; GLOS says GLOS-WARN dpmi-no-memory, once. */
 #include <dpmi.h>
 #include <go32.h>
 #include <pc.h>
@@ -53,7 +56,7 @@ static void touch(unsigned long lin, unsigned long size, unsigned long step, int
     __dpmi_free_ldt_descriptor(sel);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
     __dpmi_free_mem_info fi;
     __dpmi_meminfo a, b, c;
@@ -78,6 +81,12 @@ int main(void)
     snprintf(line, sizeof line, "HX-LAZY largest=%lu first=%d second=%d zero=%d kept=%d huge=%d\r\n", largest >> 10,
              first, second, zero, kept, huge);
     ser(line);
+    if (argc > 1 && (argv[1][0] | 0x20) == 'o' && first && second) {
+        ser("HX-LAZY oom-touch\r\n");
+        touch(b.address, b.size, 1, &zero, &kept);
+        touch(a.address, a.size, 1, &zero, &kept);
+        ser("HX-LAZY oom-survived\r\n");     /* (never, with less memory than both blocks) */
+    }
     if (second) __dpmi_free_memory(b.handle);
     if (first) __dpmi_free_memory(a.handle);
     return 0;
