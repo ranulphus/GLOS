@@ -573,8 +573,14 @@ DOSBench within 3% under native GLOS of plain DOS (the P1 target, kept). Phase H
 - ~~`thr`'s interrupts on a no-VME 486, natively~~ (found 2026-11-26: the first thread had no interrupt for the
   whole of another thread's DOS call, ~300 ms natively on the 486, so a call's ticks came as one; now only the
   context's one stack for handlers is kept one thread's at a time, the owner's choice: supervisor.md §12.7);
-- the GUI scripts' races under load (`term-run`'s MODE done, the Terminal's first keys; `studio-step`'s chord
-  mended 2026-11-26);
+- the GUI scripts' races under load (~~`term-run`'s MODE done~~: the notice between a program's CR and LF, fixed
+  2026-11-26, 1613469; the Terminal's first keys; `studio-step`'s chord mended 2026-11-26);
+- **the command-line tools' C1-C3** (the owner, 2026-11-27: "all of DOS, plus common Linux equivalents", an editor
+  and full network management; [v1/cli.md](v1/cli.md)): C1 the DOS commands a native GLOS lacks (FIND, SORT, FC,
+  TREE, LABEL, MEM, CHKDSK, MODE, KEYB, DOSKEY macros, FORMAT/FDISK/SYS onto DISK), C2 the editor (EDIT: EDIT.COM's
+  look with nano's keys), C3 the network tools (IPCONFIG /RENEW /RELEASE and static or DHCP, PING, TRACERT,
+  NSLOOKUP, NETSTAT, ROUTE, ARP, HOSTNAME, nc; Windows and Linux names; live and saved). C4 (archives, checksums)
+  and C5 (the Linux set, real tools with Linux flags) after UAT, before v1's release;
 - ~~the Games Library's overwritten output~~ (found 2026-11-26: putchar, unwrapped; see Open faults), and any
   `GLOS-WARN pmm-` line (the loose kernel frame);
 - ~~Crystal's automatic look taking another maker's WSS codec at 534h~~ (closed 2026-11-25: its control port must
