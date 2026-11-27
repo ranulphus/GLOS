@@ -165,10 +165,13 @@ start tool
 (RUN command="C:\TOOLS\TOOL.EXE" prog=C:\TOOLS\TOOL.EXE name=tool cwd=C:\WORK env=X=hello; detach=1 -> 0)
 [[C:\WORK>]]
 dir | sort
-(IO in=C:\GP000000.TMP out=-)
-<<Bad command or file name
->>(IO in=- out=-)
-[[C:\WORK>]]
+{{
+}}{{         0 dir(s)
+}}{{         2 file(s)             21 bytes
+}}{{ Directory of C:\WORK
+}}{{NOTES    TXT             12 11-13-2026  12:34
+}}{{README   MD               9 11-13-2026  12:34
+}}[[C:\WORK>]]
 dir /b *.txt > list.txt
 [[C:\WORK>]]
 (CAT C:\WORK\LIST.TXT: LIST.TXT\r\nNOTES.TXT\r\n)
@@ -221,6 +224,8 @@ DEL files           files deleted (* and ?)
 XCOPY from [to] [/S] [/E] [/H] ...  files copied, with /S the folders in them
 DELTREE [/Y] path ...  a folder and all in it deleted (asked first)
 MORE [file]         a page at a time (also: command | MORE)
+FIND [/V] [/C] [/N] [/I] "text" [files]  the lines with the text (also: command | FIND "text")
+SORT [/R] [/+n] [files]  the lines in order (also: command | SORT)
 ATTRIB [+R|-R] [+A|-A] [+S|-S] [+H|-H] [path]  attributes changed, or listed
 MD path, RD path    a folder made, removed
 DF [drive: ...]     the drives: their size, what is used and free

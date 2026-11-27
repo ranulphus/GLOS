@@ -1,0 +1,378 @@
+GLOS shell 1.0. HELP lists its commands.
+
+[[C:\>]]
+find "hello" a.txt
+
+---------- a.txt
+{{hello again
+}}{{tab	here and hello
+}}{{Hellohello twice
+}}{{last line hello
+}}[[C:\>]]
+find /i "hello" a.txt
+
+---------- a.txt
+{{Hello world
+}}{{hello again
+}}{{HELLO THERE
+}}{{tab	here and hello
+}}{{Hellohello twice
+}}{{last line hello
+}}[[C:\>]]
+find /v "hello" a.txt
+
+---------- a.txt
+{{Hello world
+}}{{HELLO THERE
+}}{{goodbye
+}}{{
+}}{{a line with "quotes" in it
+}}[[C:\>]]
+find /c "hello" a.txt
+
+---------- a.txt: 4
+[[C:\>]]
+find /n "hello" a.txt
+
+---------- a.txt
+[2]{{hello again
+}}[7]{{tab	here and hello
+}}[8]{{Hellohello twice
+}}[9]{{last line hello
+}}[[C:\>]]
+find /n /v /i "hello" a.txt
+
+---------- a.txt
+[4]{{goodbye
+}}[5]{{
+}}[6]{{a line with "quotes" in it
+}}[[C:\>]]
+find /c /v "hello" a.txt
+
+---------- a.txt: 5
+[[C:\>]]
+find /c /n "hello" a.txt
+
+---------- a.txt: 4
+[[C:\>]]
+find "hello" a.txt b.txt c.txt
+
+---------- a.txt
+{{hello again
+}}{{tab	here and hello
+}}{{Hellohello twice
+}}{{last line hello
+}}
+---------- b.txt
+{{hello from b
+}}
+---------- c.txt
+[[C:\>]]
+echo %errorlevel%
+0
+[[C:\>]]
+find "hello" a.txt > f.txt
+[[C:\>]]
+(CAT C:\F.TXT: \r\n---------- a.txt\r\nhello again\r\ntab	here and hello\r\nHellohello twice\r\nlast line hello\r\n)
+find /c "hello" a.txt b.txt > f.txt
+[[C:\>]]
+(CAT C:\F.TXT: \r\n---------- a.txt: 4\r\n\r\n---------- b.txt: 1\r\n)
+find "hello" < a.txt
+{{hello again
+}}{{tab	here and hello
+}}{{Hellohello twice
+}}{{last line hello
+}}[[C:\>]]
+type a.txt | find /c "hello"
+4
+[[C:\>]]
+find /n "hello" < a.txt
+[2]{{hello again
+}}[7]{{tab	here and hello
+}}[8]{{Hellohello twice
+}}[9]{{last line hello
+}}[[C:\>]]
+find /c /v "hello" < a.txt > f.txt
+[[C:\>]]
+(CAT C:\F.TXT: 5\r\n)
+find "zzz" < nul
+[[C:\>]]
+find /c "zzz" < nul
+0
+[[C:\>]]
+find /c "zzz" < empty.txt
+0
+[[C:\>]]
+find /c "hello" c:\sub\d.txt
+
+---------- c:\sub\d.txt: 1
+[[C:\>]]
+find "hello" .\a.txt /c
+
+---------- .\a.txt: 4
+[[C:\>]]
+find "hello" /C a.txt,b.txt;c.txt
+
+---------- a.txt: 4
+
+---------- b.txt: 1
+
+---------- c.txt: 0
+[[C:\>]]
+find "hello"a.txt
+
+---------- a.txt
+{{hello again
+}}{{tab	here and hello
+}}{{Hellohello twice
+}}{{last line hello
+}}[[C:\>]]
+find /V /N "hello"	c.txt
+
+---------- c.txt
+[1]{{no match
+}}[2]{{at all
+}}[[C:\>]]
+find """quotes""" a.txt
+
+---------- a.txt
+{{a line with "quotes" in it
+}}[[C:\>]]
+find "with "quotes" in" a.txt
+<<File not found - quotes"
+>><<File not found - in"
+>>
+---------- a.txt
+{{a line with "quotes" in it
+}}[[C:\>]]
+find "tab	here" a.txt
+
+---------- a.txt
+{{tab	here and hello
+}}[[C:\>]]
+find "" a.txt
+
+---------- a.txt
+[[C:\>]]
+echo %errorlevel%
+1
+[[C:\>]]
+find /v "" a.txt
+
+---------- a.txt
+{{Hello world
+}}{{hello again
+}}{{HELLO THERE
+}}{{goodbye
+}}{{
+}}{{a line with "quotes" in it
+}}{{tab	here and hello
+}}{{Hellohello twice
+}}{{last line hello
+}}[[C:\>]]
+echo %errorlevel%
+1
+[[C:\>]]
+find /c /v "" a.txt
+
+---------- a.txt: 9
+[[C:\>]]
+find /i "CAFE" acc.txt
+
+---------- acc.txt
+{{caf‚ one
+}}{{cafe three
+}}{{CAFE four
+}}[[C:\>]]
+find "hello" noeol.txt
+
+---------- noeol.txt
+{{hello no eol}}{{
+}}[[C:\>]]
+find /v "hello" noeol.txt > f.txt
+[[C:\>]]
+(CAT C:\F.TXT: \r\n---------- noeol.txt\r\nfirst line\r\n)
+find /v "zzz" ctrlz.txt > f.txt
+[[C:\>]]
+(CAT C:\F.TXT: \r\n---------- ctrlz.txt\r\nhello before\r\nmiddle\r\n)
+find /n /v "hello" < ctrlz.txt
+[2]{{middle}}{{
+}}[[C:\>]]
+find /v "zzz" z1.txt
+
+---------- z1.txt
+[[C:\>]]
+find /v "zzz" lf.txt > f.txt
+[[C:\>]]
+(CAT C:\F.TXT: \r\n---------- lf.txt\r\nhello one\nhello two\nthree\n)
+find "hello" cr.txt > f.txt
+[[C:\>]]
+(CAT C:\F.TXT: \r\n---------- cr.txt\r\nhello one\rhello two\rthree\r\n)
+find /c "hello" nulb.txt
+
+---------- nulb.txt: 1
+[[C:\>]]
+find /c "after" nulb.txt
+
+---------- nulb.txt: 1
+[[C:\>]]
+find "zzz" empty.txt
+
+---------- empty.txt
+[[C:\>]]
+echo %errorlevel%
+1
+[[C:\>]]
+find /c "zzz" empty.txt
+
+---------- empty.txt: 0
+[[C:\>]]
+find /n "6789ABCDEFy" p1.txt
+
+---------- p1.txt
+[2]{{6789ABCDEFyyyyyyyyyyyyyyyyyyyy
+}}[[C:\>]]
+find /c "012345" p1.txt
+
+---------- p1.txt: 1
+[[C:\>]]
+find /c "0123456" p1.txt
+
+---------- p1.txt: 0
+[[C:\>]]
+find /n /v "q" p2.txt
+
+---------- p2.txt
+[2]{{
+}}[3]{{next
+}}[[C:\>]]
+find /n /v "q" p3.txt > f.txt
+[[C:\>]]
+(CAT C:\F.TXT: \r\n---------- p3.txt\r\n[2]\n[3]next\r\n)
+find "hello" p5.txt
+
+---------- p5.txt
+[[C:\>]]
+echo %errorlevel%
+1
+[[C:\>]]
+find /c "q" p7.txt
+
+---------- p7.txt: 1
+[[C:\>]]
+find "hello" nosuch.txt
+<<File not found - nosuch.txt
+>>[[C:\>]]
+echo %errorlevel%
+2
+[[C:\>]]
+find "hello" a.txt nosuch.txt b.txt > nul
+<<File not found - nosuch.txt
+>>[[C:\>]]
+echo %errorlevel%
+0
+[[C:\>]]
+find "hello" a.txt nosuch.txt > nul
+<<File not found - nosuch.txt
+>>[[C:\>]]
+echo %errorlevel%
+2
+[[C:\>]]
+find "zzz" a.txt nosuch.txt > nul
+<<File not found - nosuch.txt
+>>[[C:\>]]
+echo %errorlevel%
+2
+[[C:\>]]
+find "zzz" a.txt > nul
+[[C:\>]]
+if errorlevel 1 echo not found
+not found
+[[C:\>]]
+find "hello" a.txt > nul && echo found
+found
+[[C:\>]]
+find "hello" sub
+<<Access denied  - sub
+>>[[C:\>]]
+find "hello" w\
+<<File not found - w\
+>>[[C:\>]]
+find "hello" q:\a.txt
+<<File not found - q:\a.txt
+>>[[C:\>]]
+find "hello" nowhere\a.txt
+<<File not found - nowhere\a.txt
+>>[[C:\>]]
+find "hello" w\*.txt
+
+---------- w\A.TXT
+{{hello from w
+}}
+---------- w\B.TXT
+
+---------- w\C.TXT
+{{hello again from w
+}}[[C:\>]]
+find /c "hello" w\*.txt
+
+---------- w\A.TXT: 1
+
+---------- w\B.TXT: 0
+
+---------- w\C.TXT: 1
+[[C:\>]]
+cd w
+[[C:\W>]]
+find "hello" *.txt
+
+---------- A.TXT
+{{hello from w
+}}
+---------- B.TXT
+
+---------- C.TXT
+{{hello again from w
+}}[[C:\W>]]
+cd \
+[[C:\>]]
+find "hello" nosuch*.txt
+<<File not found - nosuch*.txt
+>>[[C:\>]]
+echo %errorlevel%
+2
+[[C:\>]]
+find hello a.txt
+<<FIND: Parameter format not correct
+>>[[C:\>]]
+echo %errorlevel%
+2
+[[C:\>]]
+find /x "hello" a.txt
+<<FIND: Invalid switch
+>>[[C:\>]]
+find /vc "hello" a.txt
+<<FIND: Invalid switch
+>>[[C:\>]]
+find
+<<FIND: Required parameter missing
+>>[[C:\>]]
+find /c
+<<FIND: Required parameter missing
+>>[[C:\>]]
+find "unterminated a.txt
+<<FIND: Parameter format not correct
+>>[[C:\>]]
+echo %errorlevel%
+2
+[[C:\>]]
+find "hello"
+<<FIND "string" file, FIND "string" < file, or command | FIND "string"
+>>[[C:\>]]
+echo %errorlevel%
+2
+[[C:\>]]
+exit
+(QUIT 0)
+[[C:\>]]
+

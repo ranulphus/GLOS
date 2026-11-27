@@ -1,0 +1,282 @@
+GLOS shell 1.0. HELP lists its commands.
+
+[[C:\>]]
+sort s2.txt
+{{
+}}{{	tab first
+}}{{ leading space
+}}{{!bang
+}}{{10
+}}{{100
+}}{{9
+}}{{a
+}}{{ab
+}}{{Apple
+}}{{B
+}}{{banana
+}}{{cherry
+}}{{‚clair
+}}{{Zebra
+}}{{_under
+}}{{~tilde
+}}[[C:\>]]
+sort /r s2.txt
+{{~tilde
+}}{{_under
+}}{{Zebra
+}}{{‚clair
+}}{{cherry
+}}{{banana
+}}{{B
+}}{{Apple
+}}{{ab
+}}{{a
+}}{{9
+}}{{100
+}}{{10
+}}{{!bang
+}}{{ leading space
+}}{{	tab first
+}}{{
+}}[[C:\>]]
+sort < s2.txt > s.txt
+[[C:\>]]
+(CAT C:\S.TXT: \r\n	tab first\r\n leading space\r\n!bang\r\n10\r\n100\r\n9\r\na\r\nab\r\nApple\r\nB\r\nbanana\r\ncherry\r\n‚clair\r\nZebra\r\n_under\r\n~tilde\r\n)
+type s2.txt | sort /R
+{{~tilde
+}}{{_under
+}}{{Zebra
+}}{{‚clair
+}}{{cherry
+}}{{banana
+}}{{B
+}}{{Apple
+}}{{ab
+}}{{a
+}}{{9
+}}{{100
+}}{{10
+}}{{!bang
+}}{{ leading space
+}}{{	tab first
+}}{{
+}}[[C:\>]]
+echo %errorlevel%
+0
+[[C:\>]]
+sort stab.txt
+{{a
+}}{{A
+}}{{a
+}}{{b
+}}{{B
+}}{{B
+}}{{b
+}}[[C:\>]]
+sort /r stab.txt
+{{b
+}}{{B
+}}{{B
+}}{{b
+}}{{a
+}}{{A
+}}{{a
+}}[[C:\>]]
+sort /+3 short.txt
+{{ab
+}}{{a
+}}{{
+}}{{yba
+}}{{xbb
+}}{{zab
+}}{{abc
+}}{{abcd
+}}[[C:\>]]
+sort /+2 short.txt
+{{a
+}}{{
+}}{{zab
+}}{{ab
+}}{{yba
+}}{{xbb
+}}{{abc
+}}{{abcd
+}}[[C:\>]]
+sort /r /+2 short.txt
+{{abcd
+}}{{abc
+}}{{xbb
+}}{{yba
+}}{{ab
+}}{{zab
+}}{{a
+}}{{
+}}[[C:\>]]
+sort /+5 short.txt
+{{abcd
+}}{{ab
+}}{{abc
+}}{{a
+}}{{
+}}{{xbb
+}}{{yba
+}}{{zab
+}}[[C:\>]]
+sort /+70000 short.txt
+{{abcd
+}}{{ab
+}}{{abc
+}}{{a
+}}{{
+}}{{xbb
+}}{{yba
+}}{{zab
+}}[[C:\>]]
+sort /+2 /+3 short.txt
+{{ab
+}}{{a
+}}{{
+}}{{yba
+}}{{xbb
+}}{{zab
+}}{{abc
+}}{{abcd
+}}[[C:\>]]
+sort /+2/R short.txt
+{{a
+}}{{
+}}{{zab
+}}{{ab
+}}{{yba
+}}{{xbb
+}}{{abc
+}}{{abcd
+}}[[C:\>]]
+sort acc.txt
+{{CAFE four
+}}{{caf‚ one
+}}{{cafe three
+}}{{CAF two
+}}[[C:\>]]
+sort col.txt
+{{!a
+}}{{­b
+}}{{#9
+}}{{0
+}}{{›1
+}}{{$2
+}}{{œ3
+}}{{%0
+}}{{?a
+}}{{¨b
+}}{{Sa
+}}{{áb
+}}{{Sc
+}}{{~
+}}{{°
+}}[[C:\>]]
+sort slf.txt > s.txt
+[[C:\>]]
+(CAT C:\S.TXT: a\r\nb\r\nc)
+sort scr.txt > s.txt
+[[C:\>]]
+(CAT C:\S.TXT: a\r\nb\r\r\n)
+sort noeol.txt > s.txt
+[[C:\>]]
+(CAT C:\S.TXT: first line\r\nhello no eol)
+sort /r sglue.txt > s.txt
+[[C:\>]]
+(CAT C:\S.TXT: zzz\r\naaa)
+sort sglue.txt > s.txt
+[[C:\>]]
+(CAT C:\S.TXT: aaa\r\nzzz\r\n)
+sort ctrlz.txt > s.txt
+[[C:\>]]
+(CAT C:\S.TXT: hello before\r\nmiddle)
+sort send.txt
+{{a
+}}{{a	b
+}}{{a!
+}}{{ab
+}}[[C:\>]]
+sort empty.txt
+[[C:\>]]
+sort < nul
+[[C:\>]]
+sort < empty.txt
+[[C:\>]]
+sort long.txt
+{{short
+}}{{yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyend
+}}{{zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzend
+}}[[C:\>]]
+sort nulb.txt | find /c "after"
+1
+[[C:\>]]
+sort w\a.txt stab.txt
+{{a
+}}{{A
+}}{{a
+}}{{b
+}}{{B
+}}{{B
+}}{{b
+}}{{fig
+}}{{pear
+}}[[C:\>]]
+sort w\a.txt nosuch.txt
+<<SORT: File <nosuch.txt> not found
+>>{{fig
+}}{{pear
+}}[[C:\>]]
+echo %errorlevel%
+0
+[[C:\>]]
+sort nosuch.txt
+<<SORT: File <nosuch.txt> not found
+>>[[C:\>]]
+sort sub
+<<SORT: File <sub\*.*> not found
+>>[[C:\>]]
+sort q:\s2.txt
+<<SORT: File <q:\s2.txt> not found
+>>[[C:\>]]
+sort w\*.txt
+{{apple
+}}{{fig
+}}{{pear
+}}[[C:\>]]
+sort w\*.xyz
+<<SORT: File <w\*.xyz> not found
+>>[[C:\>]]
+sort /x s2.txt
+<<SORT: Invalid switch
+>>[[C:\>]]
+echo %errorlevel%
+1
+[[C:\>]]
+sort /+0 s2.txt
+<<SORT: Invalid switch
+>>[[C:\>]]
+sort /+ s2.txt
+<<SORT: Invalid switch
+>>[[C:\>]]
+sort /R/+2 short.txt
+<<SORT: Invalid switch
+>>[[C:\>]]
+sort /+-1 short.txt
+<<SORT: Invalid switch
+>>[[C:\>]]
+sort
+<<SORT file, SORT < file, or command | SORT
+>>[[C:\>]]
+sort big.txt
+<<SORT: Insufficient memory (it sorts 256 KB at most)
+>>[[C:\>]]
+echo %errorlevel%
+1
+[[C:\>]]
+exit
+(QUIT 0)
+[[C:\>]]
+

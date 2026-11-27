@@ -1,0 +1,114 @@
+# SORT (sdk/shell, 2026-11-27): as MS-DOS 7.1's SORT.EXE (asked of the reference disk) where docs/v1/shell.md
+# doesn't say otherwise: equal lines keep their order; long lines and NULs are kept; a last line with no line end
+# is given one if it isn't written last; names may be patterns.
+mkdir C:\W
+mkdir C:\SUB
+line C:\S2.TXT banana
+line C:\S2.TXT Apple
+line C:\S2.TXT cherry
+line C:\S2.TXT 10
+line C:\S2.TXT 9
+line C:\S2.TXT 100
+line C:\S2.TXT  leading space
+line C:\S2.TXT 	tab first
+line C:\S2.TXT Zebra
+line C:\S2.TXT _under
+line C:\S2.TXT ~tilde
+line C:\S2.TXT !bang
+line C:\S2.TXT
+bytes C:\S2.TXT \x82clair\r\n
+line C:\S2.TXT ab
+line C:\S2.TXT a
+line C:\S2.TXT B
+line C:\W\A.TXT pear
+line C:\W\A.TXT fig
+line C:\W\B.TXT apple
+line C:\STAB.TXT b
+line C:\STAB.TXT B
+line C:\STAB.TXT a
+line C:\STAB.TXT A
+line C:\STAB.TXT B
+line C:\STAB.TXT b
+line C:\STAB.TXT a
+line C:\SHORT.TXT abcd
+line C:\SHORT.TXT ab
+line C:\SHORT.TXT abc
+line C:\SHORT.TXT a
+line C:\SHORT.TXT
+line C:\SHORT.TXT xbb
+line C:\SHORT.TXT yba
+line C:\SHORT.TXT zab
+bytes C:\ACC.TXT caf\x82 one\r\nCAF\x90 two\r\ncafe three\r\nCAFE four\r\n
+bytes C:\COL.TXT %0\r\n\x9c3\r\nSc\r\n#9\r\n$2\r\n\xe1b\r\n\x9d0\r\nSa\r\n\x9b1\r\n\xa8b\r\n?a\r\n\xadb\r\n!a\r\n\xb0\r\n~\r\n
+bytes C:\SLF.TXT b\na\r\nc
+bytes C:\SCR.TXT b\r\r\na\r\n
+bytes C:\NOEOL.TXT first line\r\nhello no eol
+bytes C:\SGLUE.TXT zzz\r\naaa
+bytes C:\CTRLZ.TXT hello before\r\nmiddle\x1ahello after\r\nlast\r\n
+bytes C:\SEND.TXT a\tb\r\na\r\na!\r\nab\r\n
+bytes C:\EMPTY.TXT
+bytes C:\NULB.TXT hel\x00lo nul\r\nhello\x00after\r\nplain\r\n
+bytes C:\LONG.TXT \*515yend\r\n\*512zend\r\nshort\r\n
+bytes C:\BIG.TXT \*262145x
+# letters in any case, and with accents, as one; a line that begins another first; /R the other way
+> sort s2.txt
+> sort /r s2.txt
+> sort < s2.txt > s.txt
+cat C:\S.TXT
+> type s2.txt | sort /R
+> echo %errorlevel%
+# equal lines: in the order they came, /R too (MS-DOS 7.1's: as its sort leaves them, "a A a B B b b")
+> sort stab.txt
+> sort /r stab.txt
+# /+n: from the n-th character; a shorter line has nothing there and goes first; the last /+ counts
+> sort /+3 short.txt
+> sort /+2 short.txt
+> sort /r /+2 short.txt
+> sort /+5 short.txt
+> sort /+70000 short.txt
+> sort /+2 /+3 short.txt
+> sort /+2/R short.txt
+# code page 437's order, MS-DOS 7.1's: case and accents aside, cents, pounds and yen with $, sharp s with S
+> sort acc.txt
+> sort col.txt
+# line ends: LF alone, a CR before LF the line's own, none at the end (none written, if last), Ctrl+Z
+> sort slf.txt > s.txt
+cat C:\S.TXT
+> sort scr.txt > s.txt
+cat C:\S.TXT
+> sort noeol.txt > s.txt
+cat C:\S.TXT
+> sort /r sglue.txt > s.txt
+cat C:\S.TXT
+> sort sglue.txt > s.txt
+cat C:\S.TXT
+> sort ctrlz.txt > s.txt
+cat C:\S.TXT
+> sort send.txt
+> sort empty.txt
+> sort < nul
+> sort < empty.txt
+# kept whole: lines of more than 511 characters, and what follows a NUL (MS-DOS 7.1's cuts both)
+> sort long.txt
+> sort nulb.txt | find /c "after"
+# several files, and what isn't there: said, and the exit code stays 0, as MS-DOS 7.1's
+> sort w\a.txt stab.txt
+> sort w\a.txt nosuch.txt
+> echo %errorlevel%
+> sort nosuch.txt
+> sort sub
+> sort q:\s2.txt
+# patterns (MS-DOS 7.1's SORT takes none)
+> sort w\*.txt
+> sort w\*.xyz
+# what can't be run: 1
+> sort /x s2.txt
+> echo %errorlevel%
+> sort /+0 s2.txt
+> sort /+ s2.txt
+> sort /R/+2 short.txt
+> sort /+-1 short.txt
+> sort
+> sort big.txt
+> echo %errorlevel%
+> exit

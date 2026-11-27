@@ -600,3 +600,58 @@ The two that wait for keys run as PAUSE does, in steps: the host's `key()` is as
 to the command's next step (`struct sh`'s `tool`), with its output's file (`>`) kept open until it ends. `*.*` now
 matches names without a dot too, as DOS's patterns do (`DST6\*.*` takes the folder SUB; `DIR`, `DEL`, `COPY` and
 `ATTRIB` the same). Tests: `tests/shell/tools.txt`.
+
+
+## FIND and SORT (2026-11-27)
+
+Built-ins for C1 ([cli.md](cli.md)): a native GLOS has no FreeDOS to bring them. Their output was asked of MS-DOS
+7.1's own (FIND.EXE and SORT.EXE on the reference disk, some 170 cases written to files and read back, the errors
+off its screen) and follows it where GLOS doesn't choose otherwise.
+
+- **FIND [/V] [/C] [/N] [/I] "string" [[drive:][path]filename ...]** writes each file's lines that have the string
+  (`/V`: that haven't), under a heading of an empty line and `---------- NAME`, the name as it was typed
+  (`c:\sub\d.txt`, `.\A.TXT`). `/N` puts `[n]` before each line; `/C` writes only `---------- NAME: n`, and beats
+  `/N`; `/I` sets case aside by code page 437's capitals, MS-DOS 7.1's (é is E there, and É its own). With no file
+  it reads its input (a pipe, `<`) and writes no heading (`/C`: the number alone). As MS-DOS's: the string must be
+  in quotation marks, two of them in it standing for one (`"""quotes"""` finds `"quotes"`), and an empty one finds
+  nothing; another quoted word after it is a file's name; switches go anywhere; spaces, tabs, commas and semicolons
+  part the words, and so does the string's closing mark (`"hello"A.TXT`). A line is written with its own line end
+  (an LF alone stays one), or with CR LF if it has none; Ctrl+Z ends a file; a line of more than 4096 bytes is taken
+  as lines of 4096, each counted, searched and written with CR LF, as MS-DOS's buffer cuts it. Errors: `FIND:
+  Parameter format not correct` (no quotation marks, or one left open), `FIND: Invalid switch` (not named, as
+  MS-DOS's), `FIND: Required parameter missing`, `File not found - NAME`, and `Access denied  - NAME` for a folder
+  (two spaces, as MS-DOS writes it). The exit code is MS-DOS's, what came last: 2 after a file that couldn't be
+  read, 0 after a line with the string (with `/V` too, so `/V ""` writes every line and gives 1), 1 if neither came;
+  2 for a command that can't be run. `IF ERRORLEVEL` sees it, as a program's.
+- **SORT [/R] [/+n] [[drive:][path]filename ...]** writes the lines of its files (several are sorted together), or of
+  its input, in order: MS-DOS 7.1's for code page 437, measured with a line for every byte (letters in either case
+  and with accents as one, ¢ £ ¥ ₧ ƒ with `$`, ¡ with `!`, ¿ with `?`, « » with `"`, ß with S, the rest of 80h-FFh
+  after `~` by their bytes). A line that begins another goes first; `/R` the other way; `/+n` from the n-th
+  character on (a tab is one; a line that is shorter has nothing there and goes first; what follows the number is
+  passed over, so `/+2/R` is `/+2`, as MS-DOS's; the last `/+n` counts). LF ends a line and a CR just before it is
+  not the line's; each line is written with CR LF, and a last line with no line end with none, if it is written
+  last; Ctrl+Z ends a file. `SORT: File <NAME> not found` for a file that isn't there (`<SUB\*.*>` for a folder, as
+  MS-DOS's), which is passed over, the exit code staying 0 as MS-DOS's does; `SORT: Invalid switch`, exit code 1.
+- **Where GLOS differs, on purpose:**
+  - *Patterns:* both take `*` and `?` in names: each match in turn, by name, hidden and system files left; FIND's
+    heading has the folder as typed and the name as found (`w\A.TXT`). MS-DOS 7.1's take a pattern as a name:
+    `File not found - W\*.TXT`, exit code 2.
+  - *No keyboard to read from:* with no file and no input, FIND and SORT say how to give them text (exit codes 2
+    and 1). MS-DOS's read the keyboard until Ctrl+Z. `/?` is an invalid switch here (HELP has a line for each).
+  - *FIND's messages end their lines:* MS-DOS's `File not found - X` and `Access denied  - X` have no line end; the
+    next file's heading, which begins with an empty line, or the prompt finishes the line, and two run together.
+  - *SORT's equal lines keep the order they came in* (lines that differ only in case or accents, or not from
+    column n on), with `/R` too: MS-DOS 7.1's are left as its sort leaves them, which is neither (`b B a A B b a`
+    gives `a A a B B b b` there and `a A a b B B b` here).
+  - *SORT keeps a line whole:* MS-DOS 7.1's cuts lines at 511 characters, sorts the pieces apart and writes all but
+    the last with no line end, so that they run into whatever is written after them; and a NUL ends a line there
+    (the rest, and its line end, are lost). A last line with no line end that doesn't sort last is given CR LF
+    here; MS-DOS's runs it into the next line (`zzz` and `aaa` with no end give `aaazzz`).
+  - *SORT's room:* 256 KB of text, sorted in memory (else `SORT: Insufficient memory`, exit code 1); MS-DOS 7.1's
+    goes on in temporary files. `/+0`, `/+` and `/+-1` are invalid switches (MS-DOS takes `/+-1` and leaves the
+    lines as they came).
+  - *The code page:* FIND /I's capitals and SORT's order are code page 437's whatever the PC's is: the shell is
+    told no other yet.
+
+Tests: `tests/shell/find.txt` and `tests/shell/sort.txt`, with the test host's new `bytes` (files with no line end,
+Ctrl+Z, NULs, long lines). A pipe into SORT is the shell's own now (`DIR | SORT` in `tests/shell/basic.txt`).

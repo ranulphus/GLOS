@@ -1,7 +1,7 @@
 /* GLOS's shell (shell.h; docs/v1/shell.md; PRD D50): DOS's commands and syntax, modernised.
  *
  * Built in: CD (CHDIR), a drive's letter, DIR [/W] [/B], COPY, MOVE, XCOPY, REN (RENAME), DEL (ERASE), DELTREE, CHOICE,
- * MD (MKDIR), RD (RMDIR), TYPE, MORE, ECHO, SET, PATH, PROMPT, CLS, VER, EXIT, HISTORY, HELP, WHERE, START, and
+ * MD (MKDIR), RD (RMDIR), TYPE, MORE, FIND, SORT, ECHO, SET, PATH, PROMPT, CLS, VER, EXIT, HISTORY, HELP, WHERE, START, and
  * what the host adds. A built-in's output goes to a file with > or >>.
  *
  * Anything else is a program: found here and along PATH (.COM, .EXE, .BAT) and run by the host, in this
@@ -1405,6 +1405,484 @@ static int cmd_deltree(struct sh *s, int argc, char **argv)
     return deltree_on(s);
 }
 
+/* ---- FIND and SORT (2026-11-27, C1a of docs/v1/cli.md: a native GLOS has no FreeDOS to bring them)
+ *
+ * As MS-DOS 7.1's FIND.EXE and SORT.EXE (asked of the real ones on the reference disk), where docs/v1/shell.md
+ * doesn't say otherwise. Text is code page 437's to both: FIND /I's capitals and SORT's order are MS-DOS 7.1's for
+ * that page (the shell is told no other). */
+
+/* Code page 437's capitals for 80h-A5h (from A6h a character is its own): MS-DOS 7.1's, which FIND /I folds by (e
+   acute is E there, and E acute itself); kernel/ndos/fucase.c's table for 437. */
+static const unsigned char cp437_upper[] = {
+    0x80, 0x9A, 0x45, 0x41, 0x8E, 0x41, 0x8F, 0x80, 0x45, 0x45, 0x45, 0x49, 0x49, 0x49, 0x8E, 0x8F,
+    0x90, 0x92, 0x92, 0x4F, 0x99, 0x4F, 0x55, 0x55, 0x59, 0x99, 0x9A, 0x9B, 0x9C, 0x9D, 0x9E, 0x9F,
+    0x41, 0x49, 0x4F, 0x55, 0xA5, 0xA5 };
+
+/* SORT's order for 80h-AFh: the letter or sign each sorts as one with, case and accents aside (MS-DOS 7.1's SORT,
+   measured with a line for every byte); from B0h a byte is its own, but for E1h (sharp s), which is S. Below 80h a
+   small letter is its capital. */
+static const unsigned char cp437_order[] = {
+    0x43, 0x55, 0x45, 0x41, 0x41, 0x41, 0x41, 0x43, 0x45, 0x45, 0x45, 0x49, 0x49, 0x49, 0x41, 0x41,
+    0x45, 0x41, 0x41, 0x4F, 0x4F, 0x4F, 0x55, 0x55, 0x59, 0x4F, 0x55, 0x24, 0x24, 0x24, 0x24, 0x24,
+    0x41, 0x49, 0x4F, 0x55, 0x4E, 0x4E, 0xA6, 0xA7, 0x3F, 0xA9, 0xAA, 0xAB, 0xAC, 0x21, 0x22, 0x22 };
+
+static int fold437(int c)
+{
+    return c < 0x80 ? upper(c) : c < 0x80 + (int)sizeof cp437_upper ? cp437_upper[c - 0x80] : c;
+}
+
+static int order437(int c)
+{
+    return c < 0x80 ? upper(c) : c < 0x80 + (int)sizeof cp437_order ? cp437_order[c - 0x80] : c == 0xE1 ? 'S' : c;
+}
+
+/* A file's own text written (to the terminal as a file's bytes, or to the output's file). */
+static void say_text(struct sh *s, const void *t, int n)
+{
+    if (s->discard)
+        return;
+    if (s->redirect)
+        s->h->put(s->h->ctx, s->redirect, t, n);
+    else
+        s->h->write(s->h->ctx, SH_TEXT, (const char *)t, n);
+}
+
+/* A file named to FIND or SORT, * and ? taken (which MS-DOS 7.1's take as names: "File not found - W\*.TXT"): each
+   file it names given to each(), by its full path and as it is to be shown (the folder as typed, the name as
+   found; hidden and system files are left, as DOS's find-first leaves them). How many each() took (0: none there
+   that could be read), or -1 for a folder named alone. */
+static int each_file(struct sh *s, const char *word, int (*each)(struct sh *s, void *arg, const char *path,
+                     const char *shown), void *arg)
+{
+    char full[SH_PATH], dir[SH_PATH], p[SH_PATH], shown[SH_PATH];
+    struct sh_dirent *e;
+    size_t len = strlen(word);
+    int n, i, took = 0;
+    full_path(s, word, full, sizeof full);
+    if (!strpbrk(word, "*?")) {
+        if (len && (word[len - 1] == '\\' || word[len - 1] == '/'))
+            return 0;                           /* (a folder's name with a backslash after it: no file) */
+        if (s->h->is_dir(s->h->ctx, full))
+            return -1;
+        return each(s, arg, full, word) == 0;
+    }
+    sh_fmt(dir, sizeof dir, "%s", full);
+    path_up(dir);
+    if ((n = s->h->dir_read(s->h->ctx, dir, &e)) < 0)
+        return 0;
+    for (i = 0; i < n; i++) {
+        if (e[i].dir || (e[i].attr & 0x06) || !match(path_name(full), e[i].name))
+            continue;
+        path_join(p, sizeof p, dir, e[i].name);
+        sh_fmt(shown, sizeof shown, "%.*s%s", (int)(path_name(word) - word), word, e[i].name);
+        if (each(s, arg, p, shown) == 0)
+            took++;
+    }
+    s->h->dir_free(s->h->ctx, e);
+    return took;
+}
+
+/* FIND [/V] [/C] [/N] [/I] "string" [[drive:][path]filename ...]: the lines that have the string (/V: that haven't),
+   each file's under "---------- NAME" (the name as typed) after an empty line; /N each line's number first, "[n]";
+   /C only how many ("---------- NAME: n"); /I the case of letters aside. With no file, the input (a pipe, or <)
+   with no heading. As MS-DOS 7.1's FIND.EXE: the string must be in quotation marks (two of them in it are one);
+   the words between switches, names and the string are parted by spaces, tabs, commas or semicolons; a line is
+   at most 4096 bytes (a longer one is taken as lines of 4096, each counted, and each written with a line end);
+   a line is written with its own line end, or CR LF if it had none; Ctrl+Z ends a file. The exit code is what
+   came last: 2 after a file that couldn't be read, 0 after a line with the string (with /V too); 1 if neither
+   came; 2 for what can't be run at all. */
+#define FIND_V 1
+#define FIND_C 2
+#define FIND_N 4
+#define FIND_I 8
+#define FIND_LINE 4096
+
+struct find {
+    char what[SH_LINE];                 /* the string */
+    char files[SH_LINE];                /* the names, each ended by a NUL, the last by two */
+    char w[SH_LINE];                    /* (a word of the command's, read) */
+    int len, flags, code;
+    unsigned char line[FIND_LINE], in[4096];
+};
+
+static int find_has(const struct find *f, const unsigned char *t, int n)
+{
+    int i, k;
+    for (i = 0; f->len && i + f->len <= n; i++) {
+        for (k = 0; k < f->len; k++) {
+            int a = t[i + k], b = (unsigned char)f->what[k];
+            if (a != b && (!(f->flags & FIND_I) || fold437(a) != fold437(b)))
+                break;
+        }
+        if (k == f->len)
+            return 1;
+    }
+    return 0;
+}
+
+/* One file's lines (or the input's, shown 0: no heading) searched: 0, or -1 if it can't be opened. */
+static int find_in(struct sh *s, void *arg, const char *path, const char *shown)
+{
+    struct find *f = arg;
+    char t[SH_PATH + 40];
+    void *h = s->h->open(s->h->ctx, path, 'r');
+    unsigned long no = 0, count = 0;
+    int n = 0, got = 0, at = 0, end = 0;
+    if (!h)
+        return -1;
+    if (shown && !(f->flags & FIND_C)) {
+        sh_fmt(t, sizeof t, "\r\n---------- %s\r\n", shown);
+        say(s, t);
+    }
+    while (!end) {
+        int c = -1, hit;
+        if (at == got) {
+            got = s->h->read(s->h->ctx, h, f->in, (int)sizeof f->in);
+            at = 0;
+        }
+        if (got <= 0 || (c = f->in[at++]) == 0x1A)
+            end = 1, c = -1;
+        if (c >= 0)
+            f->line[n++] = (unsigned char)c;
+        if (!n || (c != '\n' && n < FIND_LINE && !end))
+            continue;
+        no++;
+        if ((hit = find_has(f, f->line, n)) != 0)
+            f->code = 0;
+        if (hit != ((f->flags & FIND_V) != 0)) {
+            count++;
+            if (!(f->flags & FIND_C)) {
+                if (f->flags & FIND_N) {
+                    sh_fmt(t, sizeof t, "[%lu]", no);
+                    say(s, t);
+                }
+                say_text(s, f->line, n);
+                if (f->line[n - 1] != '\n')
+                    say_text(s, "\r\n", 2);
+            }
+        }
+        n = 0;
+    }
+    s->h->close(s->h->ctx, h);
+    if (f->flags & FIND_C) {
+        if (shown)
+            sh_fmt(t, sizeof t, "\r\n---------- %s: %lu\r\n", shown, count);
+        else
+            sh_fmt(t, sizeof t, "%lu\r\n", count);
+        say(s, t);
+    }
+    return 0;
+}
+
+/* raw: the command as typed, its redirections taken out; source: its input's file (a pipe, <), or "". */
+static int cmd_find(struct sh *s, const char *raw, const char *source)
+{
+    struct find *f = s->h->alloc(s->h->ctx, sizeof *f);
+    const char *t = raw, *bad = 0;
+    char line[SH_PATH + 40];
+    unsigned k = 0;
+    int have = 0, r;
+    if (!f) {
+        err(s, "FIND: Insufficient memory\r\n");
+        return s->level = 2;
+    }
+    f->flags = 0, f->code = 1;
+    while (*t == ' ' || *t == '\t')
+        t++;
+    while (*t && *t != ' ' && *t != '\t')       /* (FIND itself) */
+        t++;
+    for (;;) {
+        char *w = f->w;
+        unsigned n = 0;
+        int quoted;
+        while (*t && strchr(" \t,;", *t))
+            t++;
+        if (!*t)
+            break;
+        if ((quoted = *t == '"') != 0) {        /* ("" in it is one; what follows the last begins the next word) */
+            for (t++; *t && (*t != '"' || t[1] == '"'); t++) {
+                if (*t == '"')
+                    t++;
+                if (n < sizeof f->w - 1)
+                    w[n++] = *t;
+            }
+            if (!*t) {
+                bad = "FIND: Parameter format not correct\r\n";
+                break;
+            }
+            t++;
+        } else {
+            for (; *t && !strchr(" \t,;", *t); t++)
+                if (n < sizeof f->w - 1)
+                    w[n++] = *t;
+        }
+        w[n] = 0;
+        if (!quoted && w[0] == '/') {
+            const char *sw = "VCNI";
+            if (n != 2 || !strchr(sw, upper((unsigned char)w[1]))) {
+                bad = "FIND: Invalid switch\r\n";
+                break;
+            }
+            f->flags |= 1 << (strchr(sw, upper((unsigned char)w[1])) - sw);
+        } else if (!have) {
+            if (!quoted) {
+                bad = "FIND: Parameter format not correct\r\n";
+                break;
+            }
+            memcpy(f->what, w, n + 1);
+            f->len = (int)n;
+            have = 1;
+        } else if (k + n + 2 < sizeof f->files) {
+            memcpy(f->files + k, w, n + 1);
+            k += n + 1;
+        }
+    }
+    f->files[k] = 0;
+    if (!bad && !have)
+        bad = "FIND: Required parameter missing\r\n";
+    if (bad) {
+        err(s, bad);
+        s->h->free(s->h->ctx, f);
+        return s->level = 2;
+    }
+    if (!k) {                                   /* the input (nothing to read from NUL) */
+        if (!source || !source[0]) {
+            err(s, "FIND \"string\" file, FIND \"string\" < file, or command | FIND \"string\"\r\n");
+            f->code = 2;
+        } else if (same(source, "NUL")) {
+            if (f->flags & FIND_C)
+                say(s, "0\r\n");
+        } else if (find_in(s, f, source, 0) != 0) {
+            sh_fmt(line, sizeof line, "File not found - %s\r\n", source);
+            err(s, line);
+            f->code = 2;
+        }
+    } else {
+        const char *w;
+        for (w = f->files; *w; w += strlen(w) + 1) {
+            /* (a line end after each, which MS-DOS's leave to the next heading's empty line or the prompt) */
+            int n = each_file(s, w, find_in, f);
+            if (n > 0)
+                continue;
+            sh_fmt(line, sizeof line, n < 0 ? "Access denied  - %s\r\n" : "File not found - %s\r\n", w);
+            err(s, line);
+            f->code = 2;
+        }
+    }
+    r = f->code;
+    s->h->free(s->h->ctx, f);
+    return s->level = r;
+}
+
+/* SORT [/R] [/+n] [[drive:][path]filename ...]: the lines of the files (or of the input: a pipe, <) in order, to the
+   output. As MS-DOS 7.1's SORT.EXE: letters in any case, and with accents, sort as one (cp437_order); a line that
+   is the start of another first; /R the other way; /+n by what is from the line's n-th character on (a line
+   shorter has nothing there, and goes first). LF ends a line, a CR before it is not the line's, and each is
+   written with CR LF; a last line with none is written with none, if it is written last; Ctrl+Z ends a file. A
+   file that isn't there is said and passed over (the exit code stays 0, as MS-DOS's); a switch it doesn't know:
+   1. Lines the same in order keep the order they came in (MS-DOS 7.1's are as its sort leaves them); lines are
+   kept whole (MS-DOS's are cut at 511 characters) and so are NULs in them; it all must fit in SORT_MAX. */
+#define SORT_MAX (256ul * 1024)
+#define SORT_END 0x80000000ul           /* (in a line's len: it had a line end) */
+
+struct sort_line {
+    unsigned long at, len;
+};
+
+struct sort {
+    unsigned char *text;
+    unsigned long size, used, room;     /* what the files are, what has been read, what may be */
+    unsigned long *ends;                /* where each file's text ends */
+    unsigned nfiles, room_files;
+    unsigned long col;                  /* /+n: n - 1 */
+    int rev;
+};
+
+static int sort_cmp(const struct sort *o, const struct sort_line *a, const struct sort_line *b)
+{
+    unsigned long la = a->len & ~SORT_END, lb = b->len & ~SORT_END, i;
+    const unsigned char *p = o->text + a->at, *q = o->text + b->at;
+    int r = 0;
+    la = la > o->col ? la - o->col : 0;         /* (what is from column n on: nothing, in a shorter line) */
+    lb = lb > o->col ? lb - o->col : 0;
+    p += la ? o->col : 0;
+    q += lb ? o->col : 0;
+    for (i = 0; i < la && i < lb && !r; i++)
+        r = order437(p[i]) - order437(q[i]);
+    if (!r)
+        r = la < lb ? -1 : la > lb;
+    return o->rev ? -r : r;
+}
+
+/* (each_file's each: a file's size counted, the first time; its text read, the second) */
+static int sort_size(struct sh *s, void *arg, const char *path, const char *shown)
+{
+    struct sort *o = arg;
+    struct sh_dirent e;
+    (void)shown;
+    if (s->h->stat(s->h->ctx, path, &e) != 0)
+        return -1;
+    o->size += e.size;
+    o->nfiles++;
+    return 0;
+}
+
+static int sort_read(struct sh *s, void *arg, const char *path, const char *shown)
+{
+    struct sort *o = arg;
+    void *f = s->h->open(s->h->ctx, path, 'r');
+    unsigned long from = o->used;
+    unsigned char *z;
+    int got;
+    (void)shown;
+    if (!f)
+        return -1;
+    while (o->used < o->room
+           && (got = s->h->read(s->h->ctx, f, o->text + o->used,
+                                o->room - o->used < 16384 ? (int)(o->room - o->used) : 16384)) > 0)
+        o->used += (unsigned long)got;
+    s->h->close(s->h->ctx, f);
+    if ((z = memchr(o->text + from, 0x1A, o->used - from)) != 0)
+        o->used = (unsigned long)(z - o->text);
+    if (o->nfiles < o->room_files)
+        o->ends[o->nfiles++] = o->used;
+    return 0;
+}
+
+static int cmd_sort(struct sh *s, int argc, char **argv, const char *source)
+{
+    struct sort o;
+    struct sort_line *lines = 0;
+    unsigned long n = 0, i, w;
+    unsigned at;
+    int k, pass, files = 0, r = 1;
+    char line[SH_PATH + 40];
+    memset(&o, 0, sizeof o);
+    for (k = 1; k < argc; k++) {
+        const char *a = argv[k];
+        if (a[0] != '/') {
+            argv[++files] = argv[k];
+            continue;
+        }
+        if (same(a, "/R")) {
+            o.rev = 1;
+        } else if (a[1] == '+' && a[2] >= '0' && a[2] <= '9') {
+            unsigned long c = 0;
+            for (a += 2; *a >= '0' && *a <= '9' && c < 100000000ul; a++)   /* (what follows the number: nothing) */
+                c = c * 10 + (unsigned long)(*a - '0');
+            if (!c)
+                break;
+            o.col = c - 1;
+        } else {
+            break;
+        }
+    }
+    if (k < argc) {
+        err(s, "SORT: Invalid switch\r\n");
+        return s->level = 1;
+    }
+    if (!files && (!source || !source[0])) {
+        err(s, "SORT file, SORT < file, or command | SORT\r\n");
+        return s->level = 1;
+    }
+    if (!files && same(source, "NUL"))
+        return s->level = 0;
+    /* twice: the sizes (and what isn't there said), then the text read */
+    for (pass = 0; pass < 2; pass++) {
+        if (pass) {
+            if (o.size > SORT_MAX || !(o.text = s->h->alloc(s->h->ctx, (unsigned)o.size + 1))
+                || !(o.ends = s->h->alloc(s->h->ctx, (o.nfiles + 1) * (unsigned)sizeof *o.ends))) {
+                sh_fmt(line, sizeof line, "SORT: Insufficient memory (it sorts %lu KB at most)\r\n", SORT_MAX / 1024);
+                err(s, line);
+                goto done;
+            }
+            o.room = o.size, o.room_files = o.nfiles + 1, o.nfiles = 0;
+        }
+        if (!files) {
+            if ((pass ? sort_read : sort_size)(s, &o, source, 0) != 0 && !pass) {
+                sh_fmt(line, sizeof line, "SORT: File <%s> not found\r\n", source);
+                err(s, line);
+            }
+            continue;
+        }
+        for (k = 1; k <= files; k++) {
+            int got = each_file(s, argv[k], pass ? sort_read : sort_size, &o);
+            size_t len = strlen(argv[k]);
+            if (got > 0 || pass)
+                continue;
+            if (got < 0)                        /* (a folder: MS-DOS names its files) */
+                sh_fmt(line, sizeof line, "SORT: File <%s%s*.*> not found\r\n", argv[k],
+                       len && argv[k][len - 1] == ':' ? "" : "\\");
+            else
+                sh_fmt(line, sizeof line, "SORT: File <%s> not found\r\n", argv[k]);
+            err(s, line);
+        }
+    }
+    /* the lines: LF ends each (a CR before it not the line's), a file's end the last */
+    for (pass = 0; pass < 2; pass++) {
+        unsigned long from = 0;
+        n = 0;
+        for (at = 0; at < o.nfiles; at++) {
+            for (i = from; i < o.ends[at]; i = w + 1) {
+                for (w = i; w < o.ends[at] && o.text[w] != '\n'; w++)
+                    ;
+                if (pass) {
+                    unsigned long len = w - i;
+                    if (w < o.ends[at] && len && o.text[w - 1] == '\r')
+                        len--;
+                    lines[n].at = i;
+                    lines[n].len = len | (w < o.ends[at] ? SORT_END : 0);
+                }
+                n++;
+            }
+            from = o.ends[at];
+        }
+        if (!pass && n && !(lines = s->h->alloc(s->h->ctx, (unsigned)(n * 2 * sizeof *lines)))) {
+            sh_fmt(line, sizeof line, "SORT: Insufficient memory (it sorts %lu KB at most)\r\n", SORT_MAX / 1024);
+            err(s, line);
+            goto done;
+        }
+        if (!n)
+            break;
+    }
+    /* merged in runs that double (the second half of lines is the room for it): equal lines keep their order */
+    if (n) {
+        struct sort_line *from = lines, *to = lines + n, *t;
+        for (w = 1; w < n; w *= 2) {
+            for (i = 0; i < n; i += 2 * w) {
+                unsigned long mid = i + w < n ? i + w : n, hi = i + 2 * w < n ? i + 2 * w : n, x = i, y = mid, c = i;
+                while (x < mid && y < hi)
+                    to[c++] = sort_cmp(&o, &from[y], &from[x]) < 0 ? from[y++] : from[x++];
+                while (x < mid)
+                    to[c++] = from[x++];
+                while (y < hi)
+                    to[c++] = from[y++];
+            }
+            t = from, from = to, to = t;
+        }
+        for (i = 0; i < n; i++) {
+            const unsigned char *l = o.text + from[i].at;
+            unsigned long len = from[i].len & ~SORT_END;
+            if ((from[i].len & SORT_END) && l[len] == '\r') {
+                say_text(s, l, (int)len + 2);   /* (its own CR LF) */
+            } else {
+                say_text(s, l, (int)len);
+                if ((from[i].len & SORT_END) || i + 1 < n)
+                    say_text(s, "\r\n", 2);
+            }
+        }
+    }
+    r = 0;
+done:
+    if (lines)
+        s->h->free(s->h->ctx, lines);
+    if (o.ends)
+        s->h->free(s->h->ctx, o.ends);
+    if (o.text)
+        s->h->free(s->h->ctx, o.text);
+    return s->level = r;
+}
+
 static int cmd_cd(struct sh *s, int argc, char **argv)
 {
     char p[SH_PATH], line[300];
@@ -1655,7 +2133,7 @@ static int cmd_set(struct sh *s, int argc, char **argv, const char *raw)
 static const char *const builtins[] = { "CD", "CHDIR", "DIR", "COPY", "MOVE", "REN", "RENAME", "DEL", "ERASE", "MD",
     "MKDIR", "RD", "RMDIR", "TYPE", "ECHO", "SET", "PATH", "PROMPT", "CLS", "VER", "EXIT", "HISTORY", "HELP", "WHERE",
     "START", "DF", "DU", "CALL", "FOR", "GOTO", "IF", "PAUSE", "REM", "SHIFT", "VOL", "TRUENAME", "BREAK", "VERIFY",
-    "LH", "LOADHIGH", "CTTY", "ATTRIB", "XCOPY", "MORE", "DELTREE", "CHOICE", 0 };
+    "LH", "LOADHIGH", "CTTY", "ATTRIB", "XCOPY", "MORE", "DELTREE", "CHOICE", "FIND", "SORT", 0 };
 
 static const char *const helps[] = {
     "CD [path]           the folder (of a drive: CD X:); X: changes drive",
@@ -1667,6 +2145,8 @@ static const char *const helps[] = {
     "XCOPY from [to] [/S] [/E] [/H] ...  files copied, with /S the folders in them",
     "DELTREE [/Y] path ...  a folder and all in it deleted (asked first)",
     "MORE [file]         a page at a time (also: command | MORE)",
+    "FIND [/V] [/C] [/N] [/I] \"text\" [files]  the lines with the text (also: command | FIND \"text\")",
+    "SORT [/R] [/+n] [files]  the lines in order (also: command | SORT)",
     "ATTRIB [+R|-R] [+A|-A] [+S|-S] [+H|-H] [path]  attributes changed, or listed",
     "MD path, RD path    a folder made, removed",
     "DF [drive: ...]     the drives: their size, what is used and free",
@@ -2396,7 +2876,7 @@ static int run_line(struct sh *s, char *line)
             s->h->io(s->h->ctx, 0, 0, 0);
         return st == BATCH_BEGUN ? s->errorlevel : st > 0 ? SH_UNDER_WAY : st < 0 ? 1 : 0;
     }
-    if (bare(line, "<>")) {                     /* a built-in: its output to the file (MORE alone reads its input) */
+    if (bare(line, "<>")) {                     /* a built-in: its output to the file (MORE, FIND, SORT read input) */
         if (take_redirs(s, line, source, target, sizeof target, &append) != 0) {
             err(s, "Syntax error\r\n");
             return 1;
@@ -2454,6 +2934,10 @@ static int run_line(struct sh *s, char *line)
         r = cmd_xcopy(s, argc, argv);
     } else if (same(argv[0], "MORE")) {
         r = cmd_more(s, argc, argv, source);
+    } else if (same(argv[0], "FIND")) {
+        r = cmd_find(s, line, source);
+    } else if (same(argv[0], "SORT")) {
+        r = cmd_sort(s, argc, argv, source);
     } else if (same(argv[0], "DELTREE")) {
         r = cmd_deltree(s, argc, argv);
     } else if (same(argv[0], "CHOICE")) {

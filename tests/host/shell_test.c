@@ -10,6 +10,8 @@
  *   mkdir PATH      a folder made (DOS path)
  *   file PATH TEXT  a file made, with TEXT and a CR LF
  *   line PATH TEXT  a line added to a file (a batch file's next line)
+ *   bytes PATH TEXT TEXT's bytes added to a file (made if not there), nothing after them: \r \n \t \\ and \xHH as
+ *                   in C, and \*Nc the character c N times (FIND's and SORT's files: no line end, Ctrl+Z, long lines)
  *   key C           the key the shell waits for (PAUSE, "Terminate batch job (Y/N)?")
  *   stop            Ctrl+C: the shell is told when it next asks
  *   nokeys          from here nobody is at a keyboard
@@ -363,6 +365,32 @@ int main(int argc, char **argv)
             native(arg, p, sizeof p);
             if ((f = fopen(p, "ab")) != NULL) {
                 fprintf(f, "%s\r\n", text ? text : "");
+                fclose(f);
+            }
+        } else if (!strncmp(line, "bytes ", 6)) {
+            char *text = strchr(arg, ' ');
+            if (text)
+                *text++ = 0;
+            native(arg, p, sizeof p);
+            if ((f = fopen(p, "ab")) != NULL) {
+                for (; text && *text; text++) {
+                    int c = (unsigned char)*text;
+                    if (c == '\\' && text[1]) {
+                        c = (unsigned char)*++text;
+                        if (c == 'r' || c == 'n' || c == 't') {
+                            c = c == 'r' ? '\r' : c == 'n' ? '\n' : '\t';
+                        } else if (c == 'x' && text[1] && text[2]) {
+                            char hex[3] = { text[1], text[2], 0 };
+                            c = (int)strtol(hex, NULL, 16);
+                            text += 2;
+                        } else if (c == '*') {
+                            long n = strtol(text + 1, &text, 10);
+                            for (c = (unsigned char)*text; n > 1; n--)
+                                fputc(c, f);
+                        }
+                    }
+                    fputc(c, f);
+                }
                 fclose(f);
             }
         } else if (!strncmp(line, "key ", 4)) {

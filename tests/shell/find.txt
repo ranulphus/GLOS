@@ -1,0 +1,140 @@
+# FIND (sdk/shell, 2026-11-27): as MS-DOS 7.1's FIND.EXE (asked of the reference disk) where docs/v1/shell.md
+# doesn't say otherwise: names may be patterns; each "File not found" ends its line; no keyboard to read from.
+mkdir C:\W
+mkdir C:\SUB
+line C:\A.TXT Hello world
+line C:\A.TXT hello again
+line C:\A.TXT HELLO THERE
+line C:\A.TXT goodbye
+line C:\A.TXT
+line C:\A.TXT a line with "quotes" in it
+line C:\A.TXT tab	here and hello
+line C:\A.TXT Hellohello twice
+line C:\A.TXT last line hello
+line C:\B.TXT nothing here
+line C:\B.TXT hello from b
+line C:\C.TXT no match
+line C:\C.TXT at all
+line C:\SUB\D.TXT hello from d
+line C:\W\A.TXT hello from w
+line C:\W\B.TXT nothing in w
+line C:\W\C.TXT hello again from w
+bytes C:\NOEOL.TXT first line\r\nhello no eol
+bytes C:\CTRLZ.TXT hello before\r\nmiddle\x1ahello after\r\nlast\r\n
+bytes C:\Z1.TXT \x1ahello\r\n
+bytes C:\LF.TXT hello one\nhello two\nthree\n
+bytes C:\CR.TXT hello one\rhello two\rthree\r\n
+bytes C:\NULB.TXT hel\x00lo nul\r\nhello\x00after\r\nplain\r\n
+bytes C:\EMPTY.TXT
+bytes C:\ACC.TXT caf\x82 one\r\nCAF\x90 two\r\ncafe three\r\nCAFE four\r\n
+bytes C:\P1.TXT \*4090x0123456789ABCDEF\*20y\r\nnext\r\n
+bytes C:\P2.TXT \*4096q\r\nnext\r\n
+bytes C:\P3.TXT \*4095q\r\nnext\r\n
+bytes C:\P5.TXT \*4093ahellotail\r\n
+bytes C:\P7.TXT \*4096q
+# each file under its heading, after an empty line; /I, /V, /C, /N
+> find "hello" a.txt
+> find /i "hello" a.txt
+> find /v "hello" a.txt
+> find /c "hello" a.txt
+> find /n "hello" a.txt
+> find /n /v /i "hello" a.txt
+> find /c /v "hello" a.txt
+> find /c /n "hello" a.txt
+> find "hello" a.txt b.txt c.txt
+> echo %errorlevel%
+> find "hello" a.txt > f.txt
+cat C:\F.TXT
+> find /c "hello" a.txt b.txt > f.txt
+cat C:\F.TXT
+# the input (a pipe, or <): no heading
+> find "hello" < a.txt
+> type a.txt | find /c "hello"
+> find /n "hello" < a.txt
+> find /c /v "hello" < a.txt > f.txt
+cat C:\F.TXT
+> find "zzz" < nul
+> find /c "zzz" < nul
+> find /c "zzz" < empty.txt
+# names as typed; switches anywhere; spaces, commas and semicolons between words
+> find /c "hello" c:\sub\d.txt
+> find "hello" .\a.txt /c
+> find "hello" /C a.txt,b.txt;c.txt
+> find "hello"a.txt
+> find /V /N "hello"	c.txt
+# the string: two quotation marks in it are one; an empty one finds nothing
+> find """quotes""" a.txt
+> find "with "quotes" in" a.txt
+> find "tab	here" a.txt
+> find "" a.txt
+> echo %errorlevel%
+> find /v "" a.txt
+> echo %errorlevel%
+> find /c /v "" a.txt
+# /I: code page 437's capitals, as MS-DOS 7.1's (e acute is E, E acute its own)
+> find /i "CAFE" acc.txt
+# a file's end: no line end (CR LF written), Ctrl+Z, LF alone (kept), CR alone (no line end), NULs, nothing
+> find "hello" noeol.txt
+> find /v "hello" noeol.txt > f.txt
+cat C:\F.TXT
+> find /v "zzz" ctrlz.txt > f.txt
+cat C:\F.TXT
+> find /n /v "hello" < ctrlz.txt
+> find /v "zzz" z1.txt
+> find /v "zzz" lf.txt > f.txt
+cat C:\F.TXT
+> find "hello" cr.txt > f.txt
+cat C:\F.TXT
+> find /c "hello" nulb.txt
+> find /c "after" nulb.txt
+> find "zzz" empty.txt
+> echo %errorlevel%
+> find /c "zzz" empty.txt
+# a line of more than 4096 bytes is lines of 4096, as MS-DOS 7.1's
+> find /n "6789ABCDEFy" p1.txt
+> find /c "012345" p1.txt
+> find /c "0123456" p1.txt
+> find /n /v "q" p2.txt
+> find /n /v "q" p3.txt > f.txt
+cat C:\F.TXT
+> find "hello" p5.txt
+> echo %errorlevel%
+> find /c "q" p7.txt
+# the exit code is what came last: 2 after a file not read, 0 after the string found, else 1
+> find "hello" nosuch.txt
+> echo %errorlevel%
+> find "hello" a.txt nosuch.txt b.txt > nul
+> echo %errorlevel%
+> find "hello" a.txt nosuch.txt > nul
+> echo %errorlevel%
+> find "zzz" a.txt nosuch.txt > nul
+> echo %errorlevel%
+> find "zzz" a.txt > nul
+> if errorlevel 1 echo not found
+> find "hello" a.txt > nul && echo found
+# folders, and what isn't there
+> find "hello" sub
+> find "hello" w\
+> find "hello" q:\a.txt
+> find "hello" nowhere\a.txt
+# patterns (MS-DOS 7.1's FIND takes none: File not found - W\*.TXT): each match, in the folder as typed
+> find "hello" w\*.txt
+> find /c "hello" w\*.txt
+> cd w
+> find "hello" *.txt
+> cd \
+> find "hello" nosuch*.txt
+> echo %errorlevel%
+# what can't be run at all: exit code 2
+> find hello a.txt
+> echo %errorlevel%
+> find /x "hello" a.txt
+> find /vc "hello" a.txt
+> find
+> find /c
+> find "unterminated a.txt
+> echo %errorlevel%
+# no file and no input: GLOS has no keyboard to read the text from
+> find "hello"
+> echo %errorlevel%
+> exit

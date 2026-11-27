@@ -33,7 +33,7 @@ GLOS the DOS's own commands still run, but the shell's built-ins answer first fo
 | Command | Today | Proposed |
 |---|---|---|
 | ATTRIB, XCOPY, MOVE, DELTREE, MORE, CHOICE, START | built-in | as is |
-| FIND, SORT | missing | built-ins (FIND's /V /C /N /I; SORT's /R /+n), pipe-friendly |
+| FIND, SORT | built-in (C1a, 2026-11-27: [shell.md](shell.md)) | FIND's /V /C /N /I; SORT's /R /+n, pipe-friendly |
 | FC, COMP | missing | FC (text: /C /N /W; binary /B), COMP as FC /B's other face |
 | TREE | missing | built-in (/F, /A) |
 | LABEL | missing | built-in (FAT volume label) |
