@@ -1,0 +1,17 @@
+# CHKDSK and SCANDISK (sdk/shell, 2026-11-27): MS-DOS 7.1's CHKDSK.EXE as it is on a FAT32 volume (the reference
+# disk's, whose figures the test host gives): the volume, its space and allocation units, DOS's memory. It checks
+# nothing, and says so: GLOS has no checker of a volume's FAT yet.
+> chkdsk
+mem plain
+> chkdsk c:
+> chkdsk /f /v
+> scandisk
+> chkdsk small.txt
+> chkdsk > c.txt
+cat C:\C.TXT
+# what it refuses
+> chkdsk q:
+> echo %errorlevel%
+> chkdsk /x
+> chkdsk c: d:
+> exit

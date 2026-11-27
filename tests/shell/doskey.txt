@@ -1,0 +1,42 @@
+# DOSKEY's macros (sdk/shell, 2026-11-27): as MS-DOS 7.1's DOSKEY.COM (its /MACROS lists asked of the reference
+# disk): a typed line's first word that is a macro's name becomes its text; $1-$9, $*, $T, $G, $L, $B, $$.
+mkdir C:\BIN
+file C:\BIN\A.COM x
+> doskey /macros
+> doskey go=echo one $1 two $2 $T echo all $*
+> doskey ls=dir /b $*
+> doskey /macros
+> go a b c
+> GO x
+> ls \bin
+# a space first: the command of that name, not the macro; a batch file's lines: never a macro
+>  ls
+line C:\M.BAT @ls
+> m
+# $G $L $B $$; a macro of the same name again; name text, name = text; name= forgets it
+> doskey out=echo to $G o.txt $$1
+> doskey pg=type o.txt $B find "to"
+> doskey /m
+> out
+cat C:\O.TXT
+> pg
+> doskey run=a $1 $L o.txt
+> run x
+ended 0
+> doskey go=echo new go
+> go
+> doskey x y
+> doskey name = text two
+> doskey /macros
+> doskey go=
+> doskey =x
+> doskey /macros
+> go
+# /HISTORY; /REINSTALL forgets them all; a switch with a colon
+> doskey /history
+> doskey /reinstall
+> doskey /macros
+> doskey /macros:all
+> echo %errorlevel%
+> doskey /bufsize=1024 /insert
+> exit

@@ -20,6 +20,7 @@
 #define SH_VARS    64
 #define SH_BATCH   16                   /* batch files that CALL one another, deep */
 #define SH_ARGS    32                   /* a batch file's arguments kept (%0 to %9 are the first ten after SHIFTs) */
+#define SH_MACROS  1024                 /* DOSKEY's macros: NAME=text, each ended by a NUL, the last by two */
 
 struct sh_dirent {
     char name[64];                      /* DOS's bytes */
@@ -30,6 +31,15 @@ struct sh_dirent {
 };
 
 enum { SH_OUT, SH_ERR, SH_PROMPT, SH_TEXT };    /* what is written: output, an error, the prompt, a file's own bytes */
+
+/* CHKDSK's (C1d): a drive's volume. */
+struct sh_fsinfo {
+    unsigned long unit, units, free_units;      /* bytes in each allocation unit; units in all, and free */
+    char label[12];                             /* "": none */
+    unsigned short date, time;                  /* the label's entry's, DOS's (0: none) */
+    unsigned long serial;
+    int has_serial;
+};
 
 /* MEM's figures (C1c, 2026-11-27): DOS's memory as a program started now would find it, in bytes (0: none). */
 struct sh_mem {
@@ -128,6 +138,8 @@ struct sh_host {
     /* KEYB, MODE CON RATE= DELAY=: a setting of GLOS.CFG's ([region] layout, [input] repeat_rate ...) read into
        out (value 0: as it applies now, "codepage" as a number) or set, at once and saved. 0, or -1 with why in out */
     int (*setting)(void *ctx, const char *section, const char *key, const char *value, char *out, unsigned room);
+    /* (C1d) CHKDSK: a drive's volume. 0, or -1 */
+    int (*fsinfo)(void *ctx, int drive, struct sh_fsinfo *f);
 };
 
 /* A batch file being run (S4): where it is, how far it has got, what it was given. */
@@ -191,6 +203,7 @@ struct sh {
         char edit[128];                 /* ... and the line being typed */
         int nedit;
     } tool;
+    char macros[SH_MACROS];             /* (C1d) DOSKEY's: what a typed line's first word becomes */
 };
 
 void sh_start(struct sh *s, const struct sh_host *h, const char *const *env);  /* env: NAME=VALUE ..., 0 at the end */

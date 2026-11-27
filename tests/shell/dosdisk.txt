@@ -1,0 +1,25 @@
+# FORMAT, SYS and FDISK (sdk/shell, 2026-11-27): DOS's names for GLOS's DISK, which they run, saying which: DISK's
+# rules stand (without /Y it says what would be lost; never the disk GLOS or DOS runs from). The test host's DISK
+# is a command that goes on: its line is shown.
+> format c:
+ended 0
+> format d: /v:new /q /y
+ended 0
+> sys c:
+ended 0
+> sys d: /y
+ended 0
+> fdisk
+ended 0
+> fdisk /status
+ended 0
+# what they refuse
+> format
+> echo %errorlevel%
+> format a:
+> format c: /s
+> format c: /f:1440
+> sys b:
+> fdisk 1 2
+> format c: d:
+> exit

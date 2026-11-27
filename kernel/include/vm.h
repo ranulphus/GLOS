@@ -201,6 +201,7 @@ int  vdos_testdisk(const char *how, char *msg, unsigned room);    /* glos testdi
 struct ems_regs;
 int  ems_vm_init(void);                         /* emsvm.c: EMS for the system VM (natively): 0, or -1 off */
 int  ems_vm_on(void);
+void ems_vm_figures(u32 *total, u32 *free);     /* (MEM) its 16 KB pages, in all and free */
 void ems_vm_call(struct ems_regs *r);
 int  mscdex_int2f(struct dos_regs86 *r);
 void mscdex_request(u32 r, int unit);
@@ -235,6 +236,7 @@ int vm_int15(struct trapframe *tf, u32 ret_ip); /* 1: emulated */
 void vm_int15_tick(u32 now);
 void xms_init(struct bootinfo *bi);
 void xms_call(struct trapframe *tf);
+void xms_figures(u32 *used_kb, u32 *free_kb);   /* (MEM) handed out, and left */
 int phys_copy(u32 dst, u32 src, u32 len);       /* physical addresses, any overlap */
 int phys_owned(u32 base, u32 len);              /* 1 if GLOS owns any of it */
 

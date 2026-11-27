@@ -561,10 +561,10 @@ static int h_stat(void *ctx, const char *path, struct sh_dirent *e)
 }
 
 /* A drive's volume: DOS's newer call first (INT 21h 7303h: a FAT32 volume's real size), else the old one
-   (36h: 2 GB at most); its label by a search for the volume's own entry. */
-static int h_space(void *ctx, int drive, unsigned long *total, unsigned long *left, char label[12])
+   (36h: 2 GB at most); its label by a search for the volume's own entry, and that entry's date and time. */
+static int volume(struct shsess *s, int drive, u32 *unit, u32 *units, u32 *free_units, char label[12], u16 *date,
+                  u16 *time)
 {
-    struct shsess *s = ctx;
     char root[8];
     u8 b[0x2C];
     u32 per, clusters, avail, i, k;
@@ -591,9 +591,9 @@ static int h_space(void *ctx, int drive, unsigned long *total, unsigned long *le
     }
     if (!per || !clusters)
         return -1;
-    *total = per >= 1024 ? clusters * (per >> 10) : clusters / (1024 / per);
-    *left = per >= 1024 ? avail * (per >> 10) : avail / (1024 / per);
+    *unit = per, *units = clusters, *free_units = avail;
     label[0] = 0;
+    *date = *time = 0;
     sh_fmt(root, sizeof root, "%c:\\*.*", 'A' + drive);
     if (paths(s, root, 0) == 0) {
         call(s, 0, 0x1A00, 0, 0, DTA_AT);
@@ -604,8 +604,153 @@ static int h_space(void *ctx, int drive, unsigned long *total, unsigned long *le
                 if (s->dta[0x1E + i] != '.')            /* (11 characters, with a dot DOS puts after the eighth) */
                     label[k++] = (char)s->dta[0x1E + i];
             label[k] = 0;
+            *time = (u16)(s->dta[0x16] | s->dta[0x17] << 8);
+            *date = (u16)(s->dta[0x18] | s->dta[0x19] << 8);
         }
     }
+    return 0;
+}
+
+static int h_space(void *ctx, int drive, unsigned long *total, unsigned long *left, char label[12])
+{
+    u32 per, clusters, avail;
+    u16 date, time;
+    if (volume(ctx, drive, &per, &clusters, &avail, label, &date, &time) != 0)
+        return -1;
+    *total = per >= 1024 ? clusters * (per >> 10) : clusters / (1024 / per);
+    *left = per >= 1024 ? avail * (per >> 10) : avail / (1024 / per);
+    return 0;
+}
+
+static int h_serial(void *ctx, int drive, unsigned long *serial);
+
+/* (CHKDSK, C1d) A drive's volume as CHKDSK shows it. */
+static int h_fsinfo(void *ctx, int drive, struct sh_fsinfo *f)
+{
+    u32 per, clusters, avail;
+    u16 date, time;
+    if (volume(ctx, drive, &per, &clusters, &avail, f->label, &date, &time) != 0)
+        return -1;
+    f->unit = per, f->units = clusters, f->free_units = avail;
+    f->date = date, f->time = time;
+    f->has_serial = h_serial(ctx, drive, &f->serial) == 0;
+    return 0;
+}
+
+/* (MEM, C1d) DOS's memory control blocks, from the first (INT 21h 52h's list: the word before it) to the last,
+   read in the system VM's memory, where DOS is (GLOS's own DOS keeps its tables there too, natively); upper
+   memory linked into the chain for the walk (5803h) and left as it was, as MS-DOS's MEM does. An upper region
+   ends at a block of DOS's own marked "SC" (memory that isn't DOS's to give: the screen's, a ROM's). n, or -1
+   (the chain isn't one: not walked). */
+#define MEM_BLOCKS 200
+
+static int mcb_chain(struct shsess *s, struct sh_mem_block *b, int max)
+{
+    u32 seg, i;
+    int n = 0, was = 1, linked = 0, region = 0, gap = 1;
+    req(s);
+    call(s, 0, 0x5200, 0, 0, 0);
+    if (made(s) != 0)
+        return -1;
+    seg = vm_rd16(vm_lin(s->q.r[0].es, (u16)(s->q.r[0].bx - 2)));
+    req(s);
+    call(s, 0, 0x5802, 0, 0, 0);
+    if (made(s) == 0 && !(was = s->q.r[0].ax & 0xFF)) {
+        req(s);
+        call(s, 0, 0x5803, 1, 0, 0);
+        linked = made(s) == 0;
+    }
+    for (i = 0; i < 4096 && seg && seg < 0xFFFF; i++) {
+        u32 lin = seg << 4, mem = seg + 1, owner = vm_rd16(lin + 1), size = vm_rd16(lin + 3), k;
+        u8 type = vm_rd8(lin);
+        char name[9];
+        if (type != 'M' && type != 'Z') {
+            if (!i)
+                n = -1;
+            break;
+        }
+        for (k = 0; k < 8; k++) {               /* (the owner's name: its own block's MCB, bytes 8 to 15) */
+            u32 at = owner == 8 || owner == mem ? lin : ((owner - 1) & 0xFFFF) << 4;
+            u8 c = vm_rd8(at + 8 + k);
+            name[k] = (char)(c >= 0x20 && c < 0x7F ? c : 0);
+            if (!c)
+                break;
+        }
+        name[k < 8 ? k : 8] = 0;
+        if (mem >= 0xA000 && owner == 8 && name[0] == 'S' && name[1] == 'C') {
+            gap = 1;                            /* (not DOS's to give: between regions) */
+        } else if (n >= 0 && n < max) {
+            struct sh_mem_block *x = &b[n++];
+            memset(x, 0, sizeof *x);
+            x->seg = mem, x->bytes = size * 16;
+            if (mem >= 0xA000 && gap)
+                region++, gap = 0;
+            x->region = (unsigned char)(mem >= 0xA000 ? region : 0);
+            if (!owner) {
+                x->type = SH_MB_FREE;
+            } else if (owner == 8) {
+                sh_fmt(x->name, sizeof x->name, "SYSTEM");
+                x->type = name[0] == 'S' && name[1] == 'C' ? SH_MB_SYSPROG : SH_MB_SYSDATA;
+            } else {
+                sh_fmt(x->name, sizeof x->name, "%s", name);
+                x->type = owner == mem ? SH_MB_PROGRAM : vm_rd16((owner << 4) + 0x2C) == mem ? SH_MB_ENV : SH_MB_DATA;
+            }
+        }
+        if (type == 'Z')
+            break;
+        seg += size + 1;
+    }
+    if (linked) {
+        req(s);
+        call(s, 0, 0x5803, 0, 0, 0);
+        (void)made(s);
+    }
+    return n;
+}
+
+static int h_mem_blocks(void *ctx, struct sh_mem_block **out)
+{
+    struct sh_mem_block *b = kmalloc(MEM_BLOCKS * sizeof *b);
+    int n;
+    if (!b)
+        return -1;
+    if ((n = mcb_chain(ctx, b, MEM_BLOCKS)) < 0) {
+        kfree(b);
+        return -1;
+    }
+    *out = b;
+    return n;
+}
+
+static int h_mem(void *ctx, struct sh_mem *m)
+{
+    struct shsess *s = ctx;
+    struct sh_mem_block *b;
+    u32 used, left, i;
+    int n = h_mem_blocks(ctx, &b);
+    if (n < 0)
+        return -1;
+    memset(m, 0, sizeof *m);
+    m->conv_total = 655360;
+    for (i = 0; i < (u32)n; i++) {
+        unsigned long *total = b[i].region ? &m->umb_total : 0, *fr = b[i].region ? &m->umb_free : &m->conv_free;
+        unsigned long *big = b[i].region ? &m->largest_umb : &m->largest;
+        if (total)
+            *total += b[i].bytes;
+        if (b[i].type == SH_MB_FREE) {
+            *fr += b[i].bytes;
+            if (b[i].bytes > *big)
+                *big = b[i].bytes;
+        }
+    }
+    kfree(b);
+    xms_figures(&used, &left);
+    m->xms_total = (unsigned long)(used + left) * 1024, m->xms_free = (unsigned long)left * 1024;
+    ems_vm_figures(&used, &left);
+    m->ems_total = (unsigned long)used * 16384, m->ems_free = (unsigned long)left * 16384;
+    req(s);                                     /* (DOS in the high memory area: 3306h's DH, bit 4) */
+    call(s, 0, 0x3306, 0, 0, 0);
+    m->hma = made(s) == 0 && (s->q.r[0].dx & 0x1000) != 0;
     return 0;
 }
 
@@ -1824,8 +1969,8 @@ static struct shsess *make(u32 cols, u32 rows, const char *line, const char *dir
     static const struct sh_host host = { 0, h_write, h_clear, h_prompted, h_input, h_quit, h_dir_read, h_dir_free,
         h_is_dir, h_stat, h_open, h_read, h_put, h_close, h_mkdir, h_rmdir, h_unlink, h_rename, h_space,
         h_run, h_as_typed,
-        own_names, own_help, h_extra, h_alloc, h_free, h_seek, h_key, h_stop, h_io, h_setattr, h_serial, 0, 0, 0,
-        h_term_size, h_setting };
+        own_names, own_help, h_extra, h_alloc, h_free, h_seek, h_key, h_stop, h_io, h_setattr, h_serial, 0, h_mem,
+        h_mem_blocks, h_term_size, h_setting, h_fsinfo };
     struct shsess *s;
     if (!(vm.bi->flags & BI_F_AGENT) || !(s = kmalloc(sizeof *s)))
         return 0;

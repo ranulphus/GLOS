@@ -742,11 +742,8 @@ its host is a new call of `struct sh_host`'s, each optional: without it the comm
   (`/DEBUG`) every block, conventional then each upper region, and the summary. `Invalid switch - /X`, `Invalid
   keyword - X`, `Too many parameters - /F` (a second of /C /F /D /M), `Required parameter missing - module name`, exit
   code 1. The host's `mem` gives the figures (`struct sh_mem`), `mem_blocks` the blocks (`struct sh_mem_block`).
-  - *Not done in the kernel:* `mem` and `mem_blocks`. They want DOS's MCB chain (INT 21h 52h's list, then the
-    blocks read in the DOS machine's memory: the system VM's on a hosted GLOS, a native machine's on a native one),
-    GLOS's upper memory, XMS (kernel/vm/xms.c's handles and the frames left) and EMS figures, and the HMA's state
-    (xms.c's `hma_taken`): more than this step's. Until then MEM says `MEM: GLOS can't tell what DOS's memory is
-    here (SYSMEM shows GLOS's own)`.
+  - *In the kernel since C1d* (below): `mem` and `mem_blocks` (kernel/shell/shsess.c). Without them a host's MEM
+    says `MEM: GLOS can't tell what DOS's memory is here (SYSMEM shows GLOS's own)`.
   - *Left out:* `/D`'s parts of DOS's own (the interrupt vectors, its devices, FILES=, BUFFERS=: what MS-DOS 7.1
     reads inside its own blocks), `/D`'s `Memory accessible using Int 15h` and `XMS version` lines, EMM386's note
     and its `*` on `Extended (XMS)` (GLOS's EMS is its own, not EMM386's); `/P` is taken and doesn't wait (`MEM /D
@@ -779,3 +776,55 @@ its host is a new call of `struct sh_host`'s, each optional: without it the comm
 Tests: `tests/shell/tree.txt`, `label.txt`, `mem.txt` (the test host's `mem PROFILE`: MS-DOS 7.1's figures from the
 reference disk), `mode.txt` (`termsize C L`), `keyb.txt`. The kernel's host (kernel/shell/shsess.c) gives `serial`,
 `term_size` and `setting`.
+
+## CHKDSK, DOSKEY, FORMAT, FDISK, SYS, and MEM's kernel side (2026-11-27)
+
+The last of C1 ([cli.md](cli.md)). CHKDSK's and DOSKEY's output was asked of MS-DOS 7.1's CHKDSK.EXE and
+DOSKEY.COM on the reference disk (some 35 cases); FORMAT, FDISK and SYS are GLOS's DISK under DOS's names.
+
+- **CHKDSK [d:] [path] [/F] [/V]**, and **SCANDISK** the same: MS-DOS 7.1's CHKDSK as it is on a FAT32 volume (the
+  reference disk's), where it checks nothing: `CHKDSK has NOT checked this drive for errors.`, `Volume LABEL created
+  MM-DD-YYYY H:MMa`, `Volume Serial Number is`, the bytes of total disk space and available, the bytes in each
+  allocation unit, the units in all and available, and DOS's memory (`total bytes memory`, `bytes free`: MEM's
+  conventional memory and its largest free block), each figure in thirteen columns, as MS-DOS's. The host's
+  `fsinfo` gives the volume (the kernel's: INT 21h 7303h or 36h, the label's entry by find-first 08h, 6900h).
+  `Invalid drive specification`, `Invalid switch - /X`, `Too many parameters - D:`, exit code 1.
+  - *Differences:* GLOS has no checker of a volume's FAT (there is none in kernel/fs: Disk Tools' Check the Disk
+    reads every sector, it doesn't check the FAT), so where MS-DOS says `You must use SCANDISK to detect and fix
+    errors on this drive.` GLOS's says it has no checker yet, and MS-DOS's closing advice to use SCANDISK is left
+    out; `/F` is taken and nothing is written. On a FAT16 volume MS-DOS 7.1's CHKDSK does check (DOS 6's lost
+    allocation units and cross-links); GLOS's gives the same summary there. A checker with a repair path is a step
+    of its own (kernel/fs, then CHKDSK's lost and cross-linked lines on it).
+- **DOSKEY**, MS-DOS 7.1's macros: `DOSKEY name=text` (also `name text` and `name = text`; the name in capitals;
+  `name=` forgets one; `=x` does nothing); a typed line whose first word is a macro's name becomes its text, `$1` to
+  `$9` the words after the name (nothing for one not there), `$*` all of what follows it, `$T` between commands
+  (each runs whatever came of the last), `$G` `>`, `$L` `<`, `$B` `|`, `$$` `$`; a line begun with a space is never
+  a macro's, and neither is a batch file's line (sh_line alone expands them). `/MACROS` (`/M`) lists them as
+  MS-DOS's does, `NAME=text` and two spaces, with `$T` `$G` `$L` `$B` kept as `$t` `$g` `$l` `$b`, an empty line for
+  none; `/HISTORY` (`/H`) the lines typed (the shell's HISTORY, plain); `/REINSTALL` forgets the macros; a switch
+  with a colon is `Invalid switch or macro definition` (exit code 1); the other switches (`/BUFSIZE=n`, `/INSERT`
+  ...) are taken. Room: 1 KB of macros a session (`Insufficient memory to store macro ...`).
+  - *Differences:* `DOSKEY` alone and `/REINSTALL` say nothing (MS-DOS's say `DOSKey installed` or `DOSKey already
+    installed`: GLOS's line editor and history are always there); `/BUFSIZE` is taken where MS-DOS's wants
+    `/REINSTALL` with it.
+- **FORMAT d: [/V:label] [/Q] [/U] [/Y]**, **SYS d: [/Y]**, **FDISK [/STATUS]**: DOS's names for DISK, which they
+  run, saying which first (`FORMAT C: is DISK C: FORMAT /V:X`): `DISK d: FORMAT`, `DISK d: BOOT` (FreeDOS's boot
+  records: its KERNEL.SYS is COPY's to put there), `DISK` (the disks and partitions, after `FDISK's menus are not
+  GLOS's: DISK n NEW, DISK n FORMAT [p] and DISK n INSTALL change the disks.`). DISK's rules stand: without `/Y` it
+  says what would be lost and does nothing; the disk GLOS or DOS runs from is never written. **`DISK d:`** is new
+  (kernel/disk/diskcmd.c): drive d:'s partition, found by the serial number DOS gives the letter (440Dh 0866h) among
+  the BIOS's hard disks' volumes; one primary partition only (two volumes with the serial, or a logical drive, are
+  refused, with what to type instead), and `C: is partition 1 of disk 1: DISK 1 FORMAT 1` said. Floppies are not
+  DISK's (`FORMAT A:` says so); `FORMAT /S` is SYS after FORMAT; `/F:`, `/T:` and the like are invalid switches.
+- **MEM in the kernel** (kernel/shell/shsess.c, `mem` and `mem_blocks`): DOS's memory control blocks from INT 21h
+  52h's first, read in the system VM's memory, upper memory linked into the chain for the walk (5803h) and left as
+  it was, as MS-DOS's MEM does; an upper region ends at a block of DOS's own marked SC. A block's owner: 0 free, 8
+  DOS's (`SYSTEM`; SD system data, SC system code), its own PSP's (a program, by its MCB's name), else another
+  PSP's (its environment, if the PSP's 2Ch says so, or its data). Conventional memory is 640 KB; XMS's figures are
+  GLOS's own (kernel/vm/xms.c: what its handles hold, and the frames left), EMS's GLOS's (kernel/vm/emsvm.c, when
+  it is on), DOS in the HMA by 3306h. A chain that doesn't begin with an M or Z block is not walked (MEM then
+  can't tell). Hosted, the DOS is the system VM's; natively GLOS's own DOS keeps its tables there too, but that is
+  not tried yet. **Untested on a PC or in Loop A**: compiled, and the shell's side tested on the host.
+
+Tests: `tests/shell/chkdsk.txt` (the reference disk's own figures), `doskey.txt`, `dosdisk.txt` (the test host's
+DISK shows the line it is given).

@@ -1,0 +1,61 @@
+GLOS shell 1.0. HELP lists its commands.
+
+[[C:\>]]
+format c:
+FORMAT C: is DISK C: FORMAT
+(EXTRA "DISK C: FORMAT" args=2)
+(ENDED 0)
+[[C:\>]]
+format d: /v:new /q /y
+FORMAT D: is DISK D: FORMAT /V:new /Y
+(EXTRA "DISK D: FORMAT /V:new /Y" args=4)
+(ENDED 0)
+[[C:\>]]
+sys c:
+SYS C: is DISK C: BOOT
+(EXTRA "DISK C: BOOT" args=2)
+(ENDED 0)
+[[C:\>]]
+sys d: /y
+SYS D: is DISK D: BOOT /Y
+(EXTRA "DISK D: BOOT /Y" args=3)
+(ENDED 0)
+[[C:\>]]
+fdisk
+FDISK's menus are not GLOS's: DISK n NEW, DISK n FORMAT [p] and DISK n INSTALL change the disks.
+(EXTRA "DISK" args=0)
+(ENDED 0)
+[[C:\>]]
+fdisk /status
+FDISK's menus are not GLOS's: DISK n NEW, DISK n FORMAT [p] and DISK n INSTALL change the disks.
+(EXTRA "DISK" args=0)
+(ENDED 0)
+[[C:\>]]
+format
+<<Required parameter missing
+>>[[C:\>]]
+echo %errorlevel%
+1
+[[C:\>]]
+format a:
+<<FORMAT: GLOS's DISK formats hard disks' partitions, not floppies
+>>[[C:\>]]
+format c: /s
+<<FORMAT /S: SYS d: after it (DISK's BOOT)
+>>[[C:\>]]
+format c: /f:1440
+<<Invalid switch - /f:1440
+>>[[C:\>]]
+sys b:
+<<SYS: GLOS's DISK writes hard disks' boot records, not floppies'
+>>[[C:\>]]
+fdisk 1 2
+<<FDISK's menus are not GLOS's: DISK lists the disks, DISK n NEW, DISK n FORMAT [p] and DISK n INSTALL change them
+>>[[C:\>]]
+format c: d:
+<<Invalid parameter - d:
+>>[[C:\>]]
+exit
+(QUIT 0)
+[[C:\>]]
+

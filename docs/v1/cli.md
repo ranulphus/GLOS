@@ -39,12 +39,12 @@ GLOS the DOS's own commands still run, but the shell's built-ins answer first fo
 | LABEL | built-in (C1c; setting a label needs the kernel's host's `setlabel`) | built-in (FAT volume label) |
 | SUBST | missing | built-in, if GLOS's drive table can map a letter to a folder (native first) |
 | MEM | built-in (C1c; its figures need the kernel's host's `mem`, `mem_blocks`), SYSMEM | MEM as a name for SYSMEM, MS-DOS's /C /F output where it makes sense |
-| CHKDSK, SCANDISK | Disk Tools only | CHKDSK [d:] [/F] on the kernel's checker; SCANDISK an alias |
-| FORMAT, FDISK, SYS | DISK | the DOS names lead to DISK's verbs (DISK n FORMAT, DISK n PARTITIONS, DISK n INSTALL), with the same "what it will destroy" questions |
+| CHKDSK, SCANDISK | built-in (C1d, 2026-11-27: [shell.md](shell.md); the summary: no FAT checker yet), Disk Tools | CHKDSK [d:] [/F] on the kernel's checker; SCANDISK an alias |
+| FORMAT, FDISK, SYS | built-in names for DISK (C1d: DISK d: FORMAT, DISK d: BOOT, DISK) | the DOS names lead to DISK's verbs (DISK n FORMAT, DISK n PARTITIONS, DISK n INSTALL), with the same "what it will destroy" questions |
 | DISKCOPY, DISKCOMP | missing | via DD and FC /B on floppies, or small built-ins |
 | MODE | built-in (C1c) | MODE CON (columns/lines), MODE COMn (baud), MODE LPT; the rest says so |
 | KEYB | built-in (C1c), CONFIG region | KEYB xx (layout now and saved) |
-| DOSKEY | HISTORY | macros (DOSKEY name=text), /HISTORY |
+| DOSKEY | built-in (C1d: macros), HISTORY | macros (DOSKEY name=text), /HISTORY |
 | EDIT | missing | the editor (section 3) |
 | EXPAND, EXTRACT | missing | EXPAND for single .CAB/compressed files; ZIP/UNZIP (section 2) cover archives |
 | REPLACE, UNDELETE, DEFRAG, PRINT | missing | REPLACE built-in; UNDELETE and DEFRAG: no (FAT risks, little use); PRINT: later with printing |

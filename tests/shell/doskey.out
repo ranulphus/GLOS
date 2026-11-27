@@ -1,0 +1,132 @@
+GLOS shell 1.0. HELP lists its commands.
+
+[[C:\>]]
+doskey /macros
+
+[[C:\>]]
+doskey go=echo one $1 two $2 $T echo all $*
+[[C:\>]]
+doskey ls=dir /b $*
+[[C:\>]]
+doskey /macros
+GO=echo one $1 two $2 $t echo all $*  
+LS=dir /b $*  
+[[C:\>]]
+go a b c
+one a two b
+all a b c
+[[C:\>]]
+GO x
+one x two
+all x
+[[C:\>]]
+ls \bin
+A.COM
+[[C:\>]]
+ ls
+<<Bad command or file name
+>>[[C:\>]]
+m
+<<Bad command or file name
+>>[[C:\>]]
+doskey out=echo to $G o.txt $$1
+[[C:\>]]
+doskey pg=type o.txt $B find "to"
+[[C:\>]]
+doskey /m
+GO=echo one $1 two $2 $t echo all $*  
+LS=dir /b $*  
+OUT=echo to $g o.txt $$1  
+PG=type o.txt $b find "to"  
+[[C:\>]]
+out
+[[C:\>]]
+(CAT C:\O.TXT: to  $1\r\n)
+pg
+{{to  $1
+}}[[C:\>]]
+doskey run=a $1 $L o.txt
+[[C:\>]]
+run x
+(IO in=C:\O.TXT out=-)
+(RUN command="C:\BIN\A.COM x " prog=C:\BIN\A.COM name=a cwd=C:\ env= detach=0 -> 1)
+(ENDED 0)
+[[C:\>]]
+doskey go=echo new go
+[[C:\>]]
+go
+new go
+[[C:\>]]
+doskey x y
+[[C:\>]]
+doskey name = text two
+[[C:\>]]
+doskey /macros
+LS=dir /b $*  
+OUT=echo to $g o.txt $$1  
+PG=type o.txt $b find "to"  
+RUN=a $1 $l o.txt  
+GO=echo new go  
+X=y  
+NAME=text two  
+[[C:\>]]
+doskey go=
+[[C:\>]]
+doskey =x
+[[C:\>]]
+doskey /macros
+LS=dir /b $*  
+OUT=echo to $g o.txt $$1  
+PG=type o.txt $b find "to"  
+RUN=a $1 $l o.txt  
+X=y  
+NAME=text two  
+[[C:\>]]
+go
+<<Bad command or file name
+>>[[C:\>]]
+doskey /history
+doskey /macros
+doskey go=echo one $1 two $2 $T echo all $*
+doskey ls=dir /b $*
+doskey /macros
+go a b c
+GO x
+ls \bin
+ls
+m
+doskey out=echo to $G o.txt $$1
+doskey pg=type o.txt $B find "to"
+doskey /m
+out
+pg
+doskey run=a $1 $L o.txt
+run x
+doskey go=echo new go
+go
+doskey x y
+doskey name = text two
+doskey /macros
+doskey go=
+doskey =x
+doskey /macros
+go
+doskey /history
+[[C:\>]]
+doskey /reinstall
+[[C:\>]]
+doskey /macros
+
+[[C:\>]]
+doskey /macros:all
+Invalid switch or macro definition
+[[C:\>]]
+echo %errorlevel%
+1
+[[C:\>]]
+doskey /bufsize=1024 /insert
+[[C:\>]]
+exit
+(QUIT 0)
+[[C:\>]]
+

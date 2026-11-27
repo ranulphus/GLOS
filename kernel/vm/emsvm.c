@@ -136,6 +136,13 @@ int ems_vm_init(void)
 
 int ems_vm_on(void) { return on; }
 
+/* (MEM, the shell's: C1d) Its pages (16 KB each), in all and not handed out; 0 and 0 with EMS off. */
+void ems_vm_figures(u32 *total, u32 *free)
+{
+    *total = on ? e.total : 0;
+    *free = on ? e.free : 0;
+}
+
 void ems_vm_call(struct ems_regs *r)
 {
     static u32 said;

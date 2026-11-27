@@ -1,8 +1,9 @@
 /* GLOS's shell (shell.h; docs/v1/shell.md; PRD D50): DOS's commands and syntax, modernised.
  *
  * Built in: CD (CHDIR), a drive's letter, DIR [/W] [/B], COPY, MOVE, XCOPY, REN (RENAME), DEL (ERASE), DELTREE, CHOICE,
- * MD (MKDIR), RD (RMDIR), TYPE, MORE, FIND, SORT, FC, COMP, TREE, LABEL, MEM, MODE, KEYB, ECHO, SET, PATH, PROMPT,
- * CLS, VER, EXIT, HISTORY, HELP, WHERE, START, and what the host adds. A built-in's output goes to a file with > or >>.
+ * MD (MKDIR), RD (RMDIR), TYPE, MORE, FIND, SORT, FC, COMP, TREE, LABEL, MEM, MODE, KEYB, CHKDSK (SCANDISK), DOSKEY,
+ * FORMAT, FDISK, SYS, ECHO, SET, PATH, PROMPT, CLS, VER, EXIT, HISTORY, HELP, WHERE, START, and what the host adds.
+ * A built-in's output goes to a file with > or >>.
  *
  * Anything else is a program: found here and along PATH (.COM, .EXE, .BAT) and run by the host, in this
  * shell's folder, with the variables this shell has set. A .BAT file is run here, a line at a time (S4a: IF,
@@ -3335,6 +3336,260 @@ static int cmd_keyb(struct sh *s, int argc, char **argv)
     return 0;
 }
 
+/* ---- CHKDSK, DOSKEY, and FORMAT, FDISK and SYS (2026-11-27, C1d of docs/v1/cli.md) */
+
+/* CHKDSK [d:] [path] [/F] [/V] (SCANDISK the same): MS-DOS 7.1's CHKDSK.EXE as it is on a FAT32 volume, which it
+   doesn't check: the volume's label and when it was made, its serial number, its space and allocation units, and
+   DOS's memory. GLOS has no checker of a volume's FAT yet, and says so where MS-DOS sends one to SCANDISK. */
+static int cmd_chkdsk(struct sh *s, int argc, char **argv)
+{
+    struct sh_fsinfo f;
+    struct sh_mem m;
+    char line[160], a[24], b[24];
+    int i, d = s->drive, drives = 0;
+    for (i = 1; i < argc; i++) {
+        const char *w = argv[i];
+        if (w[0] == '/') {
+            if (same(w, "/F") || same(w, "/V") || same(w, "/AUTOFIX") || same(w, "/CHECKONLY") || same(w, "/NOSAVE")
+                || same(w, "/NOSUMMARY") || same(w, "/SURFACE") || same(w, "/ALL") || same(w, "/MONO")
+                || same(w, "/CUSTOM"))
+                continue;
+            sh_fmt(line, sizeof line, "Invalid switch - %s\r\n", w);
+            err(s, line);
+            return 1;
+        }
+        if (w[0] && w[1] == ':' && !w[2]) {
+            if (drives++) {
+                sh_fmt(line, sizeof line, "Too many parameters - %s\r\n", w);
+                err(s, line);
+                return 1;
+            }
+            d = upper((unsigned char)w[0]) - 'A';
+        } else if (w[0] && w[1] == ':') {       /* (a file: MS-DOS 7.1's tells nothing of it on FAT32 either) */
+            d = upper((unsigned char)w[0]) - 'A';
+        }
+    }
+    memset(&f, 0, sizeof f);
+    if (d < 0 || d > 25 || !s->h->fsinfo || s->h->fsinfo(s->h->ctx, d, &f) != 0) {
+        err(s, s->h->fsinfo ? "Invalid drive specification\r\n"
+                            : "CHKDSK: GLOS can't tell what a volume holds here\r\n");
+        return 1;
+    }
+    say(s, "\r\nCHKDSK has NOT checked this drive for errors.\r\n"
+           "GLOS has no checker of a volume's FAT yet (Disk Tools reads every sector: Check the Disk).\r\n\r\n");
+    if (f.label[0]) {
+        unsigned hr = (f.time >> 11) % 12;
+        sh_fmt(line, sizeof line, "Volume %s created %02u-%02u-%04u %u:%02u%c\r\n", f.label, (f.date >> 5) & 15u,
+               f.date & 31u, 1980u + (f.date >> 9), hr ? hr : 12u, (f.time >> 5) & 63u,
+               (f.time >> 11) >= 12 ? 'p' : 'a');
+        say(s, line);
+    }
+    if (f.has_serial) {
+        char ser[12];
+        serial_text(ser, sizeof ser, f.serial);
+        sh_fmt(line, sizeof line, "Volume Serial Number is %s\r\n", ser);
+        say(s, line);
+    }
+    size_text(f.unit * f.units, a, sizeof a);
+    size_text(f.unit * f.free_units, b, sizeof b);
+    sh_fmt(line, sizeof line, "\r\n%13s bytes total disk space\r\n%13s bytes available on disk\r\n\r\n", a, b);
+    say(s, line);
+    size_text(f.unit, a, sizeof a);
+    sh_fmt(line, sizeof line, "%13s bytes in each allocation unit\r\n", a);
+    say(s, line);
+    size_text(f.units, a, sizeof a);
+    size_text(f.free_units, b, sizeof b);
+    sh_fmt(line, sizeof line, "%13s total allocation units on disk\r\n%13s available allocation units on disk\r\n",
+           a, b);
+    say(s, line);
+    memset(&m, 0, sizeof m);
+    if (s->h->mem && s->h->mem(s->h->ctx, &m) == 0) {
+        size_text(m.conv_total, a, sizeof a);
+        size_text(m.largest, b, sizeof b);
+        sh_fmt(line, sizeof line, "\r\n%13s total bytes memory\r\n%13s bytes free\r\n", a, b);
+        say(s, line);
+    }
+    return 0;
+}
+
+/* DOSKEY [/REINSTALL] [/MACROS] [/HISTORY] [name=[text]]: the shell's line editing and history are DOSKEY's own
+   already; its macros, as MS-DOS 7.1's: a typed line's first word that is a macro's name becomes its text
+   (sh_line; a line begun with a space never does, and a batch file's lines never do). /MACROS (/M) lists them,
+   "NAME=text" and two spaces as MS-DOS's; /HISTORY (/H) the lines typed; /REINSTALL forgets the macros; "name="
+   forgets one. Its other switches are taken. */
+static int cmd_doskey(struct sh *s, const char *raw)
+{
+    const char *t = raw;
+    char name[64], text[SH_LINE], line[SH_LINE + 80];
+    int list = 0, history = 0, i;
+    size_t n = 0, k;
+    while (*t == ' ' || *t == '\t')
+        t++;
+    while (*t && *t != ' ' && *t != '\t')       /* (DOSKEY itself) */
+        t++;
+    for (;;) {
+        const char *w;
+        while (*t == ' ' || *t == '\t')
+            t++;
+        if (*t != '/')
+            break;
+        for (w = t; *t && *t != ' ' && *t != '\t'; t++)
+            ;
+        sh_fmt(name, sizeof name, "%.*s", (int)(t - w), w);
+        if (strchr(name, ':')) {
+            say(s, "Invalid switch or macro definition\r\n");
+            return 1;
+        }
+        upper_all(name);
+        if (!strcmp(name, "/MACROS") || !strcmp(name, "/M"))
+            list = 1;
+        else if (!strcmp(name, "/HISTORY") || !strcmp(name, "/H"))
+            history = 1;
+        else if (!strcmp(name, "/REINSTALL"))
+            s->macros[0] = 0;
+    }
+    if (*t && *t != '=') {                      /* name=text, name text, name = text */
+        char *m;
+        for (n = 0; t[n] && t[n] != '=' && t[n] != ' ' && t[n] != '\t' && n < sizeof name - 1; n++)
+            name[n] = (char)upper((unsigned char)t[n]);
+        name[n] = 0;
+        for (t += n; *t == ' ' || *t == '\t'; t++)
+            ;
+        if (*t == '=')
+            for (t++; *t == ' ' || *t == '\t'; t++)
+                ;
+        for (k = 0; *t && k < sizeof text - 1; t++) {   /* (its $T $G $L $B kept small, as MS-DOS keeps them) */
+            text[k++] = *t;
+            if (*t == '$' && t[1] && strchr("TGLB", t[1])) {
+                text[k++] = (char)(t[1] | 32);
+                t++;
+            }
+        }
+        while (k && (text[k - 1] == ' ' || text[k - 1] == '\t'))
+            k--;
+        text[k] = 0;
+        for (m = s->macros; *m; m += strlen(m) + 1)     /* (the old one goes) */
+            if (!strncmp(m, name, n) && m[n] == '=') {
+                size_t len = strlen(m) + 1, used;
+                for (used = (size_t)(m - s->macros) + len; s->macros[used]; used += strlen(s->macros + used) + 1)
+                    ;
+                memmove(m, m + len, used - (size_t)(m - s->macros) - len + 1);
+                break;
+            }
+        if (k) {
+            size_t used;
+            for (used = 0; s->macros[used]; used += strlen(s->macros + used) + 1)
+                ;
+            if (used + n + k + 3 > sizeof s->macros) {
+                err(s, "Insufficient memory to store macro.  Use the DOSKEY command with the /BUFSIZE switch to\r\n"
+                       "increase available memory.\r\n");
+                return 1;
+            }
+            sh_fmt(s->macros + used, (unsigned)(sizeof s->macros - used), "%s=%s", name, text);
+            s->macros[used + n + k + 2] = 0;
+        }
+    }
+    if (list) {
+        const char *m;
+        if (!s->macros[0])
+            say(s, "\r\n");
+        for (m = s->macros; *m; m += strlen(m) + 1) {
+            sh_fmt(line, sizeof line, "%s  \r\n", m);
+            say(s, line);
+        }
+    }
+    if (history) {
+        if (!s->nhist)
+            say(s, "\r\n");
+        for (i = 0; i < s->nhist; i++) {
+            sh_fmt(line, sizeof line, "%s\r\n", s->hist[i]);
+            say(s, line);
+        }
+    }
+    return 0;
+}
+
+/* FORMAT d: [/V:label] [/Q] [/Y], SYS d: [/Y], FDISK: DOS's names for GLOS's DISK (docs/v1/shell.md, S3), which they
+   run, saying so first: DISK d: FORMAT, DISK d: BOOT (FreeDOS's boot records: its KERNEL.SYS is COPY's to put
+   there), DISK (the disks and their partitions; FDISK's menus are DISK n NEW, FORMAT, INSTALL). DISK's rules
+   stand: without /Y it says what would be lost and does nothing, and the disk GLOS or DOS runs from is never
+   written. Floppies are not DISK's. */
+static int cmd_dos_disk(struct sh *s, int argc, char **argv)
+{
+    char cmd[SH_LINE], line[SH_LINE + 80], label[40], words[SH_LINE], *av[8];
+    const char *drive = 0;
+    int i, yes = 0, ac, r, what = upper((unsigned char)argv[0][0]);      /* 'F' FORMAT or FDISK, 'S' SYS */
+    if (what == 'F' && upper((unsigned char)argv[0][1]) == 'D')
+        what = 'D';
+    label[0] = 0;
+    for (i = 1; i < argc; i++) {
+        const char *w = argv[i];
+        if (w[0] != '/') {
+            if (drive || what == 'D' || !w[0] || w[1] != ':' || w[2]) {
+                sh_fmt(line, sizeof line, what == 'D' ? "FDISK's menus are not GLOS's: DISK lists the disks, DISK n"
+                       " NEW, DISK n FORMAT [p] and DISK n INSTALL change them\r\n" : "Invalid parameter - %s\r\n", w);
+                err(s, line);
+                return 1;
+            }
+            drive = w;
+        } else if (same(w, "/Y")) {
+            yes = 1;
+        } else if (what == 'F' && upper((unsigned char)w[1]) == 'V' && (w[2] == ':' || !w[2])) {
+            sh_fmt(label, sizeof label, "%s", w[2] ? w + 3 : "");
+        } else if (what == 'F' && (same(w, "/Q") || same(w, "/U") || same(w, "/C") || same(w, "/B"))) {
+            continue;                           /* (DISK's formatting is quick, and checks nothing) */
+        } else if (what == 'F' && (same(w, "/S"))) {
+            err(s, "FORMAT /S: SYS d: after it (DISK's BOOT)\r\n");
+            return 1;
+        } else if (what == 'D' && (same(w, "/STATUS") || same(w, "/X"))) {
+            continue;
+        } else {
+            sh_fmt(line, sizeof line, "Invalid switch - %s\r\n", w);
+            err(s, line);
+            return 1;
+        }
+    }
+    if (what != 'D' && !drive) {
+        err(s, "Required parameter missing\r\n");
+        return 1;
+    }
+    if (drive && (upper((unsigned char)drive[0]) == 'A' || upper((unsigned char)drive[0]) == 'B')) {
+        err(s, what == 'F' ? "FORMAT: GLOS's DISK formats hard disks' partitions, not floppies\r\n"
+                           : "SYS: GLOS's DISK writes hard disks' boot records, not floppies'\r\n");
+        return 1;
+    }
+    av[0] = (char *)"DISK", ac = 1;
+    if (what == 'D') {
+        sh_fmt(cmd, sizeof cmd, "DISK");
+        say(s, "FDISK's menus are not GLOS's: DISK n NEW, DISK n FORMAT [p] and DISK n INSTALL change the disks.\r\n");
+    } else {
+        sh_fmt(cmd, sizeof cmd, "DISK %c: %s%s%s%s", upper((unsigned char)drive[0]), what == 'F' ? "FORMAT" : "BOOT",
+               label[0] ? " /V:" : "", label, yes ? " /Y" : "");
+        sh_fmt(line, sizeof line, "%s %c: is %s\r\n", what == 'F' ? "FORMAT" : "SYS", upper((unsigned char)drive[0]),
+               cmd);
+        say(s, line);
+    }
+    {                                           /* (the words of cmd, for the host's command) */
+        char *w = words;
+        sh_fmt(words, sizeof words, "%s", strlen(cmd) > 5 ? cmd + 5 : "");
+        while (*w && ac < 7) {
+            av[ac++] = w;
+            while (*w && *w != ' ')
+                w++;
+            if (*w)
+                *w++ = 0;
+        }
+        av[ac] = 0;
+    }
+    if (!s->h->extra || (r = s->h->extra(s->h->ctx, ac, av, cmd)) == SH_NOT_MINE) {
+        err(s, "GLOS's DISK command isn't here\r\n");
+        return 1;
+    }
+    if (r != SH_UNDER_WAY)
+        s->level = r;
+    return r;
+}
+
 static int cmd_cd(struct sh *s, int argc, char **argv)
 {
     char p[SH_PATH], line[300];
@@ -3586,7 +3841,8 @@ static const char *const builtins[] = { "CD", "CHDIR", "DIR", "COPY", "MOVE", "R
     "MKDIR", "RD", "RMDIR", "TYPE", "ECHO", "SET", "PATH", "PROMPT", "CLS", "VER", "EXIT", "HISTORY", "HELP", "WHERE",
     "START", "DF", "DU", "CALL", "FOR", "GOTO", "IF", "PAUSE", "REM", "SHIFT", "VOL", "TRUENAME", "BREAK", "VERIFY",
     "LH", "LOADHIGH", "CTTY", "ATTRIB", "XCOPY", "MORE", "DELTREE", "CHOICE", "FIND", "SORT",
-    "FC", "COMP", "TREE", "LABEL", "MEM", "MODE", "KEYB", 0 };
+    "FC", "COMP", "TREE", "LABEL", "MEM", "MODE", "KEYB", "CHKDSK", "SCANDISK", "DOSKEY", "FORMAT", "FDISK", "SYS",
+    0 };
 
 static const char *const helps[] = {
     "CD [path]           the folder (of a drive: CD X:); X: changes drive",
@@ -3607,6 +3863,9 @@ static const char *const helps[] = {
     "MEM [/C] [/F] [/D] [/M name]  DOS's memory: the summary, the programs, what is free",
     "MODE [CON|LPTn|COMn] [...]  the devices' state; MODE CON RATE=r DELAY=d the keyboard's repeat",
     "KEYB [us|uk]        the keyboard's layout shown, or set (and saved)",
+    "CHKDSK [d:], SCANDISK  a volume's space and allocation units (not checked yet)",
+    "DOSKEY name=text    a macro: the typed line's first word becomes text ($1-$9 $* $T $G $L $B); /MACROS",
+    "FORMAT d: [/V:label] [/Y], SYS d: [/Y], FDISK  DOS's names for DISK (d: FORMAT, d: BOOT, the list)",
     "ATTRIB [+R|-R] [+A|-A] [+S|-S] [+H|-H] [path]  attributes changed, or listed",
     "MD path, RD path    a folder made, removed",
     "DF [drive: ...]     the drives: their size, what is used and free",
@@ -4413,6 +4672,12 @@ static int run_line(struct sh *s, char *line)
         r = s->level = cmd_mode(s, argc, argv);
     } else if (same(argv[0], "KEYB")) {
         r = s->level = cmd_keyb(s, argc, argv);
+    } else if (same(argv[0], "CHKDSK") || same(argv[0], "SCANDISK")) {
+        r = s->level = cmd_chkdsk(s, argc, argv);
+    } else if (same(argv[0], "DOSKEY")) {
+        r = s->level = cmd_doskey(s, line);
+    } else if (same(argv[0], "FORMAT") || same(argv[0], "FDISK") || same(argv[0], "SYS")) {
+        r = cmd_dos_disk(s, argc, argv);
     } else if (same(argv[0], "DELTREE")) {
         r = cmd_deltree(s, argc, argv);
     } else if (same(argv[0], "CHOICE")) {
@@ -4687,6 +4952,68 @@ static void next_command(struct sh *s)
     sh_prompt(s);
 }
 
+/* A DOSKEY macro's (C1d) text with what follows its name put in, as MS-DOS 7.1's DOSKEY does it: $1 to $9 the
+   words after the name, $* all of what follows it, $T between two commands (the shell's THEN: the next runs
+   whatever came of the last), $G >, $L <, $B |, $$ $. 1 if the line's first word is a macro's name (into out). */
+static int macro_line(const struct sh *s, const char *typed, char *out, unsigned room)
+{
+    const char *m, *words[9], *rest;
+    size_t n, wl[9];
+    unsigned k = 0;
+    int nw = 0;
+    for (n = 0; typed[n] && typed[n] != ' ' && typed[n] != '\t'; n++)
+        ;
+    for (m = s->macros; *m; m += strlen(m) + 1) {
+        size_t i;
+        for (i = 0; i < n && m[i] && upper((unsigned char)m[i]) == upper((unsigned char)typed[i]); i++)
+            ;
+        if (i == n && m[n] == '=')
+            break;
+    }
+    if (!n || !*m)
+        return 0;
+    for (rest = typed + n; *rest == ' ' || *rest == '\t'; rest++)
+        ;
+    {
+        const char *w = rest;
+        while (*w && nw < 9) {
+            words[nw] = w;
+            while (*w && *w != ' ' && *w != '\t')
+                w++;
+            wl[nw] = (size_t)(w - words[nw]);
+            nw++;
+            while (*w == ' ' || *w == '\t')
+                w++;
+        }
+    }
+    for (m += n + 1; *m && k < room - 1; m++) {
+        const char *put = 0;
+        size_t len = 0;
+        char c = m[0] == '$' && m[1] ? (char)upper((unsigned char)m[1]) : 0;
+        if (c >= '1' && c <= '9') {
+            if (c - '1' < nw)
+                put = words[c - '1'], len = wl[c - '1'];
+            else
+                put = "", len = 0;
+        } else if (c == '*') {
+            put = rest, len = strlen(rest);
+        } else if (c == 'T' || c == 'G' || c == 'L' || c == 'B' || c == '$') {
+            out[k++] = c == 'T' ? THEN : c == 'G' ? '>' : c == 'L' ? '<' : c == 'B' ? '|' : '$';
+            m++;
+            continue;
+        }
+        if (put) {
+            for (; len && k < room - 1; len--)
+                out[k++] = *put++;
+            m++;
+            continue;
+        }
+        out[k++] = *m;
+    }
+    out[k] = 0;
+    return 1;
+}
+
 void sh_line(struct sh *s, const char *line)
 {
     const char *p = line;
@@ -4710,6 +5037,11 @@ void sh_line(struct sh *s, const char *line)
         for (c = s->rest; *c; c++)              /* (THEN and GONE are the shell's own marks: not typed) */
             if (*c == THEN || *c == GONE)
                 *c = ' ';
+    }
+    if (line[0] != ' ' && s->macros[0]) {       /* (a DOSKEY macro; a space first: the command of that name) */
+        char typed[SH_LINE];
+        sh_fmt(typed, sizeof typed, "%s", s->rest);
+        macro_line(s, typed, s->rest, sizeof s->rest);
     }
     s->rest_op = 0;
     s->rest_plain = 0;

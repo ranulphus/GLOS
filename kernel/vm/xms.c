@@ -114,6 +114,17 @@ static u32 largest_frames(void)
     return l < f ? l : f;
 }
 
+/* (MEM, the shell's: C1d) What XMS has handed out and what it has left, in KB. */
+void xms_figures(u32 *used_kb, u32 *free_kb)
+{
+    u32 i, used = 0;
+    for (i = 0; i < NHANDLES; i++)
+        if (emb[i].used)
+            used += emb[i].kb;
+    *used_kb = used;
+    *free_kb = free_frames() * 4;
+}
+
 static int handle(u32 h)
 {
     return (h >= 1 && h <= NHANDLES && emb[h - 1].used) ? (int)h - 1 : -1;

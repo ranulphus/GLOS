@@ -207,7 +207,11 @@ static const char *const extra_help[] = { "XTRA                a command of the 
 
 static int h_extra(void *ctx, int argc, char **argv, const char *line)
 {
-    (void)ctx, (void)line;
+    (void)ctx;
+    if (!strcmp(argv[0], "DISK")) {             /* (FORMAT, FDISK, SYS: what they run) */
+        printf("(EXTRA \"%s\" args=%d)\n", line, argc - 1);
+        return SH_UNDER_WAY;
+    }
     printf("(EXTRA %s args=%d)\n", argv[0], argc - 1);
     return !strcmp(argv[0], "XTRA") || !strcmp(argv[0], "xtra") ? 7 : SH_UNDER_WAY;
 }
@@ -418,10 +422,25 @@ static int h_setting(void *ctx, const char *section, const char *key, const char
     return -1;
 }
 
+/* CHKDSK's: C: as the reference disk's volume is (MS-DOS 7.1's CHKDSK of it), its label made 2026-11-27 16:18 */
+static int h_fsinfo(void *ctx, int drive, struct sh_fsinfo *f)
+{
+    (void)ctx;
+    if (drive != 2)
+        return -1;
+    f->unit = 512, f->units = 251998, f->free_units = 250958;
+    snprintf(f->label, sizeof f->label, "%s", c_label);
+    f->date = (unsigned short)((2026 - 1980) << 9 | 11 << 5 | 27);
+    f->time = (unsigned short)(16 << 11 | 18 << 5);
+    f->serial = 0x71071071ul, f->has_serial = 1;
+    return 0;
+}
+
 static const struct sh_host host = {
     0, h_write, h_clear, h_prompted, h_input, h_quit, h_dir_read, h_dir_free, h_is_dir, h_stat, h_open, h_read, h_put,
     h_close, h_mkdir, h_rmdir, h_unlink, h_rename, h_space, h_run, 0, extra_names, extra_help, h_extra, h_alloc, h_free,
-    h_seek, h_key, h_stop, h_io, h_setattr, h_serial, h_setlabel, h_mem, h_mem_blocks, h_term_size, h_setting };
+    h_seek, h_key, h_stop, h_io, h_setattr, h_serial, h_setlabel, h_mem, h_mem_blocks, h_term_size, h_setting,
+    h_fsinfo };
 
 int main(int argc, char **argv)
 {

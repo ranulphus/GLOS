@@ -233,6 +233,9 @@ LABEL [drive:][label]  a drive's label shown, set or taken away
 MEM [/C] [/F] [/D] [/M name]  DOS's memory: the summary, the programs, what is free
 MODE [CON|LPTn|COMn] [...]  the devices' state; MODE CON RATE=r DELAY=d the keyboard's repeat
 KEYB [us|uk]        the keyboard's layout shown, or set (and saved)
+CHKDSK [d:], SCANDISK  a volume's space and allocation units (not checked yet)
+DOSKEY name=text    a macro: the typed line's first word becomes text ($1-$9 $* $T $G $L $B); /MACROS
+FORMAT d: [/V:label] [/Y], SYS d: [/Y], FDISK  DOS's names for DISK (d: FORMAT, d: BOOT, the list)
 ATTRIB [+R|-R] [+A|-A] [+S|-S] [+H|-H] [path]  attributes changed, or listed
 MD path, RD path    a folder made, removed
 DF [drive: ...]     the drives: their size, what is used and free

@@ -196,11 +196,11 @@ static int h_space(void *ctx, int drive, unsigned long *total, unsigned long *le
 }
 
 /* (no batch files' seek, key or Ctrl+C, no redirection, no ATTRIB's setting, nothing of LABEL's, MEM's, MODE's or
-   KEYB's: the shell copes) */
+   KEYB's or CHKDSK's: the shell copes) */
 static const struct sh_host host = {
     0, h_write, h_clear, h_prompted, h_input, h_quit, h_dir_read, h_dir_free, h_is_dir, h_stat, h_open, h_read, h_put,
     h_close, h_mkdir, h_rmdir, h_unlink, h_rename, h_space, h_run, 0, none, none, h_extra, h_alloc, h_free,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 
 /* ---- JOB's calls for it (the rest of JOB is glosshim.c's: nothing runs) */
 

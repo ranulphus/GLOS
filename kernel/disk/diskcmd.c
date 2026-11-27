@@ -26,6 +26,8 @@
  *   ... INSTALL ... /FROM:X:\FOLDER  GLOS's files (and GLOSLDR.SYS) from that folder, not from the one GLOS runs
  *                                    from: a boot CD's \GLOS, the whole system, while GLOS runs from the small
  *                                    setup floppy the CD emulates (its GLOS.CFG the copy's, /SET's put in it)
+ *   DISK d: [FORMAT|BOOT] ...        the same for the partition DOS's drive d: is (by its serial number, a
+ *                                    primary one of a disk the BIOS has): the shell's FORMAT d: and SYS d:
  *   DISK n INSTALL p /Y              p the volume GLOS's own folder is on (a GLOS that DOS starts): that GLOS
  *                                    made to start by itself, nothing erased: GLOSLDR.SYS into the volume's
  *                                    first folder, its boot sector kept as BOOTSECT.DOS beside GLOS's files (the
@@ -1738,6 +1740,7 @@ static const char usage[] =
     "                                  what is there (its start-up menu offers the others)\n"
     "DISK n INSTALL p [/ERASE] /Y      ... in partition p, which is made empty\n"
     "DISK n INSTALL p /Y               p GLOS's own volume: this GLOS made to start with no DOS\n"
+    "DISK d: [FORMAT|BOOT] ...          the same for drive d:'s partition (FORMAT d:, SYS d:)\n"
     "  ... /SET:section.key=value      GLOS.CFG's copy with that setting (up to four)\n"
     "  ... /FROM:X:\\FOLDER             GLOS's files copied from that folder (a boot CD's \\GLOS)\n"
     "Without /Y a command says what would be lost and does nothing. The disk GLOS or DOS runs\n"
@@ -1836,6 +1839,44 @@ static int run(struct diskcmd *c)
     if (!nw || (nw == 1 && !strcmp(w[0], "LIST"))) {
         own_volumes(c);
         return list(c, 0);
+    }
+    /* A DOS drive letter for "n p" (FORMAT d: and SYS d:, the shell's: C1d): the volume DOS gives the letter's
+       serial number, which must be one primary partition's on a disk the BIOS has; the rules stand as for n p. */
+    if (w[0][0] >= 'C' && w[0][0] <= 'Z' && w[0][1] == ':' && !w[0][2] && nw <= 2) {
+        static struct layout L;
+        u32 serial, d, k, found = 0;
+        int got;
+        dos_hold();
+        got = dos_serial((u8)w[0][0], &serial);
+        dos_release();
+        if (got != 0) {
+            say(c, "DISK: DOS doesn't say which volume %s is\n", w[0]);
+            return 2;
+        }
+        for (d = 1; d <= 4 && scan((u8)(0x7F + d), &L) == 0; d++)
+            for (k = 0; k < L.nv; k++)
+                if (L.v[k].has_serial && L.v[k].serial == serial)
+                    found++, n = d, p = L.v[k].n;
+        if (found != 1) {
+            say(c, found ? "DISK: more than one volume has %s's serial number: name the disk and partition\n"
+                         : "DISK: %s is on none of the BIOS's hard disks' partitions\n", w[0]);
+            return 2;
+        }
+        if (p > 4) {
+            say(c, "DISK: %s is a logical drive (disk %u): FORMAT and BOOT take the table's four partitions\n", w[0], n);
+            return 2;
+        }
+        if (nw == 2)
+            say(c, "%s is partition %u of disk %u: DISK %u %s %u\n", w[0], p, n, n, w[1], p);
+        else
+            say(c, "%s is partition %u of disk %u.\n", w[0], p, n);
+        own_volumes(c);
+        if (nw == 1)
+            return list(c, n);
+        if (!nsets && !from_dir[0] && (!strcmp(w[1], "FORMAT") || !strcmp(w[1], "BOOT")))
+            return w[1][0] == 'F' ? do_format(c, n, p, label, yes) : do_boot(c, n, p, yes, native);
+        say(c, "%s", usage);
+        return 2;
     }
     if (number(w[0], &n) != 0 || n < 1 || n > 4) {
         say(c, "%s", usage);

@@ -1,0 +1,109 @@
+GLOS shell 1.0. HELP lists its commands.
+
+[[C:\>]]
+chkdsk
+
+CHKDSK has NOT checked this drive for errors.
+GLOS has no checker of a volume's FAT yet (Disk Tools reads every sector: Check the Disk).
+
+Volume TESTDISK created 11-27-2026 4:18p
+Volume Serial Number is 7107-1071
+
+  129,022,976 bytes total disk space
+  128,490,496 bytes available on disk
+
+          512 bytes in each allocation unit
+      251,998 total allocation units on disk
+      250,958 available allocation units on disk
+[[C:\>]]
+chkdsk c:
+
+CHKDSK has NOT checked this drive for errors.
+GLOS has no checker of a volume's FAT yet (Disk Tools reads every sector: Check the Disk).
+
+Volume TESTDISK created 11-27-2026 4:18p
+Volume Serial Number is 7107-1071
+
+  129,022,976 bytes total disk space
+  128,490,496 bytes available on disk
+
+          512 bytes in each allocation unit
+      251,998 total allocation units on disk
+      250,958 available allocation units on disk
+
+      655,360 total bytes memory
+      563,440 bytes free
+[[C:\>]]
+chkdsk /f /v
+
+CHKDSK has NOT checked this drive for errors.
+GLOS has no checker of a volume's FAT yet (Disk Tools reads every sector: Check the Disk).
+
+Volume TESTDISK created 11-27-2026 4:18p
+Volume Serial Number is 7107-1071
+
+  129,022,976 bytes total disk space
+  128,490,496 bytes available on disk
+
+          512 bytes in each allocation unit
+      251,998 total allocation units on disk
+      250,958 available allocation units on disk
+
+      655,360 total bytes memory
+      563,440 bytes free
+[[C:\>]]
+scandisk
+
+CHKDSK has NOT checked this drive for errors.
+GLOS has no checker of a volume's FAT yet (Disk Tools reads every sector: Check the Disk).
+
+Volume TESTDISK created 11-27-2026 4:18p
+Volume Serial Number is 7107-1071
+
+  129,022,976 bytes total disk space
+  128,490,496 bytes available on disk
+
+          512 bytes in each allocation unit
+      251,998 total allocation units on disk
+      250,958 available allocation units on disk
+
+      655,360 total bytes memory
+      563,440 bytes free
+[[C:\>]]
+chkdsk small.txt
+
+CHKDSK has NOT checked this drive for errors.
+GLOS has no checker of a volume's FAT yet (Disk Tools reads every sector: Check the Disk).
+
+Volume TESTDISK created 11-27-2026 4:18p
+Volume Serial Number is 7107-1071
+
+  129,022,976 bytes total disk space
+  128,490,496 bytes available on disk
+
+          512 bytes in each allocation unit
+      251,998 total allocation units on disk
+      250,958 available allocation units on disk
+
+      655,360 total bytes memory
+      563,440 bytes free
+[[C:\>]]
+chkdsk > c.txt
+[[C:\>]]
+(CAT C:\C.TXT: \r\nCHKDSK has NOT checked this drive for errors.\r\nGLOS has no checker of a volume's FAT yet (Disk Tools reads every sector: Check the Disk).\r\n\r\nVolume TESTDISK created 11-27-2026 4:18p\r\nVolume Serial Number is 7107-1071\r\n\r\n  129,022,976 bytes total disk space\r\n  128,490,496 bytes available on disk\r\n\r\n          512 bytes in each allocation unit\r\n      251,998 total allocation units on disk\r\n      250,958 available allocation units on disk\r\n\r\n      655,360 total bytes memory\r\n      563,440 bytes free\r\n)
+chkdsk q:
+<<Invalid drive specification
+>>[[C:\>]]
+echo %errorlevel%
+1
+[[C:\>]]
+chkdsk /x
+<<Invalid switch - /x
+>>[[C:\>]]
+chkdsk c: d:
+<<Too many parameters - d:
+>>[[C:\>]]
+exit
+(QUIT 0)
+[[C:\>]]
+
