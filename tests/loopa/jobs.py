@@ -11031,8 +11031,10 @@ def disk_case(profile, card, mb):
         checks["dd-shell"] = rc == 0 and named == start[63 * 512:127 * 512]
         rc, first, _ = raw("glos dd if=disk2:1 of=- count=1")
         checks["dd-partition"] = rc == 0 and first == start[63 * 512:64 * 512]
-        rc, exe, _ = raw("glos dd if=c:\\test\\glos.exe of=-")
-        checks["dd-file-bytes"] = rc == 0 and exe == open(os.path.join(ROOT, "build/ow/GLOS.EXE"), "rb").read()
+        # (a file's bytes: natively C:\\TEST has no GLOS.EXE, the loader is GLOSLDR.SYS; the kernel is on both)
+        name, built = ("glosk.bin", "build/kernel/GLOSK.BIN") if NATIVE else ("glos.exe", "build/ow/GLOS.EXE")
+        rc, exe, _ = raw("glos dd if=c:\\test\\%s of=-" % name)
+        checks["dd-file-bytes"] = rc == 0 and exe == open(os.path.join(ROOT, built), "rb").read()
         rc, out, err = agent.ssh("glos dd if=c:\\test\\d2.img of=disk2 seek=8000")
         checks["dd-asks"] = rc == 2 and "Nothing was done" in out and "WOULD BE LOST" in out
         rc, out, err = agent.ssh("glos dd if=c:\\test\\d2.img of=disk2 seek=8000 /y", timeout=300)
@@ -13999,8 +14001,15 @@ def gui_case(profile, vcard, card, bits, scripts=None, files=None, tag_prefix="g
         for script in scripts or sorted(f for f in os.listdir(os.path.join(ROOT, "tests", "gui"))
                                         if f.endswith(".txt") and open(os.path.join(ROOT, "tests", "gui", f)).readline()
                                         and "GUITEST" in open(os.path.join(ROOT, "tests", "gui", f)).read()):
-            g = GuiDriver(agent, out, bits, " dac=6" in line, appdir)
             name = os.path.splitext(os.path.basename(script))[0]
+            if agent.proc.poll() is not None:   # (its PC gone, at its time limit or a crash: the scripts left can only
+                                                # wait out every wait; N7's survey, 2026-11-27, waited 4 hours so)
+                st = os.path.join(ROOT, "out", agent.proc.run_name, "status")
+                checks["emulator"] = False
+                notes.append("the run ended (%s) before %s: the scripts from there not run"
+                             % (open(st).read().strip() if os.path.exists(st) else "?", name))
+                break
+            g = GuiDriver(agent, out, bits, " dac=6" in line, appdir)
             g.play(os.path.join("tests", "gui", os.path.basename(script)))
             with open(os.path.join(out, name + ".out"), "w") as f:
                 f.write(g.finish())
@@ -14412,7 +14421,10 @@ def main():
     ok = True
     for p in a.profile or PROFILES:
         for b in a.boot or BOOTS:
-            ok &= m1(p, b)
+            try:
+                ok &= m1(p, b)
+            except HostedOnly as why:           # (natively, as matrix says it: M1 is GLOS.EXE started from DOS)
+                print("  %-22s SKIP hosted only (%s)" % ("m1 %s-%s" % (p, b), why), flush=True)
     return 0 if ok else 1
 
 
