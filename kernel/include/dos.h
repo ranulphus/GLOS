@@ -47,7 +47,8 @@ int dos_call(struct dos_req *q);                /* for a thread of its own (a sh
 u32 dos_xfer_size(void);                        /* the transfer buffer's size (32 KB, or less) */
 
 /* The VM thread's side (trap context). */
-int dos_vm_pending(void);                       /* a request (or a free) waits for the idle stub */
+int dos_vm_pending(void);
+u16 dos_xfer_seg(void);                         /* the server's transfer buffer's segment, or 0 */                       /* a request (or a free) waits for the idle stub */
 int dos_vm_next(int ran, u32 regs_lin);         /* ran: NEXT 3 came back; 1: make the call in regs_lin */
 int dos_vm_pending_for(void *via);              /* ... for a COMMAND.COM of GLOS's: a request of its session's */
 int dos_vm_next_for(void *via, int ran, u32 regs_lin, u16 seg, u32 paras);    /* (seg, paras: via's own buffer) */

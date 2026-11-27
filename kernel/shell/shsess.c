@@ -647,7 +647,7 @@ static int h_fsinfo(void *ctx, int drive, struct sh_fsinfo *f)
 static int mcb_chain(struct shsess *s, struct sh_mem_block *b, int max)
 {
     u32 seg, i;
-    int n = 0, was = 1, linked = 0, region = 0, gap = 1;
+    int n = 0, was = 1, linked = 0, region = 0, gap = 1, free;
     req(s);
     call(s, 0, 0x5200, 0, 0, 0);
     if (made(s) != 0)
@@ -679,8 +679,15 @@ static int mcb_chain(struct shsess *s, struct sh_mem_block *b, int max)
                 break;
         }
         name[k < 8 ? k : 8] = 0;
+        free = !owner || mem == dos_xfer_seg();
         if (mem >= 0xA000 && owner == 8 && name[0] == 'S' && name[1] == 'C') {
             gap = 1;                            /* (not DOS's to give: between regions) */
+        } else if (free && mem < 0xA000 && n > 0 && b[n - 1].type == SH_MB_FREE
+                   && b[n - 1].seg + b[n - 1].bytes / 16 + 1 == mem) {
+            /* Free, next to a free block: one, as DOS joins them when it next gives memory. The DOS server's transfer
+               buffer counts as free: it is MEM's own calls' (allocated for them), and a program never sees it,
+               GLOS's being 8 KB as MEM.EXE found it (gate 71's cache agent-p7, 2026-11-27). */
+            b[n - 1].bytes += 16 + size * 16;
         } else if (n >= 0 && n < max) {
             struct sh_mem_block *x = &b[n++];
             memset(x, 0, sizeof *x);
@@ -688,7 +695,7 @@ static int mcb_chain(struct shsess *s, struct sh_mem_block *b, int max)
             if (mem >= 0xA000 && gap)
                 region++, gap = 0;
             x->region = (unsigned char)(mem >= 0xA000 ? region : 0);
-            if (!owner) {
+            if (free) {
                 x->type = SH_MB_FREE;
             } else if (owner == 8) {
                 sh_fmt(x->name, sizeof x->name, "SYSTEM");

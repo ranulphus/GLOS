@@ -132,6 +132,10 @@ static struct dos_req *take(void *via)
 }
 
 int dos_vm_pending(void) { return waits_for(0) || (!users && xfer_seg); }
+
+/* The server's transfer buffer's block (its segment, the MCB's +1), or 0: it is GLOS's only while kernel callers
+   make DOS calls, and freed while a program runs (MEM counts it as free: kernel/shell/shsess.c). */
+u16 dos_xfer_seg(void) { return xfer_seg; }
 int dos_vm_pending_for(void *via) { return (cur && cur->via == via) || waits_for(via); }
 
 static void put_regs(u32 lin, const struct dos_regs *r)
