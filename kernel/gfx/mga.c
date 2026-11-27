@@ -175,6 +175,15 @@ void mga_display_init(const struct bootinfo *bi)
     m.off = (bi->display_flags & BI_DISPLAY_NOACCEL) != 0;
     if (m.off || mga_find(&mga) != 0 || mga.family == MGA_FAMILY_G200E)
         return;
+    /* A card whose ranges the BIOS left unplaced (0: bench C's PCI G450 beside its ViRGE, which the BIOS started)
+       isn't GLOS's to touch: its registers "at" 0 are the first page of memory, and the clocks' look (an indexed
+       register's writes, at 3C00h and on) wrote into DOS's own, so that DOS came back from GLOS broken (a restart
+       hung; once DOS's prompt had no keyboard). [display] card places a card's ranges before this (pcicard.c). */
+    if (!mga.fb_phys || !mga.mmio_phys) {
+        kprintf("GLOS-MGA refused %s at %u:%u.%u fb=%08x mmio=%08x why=unplaced\n", mga.name, mga.bus, mga.dev, mga.fn,
+                mga.fb_phys, mga.mmio_phys);
+        return;
+    }
     m.found = 1;
     mga.fb_size = mga.family == MGA_FAMILY_G400 ? 32u << 20 : 16u << 20;   /* (the apertures: the G400's and
                                                    G450's are 32 MB, the others' 16; the HAL would assume 16) */

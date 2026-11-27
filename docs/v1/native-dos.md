@@ -1186,6 +1186,63 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   bootinfo 16's ems_kb (0 auto, BI_EMS_OFF off). `jobs.py cdrom`'s ems case: EMSTEST's checks, the frame at C800h
   with 512 pages, then 1024 KB (64 pages) and off (no EMMXXXX0, reason=setting) after a restart each, on the bf6
   and the 486: PASS. Owed: games that want EMS, native machines' own EMS.
+- **N4, a display card the BIOS couldn't start (planned 2026-11-26; before v1, the owner's choice).** Bench C's
+  486 (UMC 8881 board) with a PCI G450 (a G450 behind its own HiNT HB6 PCI-to-PCI bridge): as the only card, a
+  black screen from power-on; beside the ViRGE/DX, the BIOS configures the bridge (bus 1; windows FD000000-FE8FFFFF
+  and, prefetchable, FC000000-FC8FFFFF) but leaves the G450's 32 MB frame buffer (BAR 0), its 8 MB ILOAD range
+  (BAR 2) and its 128 KB ROM at 0: only the 16 KB registers (BAR 1) have an address, so the card's BIOS never ran.
+  tests/dos/pciplace.c (PCIPLACE) there: the ROM placed in the bridge's window reads 55AA and its PCIR block (102B:
+  0525, 34 KB of image), and placed at F4000000 with the bridge's prefetchable window widened to it reads the same:
+  the UMC chipset passes that range to the PCI bus and the bridge passes it on; everything put back. The steps:
+  D1 GLOS places what the BIOS left unplaced: a display card's (class 03) memory BARs and ROM that read 0, sized
+  with its decode off, each in free space (every function's BARs, every bridge's windows, the E820 map's RAM and
+  reserved ranges and the top 20 MB kept clear), aligned to its size, its parent bridges' windows widened to take
+  it (a prefetchable BAR in the prefetchable window); a plain C allocator, host-tested; `GLOS-PCI place` lines.
+  D2 which card is GLOS's display (the owner, 2026-11-26): [display] card = auto, the card the BIOS started, as
+  now, or a card's PCI address (01:00.0); the Control Panel's Display page lists the cards. Nothing changes on a
+  PC unless it is set; an address naming the card the BIOS started (its I/O decode on, the image at C0000h its own
+  by its PCI header) leaves it as it is, its BIOS not run twice. D3 the named card started: its ROM read through its ROM BAR; the VGA ranges
+  switched to it (the old primary's I/O and memory decode off, the card's bridges' VGA Enable on, its own decode
+  on); its image mapped at C0000h for the system VM by GLOS's page tables (no chipset shadowing); its entry
+  (C000:0003, AX its bus and device) called as a nested real-mode call with a time limit; then INT 10h, VBE and the
+  desktop are the card's (the loader's and the kernel's first lines stay on the old primary). Native only. D4 Loop
+  A: a second display card in 86Box's 486 profile, its ranges cleared before GLOS starts to take D1's path, the
+  desktop's shot from it (2026-11-26: our 86Box drops gfxcard_2 for its Matrox PCI models, rewriting the config
+  without it: a patch of 86Box's first, for two VGA cards' legacy decode by their command registers; until
+  then the real 486 is D3's test). D5 bench C: the G450 as GLOS's display; then DOS-GL's Glide and GL
+  there (asked). Unknowns: what the card's BIOS asks of a 1995 BIOS at its start (a POST memory manager it may not
+  find), and whether every board lets the VGA ranges move.
+  **First try on the real PC (2026-11-26, the owner's "why don't we just try it on the real hardware"):**
+  tests/dos/card2.c (CARD2, DJGPP, under GLOS M3 hosted on bench C) does D1 and D3 from DOS: the frame buffer
+  placed at FA000000 (the bridge's prefetchable window moved there) and ILOAD at FE000000 by kernel/drv/pcialloc.c,
+  the ROM read into a DOS block (34,816 bytes, checksum 0), the ViRGE's decode off and the bridge's VGA Enable on,
+  the image's entry called in real mode (DPMI 0301h, a stack of its own): it returned, INT 10h is the card's
+  (2999:0B60, was C000:1EF8), mode 3 set, VBE 3.0 "Matrox Graphics Inc." with 16 MB. Then `glos display on
+  640x480x8`: mode 101h with its LFB at FA000000, GLOS's Matrox driver on the G450 ("accel idle MGA-G450"), the
+  desktop's screenshot read back from it. What GLOS's own D1-D3 add: done natively at the start, the image at
+  C0000h (not a DOS block), the setting, the PC left as the BIOS had it when the setting is auto.
+  **But the monitor had no signal** (the owner, the same evening; the screenshot is a read of the frame buffer,
+  not of the card's output). tests/dos/g450out.c (G450OUT) read why: the CRTC ran with garbage timing and CRTC 17h's
+  syncs off; the PLL's sets A and B (programmed by the BIOS's start) locked, the DAC powered, its output routed,
+  CRTC2 off. The card's BIOS's own mode 3 (INT 10h AH=0, its handler at 0B70h through INT 6Dh) wrote nothing to the
+  CRTC; INT 42h was the system BIOS's (F000:F065), no chaining, no segment C000h in its code. Port writes reach the
+  card (3D5h seen at its mirror, 1FD5h). Text mode 3 written by its registers (G450OUT vga3) gave a picture (the
+  font not loaded: coloured cells); then the BIOS's VBE 4F02h (101h, LFB) returned 004Fh, programmed the CRTC
+  (17h C3h) and bars drawn into its LFB showed, with GLOS's /VERBOSE lines drawn by the BIOS scrolling at the top.
+  `glos display on` (VBE through the stub's 256-byte spare stack in that build: the PCI G450's BIOS needs about 302)
+  hung the 486, and GLOS's Matrox driver held the card's ranges as they were at the start (0). pcicard.c takes from
+  this: placing before display_init, the start's stack a 4 KB DOS block, and mode 3 by registers where the syncs
+  stay off after the card's BIOS's own.
+  **D3 on bench C (2026-11-27, the owner watching): it works.** GLOS 930f994 hosted on FreeDOS with [display] card
+  = 01:00.0 for one start: the G450's frame buffer placed at FA000000 (32 MB) and its BAR2 at FE000000 (the BIOS
+  had left both at 0), its bridge's windows widened; its ROM read from FE8E0000 (34,816 bytes, checksum 00); the
+  ViRGE's decode off; the card's BIOS run from C000:0003 (8 s, interrupts off: one vif-stuck warning), INT 10h
+  then its own (C000:0B60); its mode 3 set the syncs on by itself (mode3 by=bios), and GLOS's console was
+  readable on the G450's monitor. `glos display on 640x480x16`: VBE 111h by the card's BIOS, the LFB at
+  FA000000, the Matrox driver's acceleration (16 MB): the desktop correct (the owner). The difference from the
+  evening before is likely the monitor: then one monitor moved between the two cards, so the G450 had none
+  while its BIOS ran (a BIOS that finds no monitor by DDC may leave its outputs off); now each card had its own.
+  Mode 3 by registers stays for a card whose BIOS leaves the syncs off.
 - **N4, the keyboard's layout (2026-11-25, native-dos; KEYB's work):** the system VM's INT 09h is an ARPL of GLOS's
   in front of the BIOS's handler (kernel/vm/vkeyb.c). A key pressed whose character on [region] layout (keymap.h:
   Shift, Caps Lock, Num Lock, AltGr from the BIOS's flags) differs from the US one, and the 102nd key, GLOS answers:

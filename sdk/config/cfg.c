@@ -24,6 +24,9 @@ const struct cfg_key cfg_schema[] = {
     { "display", "write_combining", CFG_CHOICE, CFG_RESTART, 0, 0, "auto|on|off", "auto", "Fast &framebuffer writes",
       "Write-combining for the video card's linear framebuffer, which software renderers write several times "
       "faster with: auto for the cards it has been checked on, on for any card, off" },
+    { "display", "card", CFG_TEXT, CFG_RESTART, 4, 7, "pciaddr", "auto", "Display &card",
+      "Which display card GLOS starts and shows its screen on: auto, the one the PC's BIOS started, or another "
+      "card's PCI address (as glos pci lists it, 01:00.0): GLOS then places its ranges and runs its BIOS" },
     { "display", "refresh", CFG_CHOICE, CFG_NOW, 0, 0, "auto|60|70|75|85", "auto", "&Refresh rate (Hz)",
       "The screen's refresh rate, where the card's BIOS can set one (VBE 3.0) and the monitor says it takes it "
       "(its EDID): auto keeps the BIOS's own" },
@@ -295,6 +298,9 @@ static int say(char *why, int room, const char *a, const char *b, const char *c)
 }
 
 /* A whole number (digits only), into *v: 0, or -1. */
+static int hexval(char c) { return c >= '0' && c <= '9' ? c - '0' : (c | 32) >= 'a' && (c | 32) <= 'f' ? (c | 32) - 'a' + 10 : -1; }
+static int hexpair(const char *s) { return hexval(s[0]) >= 0 && hexval(s[1]) >= 0; }
+
 static int number(const char *s, long *v)
 {
     long n = 0;
@@ -597,6 +603,14 @@ int cfg_check(const struct cfg_key *k, const char *v, char *why, int room)
         if (same(k->choices ? k->choices : "", "page")) {
             if (cfg_page(v) < 0)
                 return say(why, room, "off, auto, or a page's segment from C800 to EF00 (D800)", "", "");
+            return 0;
+        }
+        if (same(k->choices ? k->choices : "", "pciaddr")) {  /* auto, or BB:DD.F in hex (glos pci's form) */
+            if (same(v, "auto"))
+                return 0;
+            if (vl != 7 || v[2] != ':' || v[5] != '.' || !hexpair(v) || !hexpair(v + 3) || hexval(v[3]) > 1
+                || v[6] < '0' || v[6] > '7')
+                return say(why, room, "auto, or a PCI address as glos pci lists it (01:00.0)", "", "");
             return 0;
         }
         if (same(k->choices ? k->choices : "", "ems")) {      /* auto, off, or KB: 64 to 32768, 16 KB pages */

@@ -24,6 +24,7 @@
 #include "sshd.h"
 #include "timer.h"
 #include "vm.h"
+#include "../drv/pcicard.h"
 
 #define WINDOWS 18                              /* 18 x 54.925 ms = 988.6 ms */
 
@@ -118,6 +119,7 @@ void kmain(struct bootinfo *loader_bi)
     if (bi->flags & BI_F_VM) {                  /* DOS carries on in V86 mode, as a thread */
         sched_init();
         random_init(bi);
+        pcicard_place(bi);                      /* ([display] card: its ranges placed before any driver looks) */
         display_init(bi);
         vm_start(bi);
         clock_init();                           /* the RTC's time, until GLOS.CFG's zone and SNTP (M10) */
