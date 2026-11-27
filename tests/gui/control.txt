@@ -6,7 +6,7 @@
 # lines and the Date and Time page's clock are the machine's: masked.)
 run CONTROL.EXE
 wait "Control Panel"
-shot cp-display "Control Panel" 146 182 440 44
+shot cp-display "Control Panel" 146 208 440 44
 key ctrl+tab alt+s
 shot cp-input "Control Panel"
 key ctrl+tab
