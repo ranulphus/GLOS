@@ -140,17 +140,27 @@ static void release(u32 lin, u32 from, u32 to)
 }
 
 /* A page fault at lin (the client's, or the kernel's touching the client's
-   memory): a page still to be backed gets its zeroed frame. 1 when it did. */
+   memory): a page still to be backed gets its zeroed frame. 1 when it did.
+   One that can't be (no memory left) is the client's page fault: said once
+   for the context (GLOS-WARN dpmi-no-memory), since all the client shows is
+   a fault inside its malloc or memset (bench C's GLQuake, 2026-11-27), and a
+   client that retries would fill the serial log at ~10 ms a line. */
 int lin_fault(u32 lin)
 {
-    u32 pte, f;
+    u32 pte, f = 0;
     if (!dctx || lin < USER_BASE || lin >= USER_END)
         return 0;
     pte = mm_lookup(lin);
-    if ((pte & 1) || !(pte & MM_LAZY) || mm_avail_frames() <= RESERVE / 4 || !(f = pmm_alloc()))
+    if ((pte & 1) || !(pte & MM_LAZY))
         return 0;
-    if (mm_map(lin & ~0xFFFu, f, MM_W | MM_U) != 0) {
-        pmm_free(f);
+    if (mm_avail_frames() <= RESERVE / 4 || !(f = pmm_alloc()) || mm_map(lin & ~0xFFFu, f, MM_W | MM_U) != 0) {
+        if (f)
+            pmm_free(f);
+        if (!dctx->oom_warned) {
+            dctx->oom_warned = 1;
+            kprintf("GLOS-WARN dpmi-no-memory lin=%08x psp=%04x free_kb=%u held_kb=%u unbacked_kb=%u\n", lin,
+                    dctx->psp, mm_avail_frames() * 4, dctx->frames * 4, dctx->lazy * 4);
+        }
         return 0;
     }
     fresh(lin & ~0xFFFu, f);                    /* (the access that faulted is made again, and sets its own bits) */

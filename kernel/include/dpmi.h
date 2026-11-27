@@ -149,6 +149,7 @@ struct dpmi_ctx {
     struct dosblk *dosblks;
     struct app *app;                    /* a GLOS app's context (kernel/app/app.c), or 0: a session's */
     u8 no_app;                          /* glos run --app was refused for it: not asked again */
+    u8 oom_warned;                      /* GLOS-WARN dpmi-no-memory said once for it (mem.c lin_fault) */
 };
 
 struct app;

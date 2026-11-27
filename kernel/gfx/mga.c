@@ -179,14 +179,18 @@ void mga_display_init(const struct bootinfo *bi)
        isn't GLOS's to touch: its registers "at" 0 are the first page of memory, and the clocks' look (an indexed
        register's writes, at 3C00h and on) wrote into DOS's own, so that DOS came back from GLOS broken (a restart
        hung; once DOS's prompt had no keyboard). [display] card places a card's ranges before this (pcicard.c). */
-    if (!mga.fb_phys || !mga.mmio_phys) {
-        kprintf("GLOS-MGA refused %s at %u:%u.%u fb=%08x mmio=%08x why=unplaced\n", mga.name, mga.bus, mga.dev, mga.fn,
-                mga.fb_phys, mga.mmio_phys);
+    mga.fb_size = mga.family == MGA_FAMILY_G400 ? 32u << 20 : 16u << 20;   /* (the apertures: the G400's and
+                                                   G450's are 32 MB, the others' 16; the HAL would assume 16) */
+    if (!mga.fb_phys || !mga.mmio_phys
+        || (mga.mmio_phys >= mga.fb_phys && mga.mmio_phys - mga.fb_phys < mga.fb_size)
+        || (mga.fb_phys >= mga.mmio_phys && mga.fb_phys - mga.mmio_phys < 0x4000)) {
+        /* (or placed on one another: bench C's G450 in slot 1, at some power-ons, its frame buffer FC000000 for 32 MB
+           and its registers at FD000000 inside it; touching them hung GLOS's leave) */
+        kprintf("GLOS-MGA refused %s at %u:%u.%u fb=%08x mmio=%08x why=%s\n", mga.name, mga.bus, mga.dev, mga.fn,
+                mga.fb_phys, mga.mmio_phys, !mga.fb_phys || !mga.mmio_phys ? "unplaced" : "overlap");
         return;
     }
     m.found = 1;
-    mga.fb_size = mga.family == MGA_FAMILY_G400 ? 32u << 20 : 16u << 20;   /* (the apertures: the G400's and
-                                                   G450's are 32 MB, the others' 16; the HAL would assume 16) */
     kprintf("GLOS-MGA found %s id=%04x rev=%02x at %u:%u.%u fb=%08x mmio=%08x\n", mga.name, mga.device_id,
             mga.revision, mga.bus, mga.dev, mga.fn, mga.fb_phys, mga.mmio_phys);
 }

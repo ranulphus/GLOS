@@ -62,11 +62,64 @@ static u32 bar_size(int b, int d, int f, int r, int rom)
 
 static int present(int b, int d, int f) { return (cfg(b, d, f, 0) & 0xFFFF) != 0xFFFF; }
 
+/* Ranges the BIOS placed (keep) that its bridge's window doesn't hold: the window widened to hold them, in 1 MB
+   steps, where nothing else is (busy, and other the card's own bridge's other window). 1 if the window changed.
+   Bench C after the G450 moved to slot 1 (2026-11-27): the BIOS put its 32 MB frame buffer at FC000000 and opened
+   its bridge's prefetchable window to FC8FFFFF alone, so past 9 MB nothing of it was reachable (GLOS's Matrox
+   driver found 9 MB of 16). */
+static int fit(struct pa_range *win, const struct pa_range *keep, int n, const struct pa_range *busy, int nbusy,
+               const struct pa_range *other)
+{
+    unsigned long lo = win->base, hi = win->last;
+    int k, empty = win->base > win->last;
+    for (k = 0; k < n; k++)
+        if (empty)
+            lo = keep[k].base & ~0xFFFFFul, hi = keep[k].last | 0xFFFFF, empty = 0;
+        else {
+            if (keep[k].base < lo)
+                lo = keep[k].base & ~0xFFFFFul;
+            if (keep[k].last > hi)
+                hi = keep[k].last | 0xFFFFF;
+        }
+    if (empty || (lo == win->base && hi == win->last))
+        return 0;
+    for (k = 0; k < nbusy; k++)
+        if (busy[k].base <= hi && busy[k].last >= lo)
+            return 0;                           /* (taken: as it was, and what's past it unreachable) */
+    if (other->base <= other->last && other->base <= hi && other->last >= lo)
+        return 0;
+    win->base = lo, win->last = hi;
+    return 1;
+}
+
+/* Is every range of keep inside win (an empty window holds none)? */
+static int held(const struct pa_range *win, const struct pa_range *keep, int n)
+{
+    int k;
+    for (k = 0; k < n; k++)
+        if (win->base > win->last || keep[k].base < win->base || keep[k].last > win->last)
+            return 0;
+    return 1;
+}
+
+/* Do any two of the card's ranges overlap? */
+static int overlap(const struct pa_range *a, int na, const struct pa_range *b, int nb)
+{
+    int i, j;
+    for (i = 0; i < na + nb; i++)
+        for (j = i + 1; j < na + nb; j++) {
+            const struct pa_range *x = i < na ? &a[i] : &b[i - na], *y = j < na ? &a[j] : &b[j - na];
+            if (x->base <= y->last && y->base <= x->last)
+                return 1;
+        }
+    return 0;
+}
+
 void pcicard_place(const struct bootinfo *bi)
 {
     struct pa_range busy[48], keep_pf[6];
     u32 bar[6], size[6], np, pf, top = 0, i;
-    int nbusy = 0, npf = 0, b, d, f, k, unplaced = 0;
+    int nbusy = 0, npf = 0, b, d, f, k, unplaced = 0, widened = 0, single = 1;
     char why[48];
 
     if (!(bi->display_card & BI_CARD_SET))
@@ -115,12 +168,18 @@ void pcicard_place(const struct bootinfo *bi)
                         break;
                     continue;
                 }
+                /* (a single function's device: never past function 0, even when the card or its bridge is skipped
+                   below. Bench C's G450 answers functions 1-7 with function 0's registers, so its own ranges came
+                   back as another device's, and GLOS found no room for them) */
+                if (!f)
+                    single = !(cfg(b, d, 0, 0x0C) & 0x00800000u);
                 hdr = cfg(b, d, f, 0x0C) >> 16 & 0x7F;
-                if (b == cb && d == cd && f == cf)
+                if ((b == cb && d == cd && f == cf) || (hdr == 1 && b == 0 && d == bd && f == bf)) {
+                    if (single)
+                        break;
                     continue;
+                }
                 if (hdr == 1) {                 /* a bridge: its windows (the card's own bridge's are placed into) */
-                    if (b == 0 && d == bd && f == bf)
-                        continue;
                     np = cfg(b, d, f, 0x20), pf = cfg(b, d, f, 0x24);
                     if ((np & 0xFFF0) << 16 <= (np & 0xFFF00000u) && nbusy < 46)
                         busy[nbusy].base = (np & 0xFFF0) << 16, busy[nbusy++].last = (np & 0xFFF00000u) | 0xFFFFF;
@@ -136,7 +195,7 @@ void pcicard_place(const struct bootinfo *bi)
                             k++;                /* (a 64-bit BAR's upper half) */
                     }
                 }
-                if (!f && !(cfg(b, d, 0, 0x0C) & 0x00800000u))
+                if (single)
                     break;                      /* (not a multi-function device) */
             }
     np = bd >= 0 ? cfg(0, bd, bf, 0x20) : 0x0000FFF0u, pf = bd >= 0 ? cfg(0, bd, bf, 0x24) : 0x0000FFF0u;
@@ -151,8 +210,26 @@ void pcicard_place(const struct bootinfo *bi)
             }
         memcpy(busy_kept, busy, sizeof busy[0] * (u32)nbusy);
         nbusy_kept = nbusy;
+        widened = bd >= 0 && (fit(&win_np, keep_np, nkeep_np, busy, nbusy, &win_pf)
+                              | fit(&win_pf, keep_pf, npf, busy, nbusy, &win_np));
+        if (bd >= 0 && !(cfg(0, bd, bf, 0x3C) >> 16 & 8)     /* (its bridge's VGA Enable off: not the BIOS's display) */
+            && (overlap(keep_np, nkeep_np, keep_pf, npf) || !held(&win_np, keep_np, nkeep_np)
+                || !held(&win_pf, keep_pf, npf))) {
+            /* the BIOS's placing unusable: its ranges on one another (bench C, the G450 in slot 1: the frame buffer
+               at FC000000, 32 MB, its registers at FD000000 inside it), or out of reach through the bridge. The card
+               isn't the BIOS's display (that one's ranges are never moved), so all of it placed again, the bridge's
+               windows anew */
+            kprintf("GLOS-CARD bios-placing refused card=%02x:%02x.%u why=%s\n", cb, cd, cf,
+                    overlap(keep_np, nkeep_np, keep_pf, npf) ? "overlap" : "out-of-window");
+            for (k = 0; k < 6; k++)
+                if (size[k] && (bar[k] & 0xFFFFFFF0u))
+                    bar[k] &= 0xF, unplaced++;
+            nkeep_np = npf = 0;
+            win_np.base = win_pf.base = 1, win_np.last = win_pf.last = 0;
+            widened = 0;
+        }
         card_np_lo = (u32)win_np.base, card_np_hi = (u32)win_np.last;
-        if (!unplaced) {                        /* (all placed by the BIOS: only its BIOS to run) */
+        if (!unplaced && !widened) {            /* (all placed by the BIOS, its windows holding them: its BIOS to run) */
             kprintf("GLOS-CARD placed card=%02x:%02x.%u by=bios\n", cb, cd, cf);
             on = 1;
             return;
@@ -191,8 +268,9 @@ void pcicard_place(const struct bootinfo *bi)
             wcfg(0, bd, bf, 4, cfg(0, bd, bf, 4) | 6);
         wcfg(cb, cd, cf, 4, (cfg(cb, cd, cf, 4) & ~0x400u) | 6);
         card_np_lo = (u32)win_np.base, card_np_hi = (u32)win_np.last;
-        kprintf("GLOS-CARD placed card=%02x:%02x.%u by=glos bridge=%s mem=%08x-%08x prefetch=%08x-%08x\n", cb, cd, cf,
-                bd >= 0 ? "yes" : "none", (u32)win_np.base, (u32)win_np.last, (u32)win_pf.base, (u32)win_pf.last);
+        kprintf("GLOS-CARD placed card=%02x:%02x.%u by=%s bridge=%s mem=%08x-%08x prefetch=%08x-%08x\n", cb, cd, cf,
+                unplaced ? "glos" : "bios windows=glos", bd >= 0 ? "yes" : "none", (u32)win_np.base, (u32)win_np.last,
+                (u32)win_pf.base, (u32)win_pf.last);
     }
     on = 1;
 }
@@ -330,10 +408,13 @@ int pcicard_start(u32 stack_seg, u32 stack_bytes)
                         break;
                     continue;
                 }
-                if ((b != cb || d != cd || f != cf) && (cfg(b, d, f, 8) >> 24) == 0x03 && (cfg(b, d, f, 4) & 1)) {
-                    ob = b, od = d, of = f;
+                if ((b != cb || d != cd) && (cfg(b, d, f, 8) >> 24) == 0x03 && (cfg(b, d, f, 4) & 1)) {
+                    ob = b, od = d, of = f;     /* (not the card's own device: an aliasing card's other function
+                                                   numbers are itself) */
                     break;
                 }
+                if (!f && !(cfg(b, d, 0, 0x0C) & 0x00800000u))
+                    break;
             }
     was.started = 1, was.ob = ob, was.od = od, was.of = of;
     was.v10 = vec(0x10), was.v6d = vec(0x6D);
