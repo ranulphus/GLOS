@@ -1233,6 +1233,16 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   hung the 486, and GLOS's Matrox driver held the card's ranges as they were at the start (0). pcicard.c takes from
   this: placing before display_init, the start's stack a 4 KB DOS block, and mode 3 by registers where the syncs
   stay off after the card's BIOS's own.
+  **D3 on bench C (2026-11-27, the owner watching): it works.** GLOS 930f994 hosted on FreeDOS with [display] card
+  = 01:00.0 for one start: the G450's frame buffer placed at FA000000 (32 MB) and its BAR2 at FE000000 (the BIOS
+  had left both at 0), its bridge's windows widened; its ROM read from FE8E0000 (34,816 bytes, checksum 00); the
+  ViRGE's decode off; the card's BIOS run from C000:0003 (8 s, interrupts off: one vif-stuck warning), INT 10h
+  then its own (C000:0B60); its mode 3 set the syncs on by itself (mode3 by=bios), and GLOS's console was
+  readable on the G450's monitor. `glos display on 640x480x16`: VBE 111h by the card's BIOS, the LFB at
+  FA000000, the Matrox driver's acceleration (16 MB): the desktop correct (the owner). The difference from the
+  evening before is likely the monitor: then one monitor moved between the two cards, so the G450 had none
+  while its BIOS ran (a BIOS that finds no monitor by DDC may leave its outputs off); now each card had its own.
+  Mode 3 by registers stays for a card whose BIOS leaves the syncs off.
 - **N4, the keyboard's layout (2026-11-25, native-dos; KEYB's work):** the system VM's INT 09h is an ARPL of GLOS's
   in front of the BIOS's handler (kernel/vm/vkeyb.c). A key pressed whose character on [region] layout (keymap.h:
   Shift, Caps Lock, Num Lock, AltGr from the BIOS's flags) differs from the US one, and the 102nd key, GLOS answers:
