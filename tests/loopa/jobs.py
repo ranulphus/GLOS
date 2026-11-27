@@ -2321,7 +2321,8 @@ def shell_case(profile, card):
         t.send("vex\x7fr\r")
         checks["edited"] = t.expect("GLOS shell 1.0 (GLOS API %s)\n" % GLOS_API)
         t.send("dir /w\r")
-        checks["dir"] = t.expect(" Directory of C:\\TEST\n") and t.expect("GLOS.EXE") and t.expect(" file(s)") \
+        checks["dir"] = t.expect(" Directory of C:\\TEST\n") and t.expect("GLOSK.BIN" if NATIVE else "GLOS.EXE") \
+            and t.expect(" file(s)") \
             and t.expect("C:\\TEST>")
         t.send("df\r")                            # (the drive's size and free space, by DOS's own figures)
         checks["df"] = t.expect("Drive  Volume") and t.expect("\nC:     ") and t.expect(" MB ") and t.expect("%\n") \

@@ -535,6 +535,15 @@ second V86 machine, the one N6 needs anyway. What it is:
     or the program's EOI to port 20h; INT 29h. Loop A: CONTEST (`tests/dos/contest.c`) with what the test types:
     a line by 0Ah, a key by INT 16h, 08h, Ctrl-C into its own INT 23h and the call made again, ticks counted by
     INT 1Ch and the tick count; and Ctrl-C ending it with no handler of its own.
+    **Redirected (2026-11-27, found by N7's survey: `conin line < in.txt` hung natively):** 01h-0Ch read and
+    write through the program's handles 0 and 1 as DOS 2+ does, so COMMAND.COM's < and > give them a file or
+    another device (`dos21.c`: std_in, std_out, std_status; they went to the keyboard and the screen whatever the
+    handles were). DOSDIFF 4's redir lines are MS-DOS 7.1's answers and GLOS's: 0Bh FFh while the file has more,
+    00h at its end; 08h, 01h, 07h, 06h (FFh) its bytes as they are; 0Ah to its CR, which it keeps, an LF taken
+    silently (the one the last line left), a bell for each byte past its room; the echo of 01h and 0Ah to standard
+    output (to the file when that is redirected: `bxyz\r`); 02h, 09h and 06h to the file, AL 'Q' and 24h; AUX,
+    PRN and NUL take output nowhere. At the input's end MS-DOS 7.1 waits for ever (a probe of it never came back);
+    GLOS's DOS goes on from the keyboard there, where Ctrl+C ends it, and 06h (FFh) says none.
   - **NS4, programs that need more:** DPMI on a native machine (DJGPP programs), EMS and XMS, a VGA of its own.
   - **NS5, a suite:** `loopa-ndos` in the gate.
 

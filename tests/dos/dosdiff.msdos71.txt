@@ -1,4 +1,4 @@
-DOSDIFF 3
+DOSDIFF 4
 30h00 ax=0A07 bh=FF
 30h01 ax=0A07 bh=00
 3306h bx=0A07 dx=0000
@@ -192,5 +192,14 @@ S6523h N cf=0 ax=0000
 S6523h x cf=0 ax=0002
 4Dh at the start ax=0000
 spawn none=-1
+redir in echo "bxyz\r"
+redir in 0Bh=FF 08h=61 01h=62 07h=0D 06h=0A
+redir in 0Ah n=3 "xyz" then=0D 0Bh=FF 08h=0A 0Bh=00
+redir 0Ah echo "ab\rcd\rlo\a\a\a\a\r"
+redir 0Ah0 max=10 n=2 61 62 0D 00 00
+redir 0Ah1 max=10 n=2 63 64 0D 00 00
+redir 0Ah2 max=3 n=2 6C 6F 0D 00 00
+redir 0Ah after 0Bh=FF 08h=0A
+redir out 02h al=51 09h al=24 file=3 "QRS"
 3Ah DDIFF              cf=0
 DOSDIFF end

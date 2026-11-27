@@ -675,12 +675,141 @@ static void small(void)
     printf("S6523h x cf=%u ax=%04X\n", r.x.cflag ? 1 : 0, r.x.ax);
 }
 
+/* Handle h of the program's made name's (opened with ax), what it was kept in *keep (46h; N7's survey, 2026-11-27:
+   GLOS's own DOS read the keyboard and wrote the screen whatever handles 0 and 1 were). */
+static void redirect(unsigned h, const char *name, unsigned ax, unsigned *keep)
+{
+    unsigned f;
+
+    fflush(stdout);
+    r.x.ax = 0x4500, r.x.bx = h;
+    dos();
+    *keep = r.x.ax;
+    f = handle(name, ax);
+    r.x.ax = 0x4600, r.x.bx = f, r.x.cx = h;
+    dos();
+    close_(f);
+}
+
+static void unredirect(unsigned h, unsigned keep)
+{
+    r.x.ax = 0x4600, r.x.bx = keep, r.x.cx = h;
+    dos();
+    close_(keep);
+}
+
+static unsigned char ch(unsigned ax)
+{
+    r.x.ax = ax;
+    dos();
+    return r.h.al;
+}
+
+/* A file's first bytes as one line, CR, LF and BEL written \r, \n, \a (the echo of the reads below, kept in a file
+   of its own: where a program's console output goes over a network shell isn't DOS's to say). */
+static void show(const char *label, const char *name)
+{
+    unsigned h = handle(name, 0x3D00), n, i;
+
+    ds_es();
+    r.x.ax = 0x3F00, r.x.bx = h, r.x.cx = 48, r.x.dx = (unsigned)buf;
+    dos();
+    n = r.x.cflag ? 0 : r.x.ax;
+    close_(h);
+    printf("%s \"", label);
+    for (i = 0; i < n; i++)
+        printf(buf[i] == '\r' ? "\\r" : buf[i] == '\n' ? "\\n" : buf[i] == 7 ? "\\a" : "%c", buf[i]);
+    printf("\"\n");
+}
+
+/* The console functions through a redirected standard input and output (DOS 2+: RBIL's 01h-0Ch "may be
+   redirected"): handle 0 a file's, read by 0Bh, 08h, 01h, 07h, 06h and 0Ah; handle 1 a file's, written by 02h,
+   09h and 06h and read back. What 01h and 0Ah echo goes to standard output, the probe's own lines. */
+static void redirection(void)
+{
+    static const char in[] = "ab\r\nxyz\r\n";
+    static const char lines[] = "ab\r\ncd\r\nlonger\r\n";
+    unsigned char lb[16];
+    unsigned char got[3][6];
+    unsigned keep, keep1, h, n, s0, s1, s2, c1, c2, c3, c4, c5, a2, a9;
+
+    make("RIN.TXT", in, sizeof in - 1, 0);
+    make("RECHO.TXT", "", 0, 0);
+    redirect(1, "RECHO.TXT", 0x3D02, &keep1);
+    redirect(0, "RIN.TXT", 0x3D00, &keep);
+    s0 = ch(0x0B00);
+    c1 = ch(0x0800);
+    c2 = ch(0x0100);
+    c3 = ch(0x0700);
+    r.x.ax = 0x0600, r.h.dl = 0xFF;
+    dos();
+    c4 = r.h.al;                                /* (its ZF: intdosx gives CF alone) */
+    memset(lb, 0, sizeof lb);
+    lb[0] = 10;
+    ds_es();
+    r.x.ax = 0x0A00, r.x.dx = (unsigned)lb;
+    dos();
+    s1 = ch(0x0B00);
+    c5 = ch(0x0800);
+    s2 = ch(0x0B00);
+    unredirect(0, keep);
+    unredirect(1, keep1);
+    show("redir in echo", "RECHO.TXT");
+    printf("redir in 0Bh=%02X 08h=%02X 01h=%02X 07h=%02X 06h=%02X\n", s0, c1, c2, c3, c4);
+    printf("redir in 0Ah n=%u \"%.*s\" then=%02X 0Bh=%02X 08h=%02X 0Bh=%02X\n", lb[1], lb[1] < 10 ? lb[1] : 10,
+           lb + 2, lb[2 + (lb[1] < 10 ? lb[1] : 10)], s1, c5, s2);
+    /* 0Ah line after line (the LF the last left first in the next) and past its buffer's room */
+    make("RIN.TXT", lines, sizeof lines - 1, 0);
+    make("RECHO.TXT", "", 0, 0);
+    redirect(1, "RECHO.TXT", 0x3D02, &keep1);
+    redirect(0, "RIN.TXT", 0x3D00, &keep);
+    for (h = 0; h < 3; h++) {
+        memset(lb, 0, sizeof lb);
+        lb[0] = h == 2 ? 3 : 10;
+        ds_es();
+        r.x.ax = 0x0A00, r.x.dx = (unsigned)lb;
+        dos();
+        got[h][0] = lb[1], memcpy(got[h] + 1, lb + 2, 5);
+    }
+    s1 = ch(0x0B00);
+    c5 = s1 ? ch(0x0800) : 0;
+    unredirect(0, keep);
+    unredirect(1, keep1);
+    show("redir 0Ah echo", "RECHO.TXT");
+    for (h = 0; h < 3; h++)
+        printf("redir 0Ah%u max=%u n=%u %02X %02X %02X %02X %02X\n", h, h == 2 ? 3 : 10, got[h][0], got[h][1],
+               got[h][2], got[h][3], got[h][4], got[h][5]);
+    printf("redir 0Ah after 0Bh=%02X 08h=%02X\n", s1, c5);
+    make("ROUT.TXT", "", 0, 0);
+    redirect(1, "ROUT.TXT", 0x3D02, &keep);
+    r.x.ax = 0x0200, r.h.dl = 'Q';
+    dos();
+    a2 = r.h.al;
+    ds_es();
+    r.x.ax = 0x0900, r.x.dx = (unsigned)"R$";
+    dos();
+    a9 = r.h.al;
+    r.x.ax = 0x0600, r.h.dl = 'S';
+    dos();
+    unredirect(1, keep);
+    h = handle("ROUT.TXT", 0x3D00);
+    ds_es();
+    r.x.ax = 0x3F00, r.x.bx = h, r.x.cx = 16, r.x.dx = (unsigned)buf;
+    dos();
+    n = r.x.cflag ? 0 : r.x.ax;
+    close_(h);
+    printf("redir out 02h al=%02X 09h al=%02X file=%u \"%.*s\"\n", a2, a9, n, n < 16 ? n : 16, buf);
+    call_dx(0x4100, "RIN.TXT", 0);
+    call_dx(0x4100, "ROUT.TXT", 0);
+    call_dx(0x4100, "RECHO.TXT", 0);
+}
+
 int main(int argc, char **argv)
 {
     unsigned h, h2, seg, cur;
     unsigned char dta[64];
 
-    printf("DOSDIFF 3\n");
+    printf("DOSDIFF 4\n");
     /* the version */
     r.x.ax = 0x3000;
     r.x.bx = 0x1234, r.x.cx = 0x5678;
@@ -945,6 +1074,7 @@ int main(int argc, char **argv)
     printf("4Dh at the start ax=%04X\n", r.x.ax);
     h2 = spawnl(P_WAIT, "C:\\NONE.EXE", "C:\\NONE.EXE", NULL);
     printf("spawn none=%d\n", (int)h2);
+    redirection();
     call_dx(0x3B00, "\\", 0);
     call_dx(0x3A00, "C:\\DDIFF", 0);
     line("3Ah DDIFF");

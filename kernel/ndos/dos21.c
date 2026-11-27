@@ -232,6 +232,57 @@ static void con_out(struct dos_m *m, const char *s, unsigned n)
         m->out(m->ctx, s, n);
 }
 
+/* Standard input or output as the console functions see them: DOS 2+ reads and writes 01h-0Ch through the program's
+   handles 0 and 1, which COMMAND.COM's < and > make a file's or another device's (N7's survey, 2026-11-27: GLOS's
+   DOS read the keyboard and wrote the screen whatever they were; DOSDIFF's redir lines are MS-DOS 7.1's). The
+   entry, or -1 for CON (the keyboard, the screen) and a handle not open. */
+static int std_entry(struct dos_m *m, unsigned h)
+{
+    int i = dos_entry(&m->files, cur_psp(m), h);
+
+    return i < 0 || m->files.k[i].dev == DOS_DEV_CON ? -1 : i;
+}
+
+/* What the console functions write, and their echo of what they read: through handle 1 where it isn't CON (AUX,
+   PRN and NUL take it nowhere, as 40h has them). */
+static void std_out(struct dos_m *m, const char *s, unsigned n)
+{
+    int i = std_entry(m, 1);
+
+    if (i < 0)
+        con_out(m, s, n);
+    else if (n && !m->files.k[i].dev && !m->files.k[i].cd)
+        dos_write(&m->files, cur_psp(m), 1, s, n);
+}
+
+/* A byte of a redirected standard input: 0-255; -1 none left, or a device with nothing to read (MS-DOS 7.1 waits
+   there for ever: GLOS's DOS goes on from the keyboard, where Ctrl+C ends it); -2 standard input is CON. */
+static int std_in(struct dos_m *m)
+{
+    int i = std_entry(m, 0);
+    unsigned char c;
+    long got;
+
+    if (i < 0)
+        return -2;
+    if (m->files.k[i].dev)
+        return -1;
+    got = m->files.k[i].cd ? dos_read_cd(&m->files, (unsigned)i, &c, 1) : dos_read(&m->files, cur_psp(m), 0, &c, 1);
+    return got == 1 ? c : -1;
+}
+
+/* 0Bh for a redirected standard input: FFh while it has more (a device: ready), 00h at its end; -1 for CON. */
+static int std_status(struct dos_m *m)
+{
+    int i = std_entry(m, 0);
+
+    if (i < 0)
+        return -1;
+    if (m->files.k[i].cd)
+        return m->files.k[i].cpos < m->files.k[i].ce.size ? 0xFF : 0;
+    return m->files.k[i].dev || m->files.k[i].f.pos < fsv_size(&m->files.k[i].f) ? 0xFF : 0;
+}
+
 /* The PC's scan code for a character as a US keyboard types it (0: none). */
 static unsigned scan_for(unsigned char c)
 {
@@ -373,21 +424,29 @@ static int getc_dos(struct dos_m *m, int check, int echo)
         m->pend_scan = 0;
         return (int)c;
     }
-    if ((k = dos_key_get(m)) < 0)
-        return -1;
-    c = (unsigned)k & 0xFF;
-    if (check && c == 0x03) {
-        con_out(m, "^C\r\n", 4);
-        return -2;
-    }
-    if (c == 0 || c == 0xE0) {
-        m->pend_scan = (unsigned char)(k >> 8);
-        return 0;
+    if ((k = std_in(m)) >= 0) {                 /* (a redirected standard input's byte, as it is: no scan code) */
+        c = (unsigned)k;
+        if (check && c == 0x03) {
+            con_out(m, "^C\r\n", 4);
+            return -2;
+        }
+    } else {
+        if ((k = dos_key_get(m)) < 0)
+            return -1;
+        c = (unsigned)k & 0xFF;
+        if (check && c == 0x03) {
+            con_out(m, "^C\r\n", 4);
+            return -2;
+        }
+        if (c == 0 || c == 0xE0) {
+            m->pend_scan = (unsigned char)(k >> 8);
+            return 0;
+        }
     }
     if (echo) {
         char e = (char)c;
 
-        con_out(m, &e, 1);
+        std_out(m, &e, 1);
     }
     return (int)c;
 }
@@ -405,19 +464,22 @@ static int read_line(struct dos_m *m, unsigned char *buf, unsigned max)
         return 0;
     for (;;) {
         unsigned c;
+        int file = (k = std_in(m)) >= 0;       /* (a redirected standard input's bytes first, then the keys) */
 
-        if ((k = dos_key_get(m)) < 0) {
+        if (!file && (k = dos_key_get(m)) < 0) {
             m->rl_n = n, m->rl_live = 1;
             return -1;
         }
         c = (unsigned)k & 0xFF;
+        if (file && c == 0x0A)
+            continue;                           /* (MS-DOS 7.1 takes a file's LF silently: DOSDIFF) */
         if (c == 0x03) {
             con_out(m, "^C\r\n", 4);
             return -2;
         }
         if (c == 0x0D) {
             buf[n] = 0x0D;
-            con_out(m, "\r", 1);
+            std_out(m, "\r", 1);
             buf[-1] = (unsigned char)n;
             return 0;
         }
@@ -426,17 +488,17 @@ static int read_line(struct dos_m *m, unsigned char *buf, unsigned max)
         if (c == 0x08) {
             if (n) {
                 n--;
-                con_out(m, buf[n] < 0x20 && buf[n] != '\t' ? "\b \b\b \b" : "\b \b", buf[n] < 0x20 && buf[n] != '\t' ? 6 : 3);
+                std_out(m, buf[n] < 0x20 && buf[n] != '\t' ? "\b \b\b \b" : "\b \b", buf[n] < 0x20 && buf[n] != '\t' ? 6 : 3);
             }
             continue;
         }
         if (c == 0x1B) {
-            con_out(m, "\\\r\n", 3);
+            std_out(m, "\\\r\n", 3);
             n = 0;
             continue;
         }
         if (n + 1 >= max) {
-            con_out(m, "\a", 1);
+            std_out(m, "\a", 1);
             continue;
         }
         buf[n++] = (unsigned char)c;
@@ -444,11 +506,11 @@ static int read_line(struct dos_m *m, unsigned char *buf, unsigned max)
             char e[2];
 
             e[0] = '^', e[1] = (char)(c + '@');
-            con_out(m, e, 2);
+            std_out(m, e, 2);
         } else {
             char e = (char)c;
 
-            con_out(m, &e, 1);
+            std_out(m, &e, 1);
         }
     }
 }
@@ -2437,8 +2499,20 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
     case 0x02:
     case 0x06:
         if (ah == 0x06 && (r->dx & 0xFF) == 0xFF) {
-            int k = m->pend_scan ? 0 : dos_key_peek(m);
+            int k;
 
+            if (std_entry(m, 0) >= 0 && !m->pend_scan) {    /* (a redirected standard input: its next byte, or
+                                                   none at its end, as no key typed) */
+                if ((k = std_in(m)) < 0) {
+                    r->flags |= ZF;
+                    set_al(r, 0);
+                    return DOS21_DONE;
+                }
+                r->flags &= ~ZF;
+                set_al(r, (unsigned)k);
+                return DOS21_DONE;
+            }
+            k = m->pend_scan ? 0 : dos_key_peek(m);
             if (k < 0) {                        /* (nothing typed: ZF, and the machine's time given up) */
                 r->flags |= ZF;
                 set_al(r, 0);
@@ -2455,7 +2529,7 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
         {
             char c = (char)(r->dx & 0xFF);
 
-            con_out(m, &c, 1);
+            std_out(m, &c, 1);
             set_al(r, (unsigned char)c);
         }
         return DOS21_DONE;
@@ -2467,7 +2541,7 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
         for (i = 0; i < 65536 && a + i < m->size && m->mem[a + i] != '$'; i++)
             ;
         if (a < m->size)
-            con_out(m, (const char *)m->mem + a, (unsigned)i);
+            std_out(m, (const char *)m->mem + a, (unsigned)i);
         set_al(r, '$');
         return DOS21_DONE;
     }
@@ -2484,6 +2558,10 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
     case 0x0B:
         if (break_waiting(m))
             return DOS21_CTRLC;
+        if ((e = std_status(m)) >= 0 && !m->pend_scan) {    /* (a redirected standard input: more, or its end) */
+            set_al(r, (unsigned)e);
+            return DOS21_DONE;
+        }
         set_al(r, dos_key_peek(m) >= 0 || m->pend_scan ? 0xFF : 0);
         if (!(r->ax & 0xFF) && m->idle)
             m->idle(m->ctx);
