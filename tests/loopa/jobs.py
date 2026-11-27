@@ -6093,8 +6093,14 @@ def mpu_hidden_case(profile, vcard, card):
     checks = {"listen": agent.listening()}
     port = None
     try:
-        lg = agent.log()
-        m = re.search(r"GLOS-MIDI mpu port=(\w+) hidden", lg)
+        # (MIDI's ports are found late in GLOS's start: SSH can answer first under a gate's load, gate 71)
+        t0 = time.time()
+        while True:
+            lg = agent.log()
+            m = re.search(r"GLOS-MIDI mpu port=(\w+) hidden", lg)
+            if m or time.time() - t0 > 60:
+                break
+            time.sleep(2)
         checks["found"] = m is not None
         port = m.group(1) if m else "330"
         rc, out, _ = agent.ssh("C:\\TEST\\MPUSTEP.EXE %s all" % port, timeout=90)
