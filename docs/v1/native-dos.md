@@ -1303,7 +1303,8 @@ Every suite today boots FreeDOS and starts `GLOS.EXE`; before hosted mode goes, 
     "Redirected") and a device's name after a folder (IF EXIST C:\TEST\NUL; NS2's list); the rest the harness's
     (the prompt and new session's folder natively C:\TEST and C:\, FreeDOS's COMMAND.COM at C:\FREEDOS\BIN, the boot
     drive C:, [shell] command = dos hosted only).
-  - open: the ESS ES1688 case recording nothing, the native (apps') suite's runs natively over an hour (hosted
+  - the ESS ES1688 case: the harness's too (its driver's stop line is GLOS-ESS's, not GLOS-SB's: hx_sbchk).
+  - open: the native (apps') suite's runs natively over an hour (hosted
     29-42 min) and its Files shots differing (a native C: has other folders: goldens of its own, or the same
     layout), the 7 suites with no native case.
 

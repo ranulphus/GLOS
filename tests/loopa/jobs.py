@@ -230,7 +230,7 @@ def hx_sbchk(text):
     """The Sound Blaster's DMA stopped once GLOS had gone (SBCHK, after GLOS.EXE): natively nothing runs after GLOS,
     so GLOS's own driver's stop at its leave says it (N7's survey, 2026-11-27: every audio case failed only this)."""
     return re.search(r"HX-SBCHK dma=\d+ stopped", text) is not None or \
-        (NATIVE and re.search(r"GLOS-SB stop irqs=\d+", text) is not None)
+        (NATIVE and re.search(r"GLOS-(SB|ESS) stop irqs=\d+", text) is not None)     # (an ESS AudioDrive: ess.c's)
 
 
 class HostedOnly(Exception):
