@@ -119,7 +119,7 @@ void pcicard_place(const struct bootinfo *bi)
 {
     struct pa_range busy[48], keep_pf[6];
     u32 bar[6], size[6], np, pf, top = 0, i;
-    int nbusy = 0, npf = 0, b, d, f, k, unplaced = 0, widened = 0;
+    int nbusy = 0, npf = 0, b, d, f, k, unplaced = 0, widened = 0, single = 1;
     char why[48];
 
     if (!(bi->display_card & BI_CARD_SET))
@@ -168,12 +168,18 @@ void pcicard_place(const struct bootinfo *bi)
                         break;
                     continue;
                 }
+                /* (a single function's device: never past function 0, even when the card or its bridge is skipped
+                   below. Bench C's G450 answers functions 1-7 with function 0's registers, so its own ranges came
+                   back as another device's, and GLOS found no room for them) */
+                if (!f)
+                    single = !(cfg(b, d, 0, 0x0C) & 0x00800000u);
                 hdr = cfg(b, d, f, 0x0C) >> 16 & 0x7F;
-                if (b == cb && d == cd && f == cf)
+                if ((b == cb && d == cd && f == cf) || (hdr == 1 && b == 0 && d == bd && f == bf)) {
+                    if (single)
+                        break;
                     continue;
+                }
                 if (hdr == 1) {                 /* a bridge: its windows (the card's own bridge's are placed into) */
-                    if (b == 0 && d == bd && f == bf)
-                        continue;
                     np = cfg(b, d, f, 0x20), pf = cfg(b, d, f, 0x24);
                     if ((np & 0xFFF0) << 16 <= (np & 0xFFF00000u) && nbusy < 46)
                         busy[nbusy].base = (np & 0xFFF0) << 16, busy[nbusy++].last = (np & 0xFFF00000u) | 0xFFFFF;
@@ -189,7 +195,7 @@ void pcicard_place(const struct bootinfo *bi)
                             k++;                /* (a 64-bit BAR's upper half) */
                     }
                 }
-                if (!f && !(cfg(b, d, 0, 0x0C) & 0x00800000u))
+                if (single)
                     break;                      /* (not a multi-function device) */
             }
     np = bd >= 0 ? cfg(0, bd, bf, 0x20) : 0x0000FFF0u, pf = bd >= 0 ? cfg(0, bd, bf, 0x24) : 0x0000FFF0u;
@@ -402,10 +408,13 @@ int pcicard_start(u32 stack_seg, u32 stack_bytes)
                         break;
                     continue;
                 }
-                if ((b != cb || d != cd || f != cf) && (cfg(b, d, f, 8) >> 24) == 0x03 && (cfg(b, d, f, 4) & 1)) {
-                    ob = b, od = d, of = f;
+                if ((b != cb || d != cd) && (cfg(b, d, f, 8) >> 24) == 0x03 && (cfg(b, d, f, 4) & 1)) {
+                    ob = b, od = d, of = f;     /* (not the card's own device: an aliasing card's other function
+                                                   numbers are itself) */
                     break;
                 }
+                if (!f && !(cfg(b, d, 0, 0x0C) & 0x00800000u))
+                    break;
             }
     was.started = 1, was.ob = ob, was.od = od, was.of = of;
     was.v10 = vec(0x10), was.v6d = vec(0x6D);
