@@ -29,10 +29,14 @@ int display_cursor(int on, s32 x, s32 y);       /* the pointer by the card's cur
 int display_scanout(const struct gfx_surface *s);       /* the display on these pixels in the card's memory instead of
                                                            the screen's own (NULL: the screen's again); 1 if so */
 u32 display_scanout_phys(void);                 /* the first pixel shown while it is so (physical); else 0 */
-int display_app_mode(u32 w, u32 h, s32 x, s32 y, void (*done)(void));  /* the card in the mode of w by h, its memory
+int display_app_mode(u32 w, u32 h, s32 x, s32 y, void (*done)(void), const void *who);  /* the card in the mode of w by h, its memory
                                                    kept, for a full-screen window of that size at (x, y) on the
                                                    desktop (w 0: the desktop's mode again): 1 it is so, 0 asked for
                                                    (done() when it is), -1 it cannot be */
+/* 1 while the card is changing to or from a mode of the app's (who: display_app_mode's) for it: the app waits on
+   GLOS meanwhile, a BIOS's mode set on the system VM's thread, its own sound not fed (the mixer holds its streams:
+   mixer.c). Any context. */
+int display_app_waits(const void *app);
 int display_app_busy(void);                     /* the card is in such a mode, or changing: nothing is drawn on the
                                                    screen */
 void display_app_refuse(void);                  /* the mode it is in is no use for the window: not asked for again */

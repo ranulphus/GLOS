@@ -30,6 +30,7 @@
 
 #include "dev.h"
 #include "devlist.h"
+#include "display.h"
 #include "kapi.h"
 #include "glos/bootinfo.h"
 #include "app.h"
@@ -61,6 +62,7 @@ static struct strm {
     u8 begun, frame_bytes;
     u32 lin;                                    /* where its app has it */
     u32 short_run, bursts;                      /* underruns in a row now; bursts logged */
+    u32 held;                                   /* periods held while GLOS changed its app's mode (display_app_waits) */
     /* API 2.0's (AUDIO's OUT and MIXER) */
     s16 balance;                                /* -256 all left to 256 all right */
     u8 mute, paused;
@@ -265,6 +267,13 @@ static void take(struct strm *s, u32 frames, const struct trapframe *tf)
     s->level[0] = s->level[1] = 0;
     if (s->paused)
         return;                                 /* (what it has waits; no period of its own goes by) */
+    if (display_app_waits(s->a)) {              /* GLOS is setting its app's mode for it (a BIOS's mode set on the
+                                                   VM's thread: on 86Box's G450 the BIOS clears 32 MB a 64 KB bank at
+                                                   a time, ~8 s, gate 69's PrBoom underruns, 2026-11-27): the app
+                                                   waits on GLOS and can't feed it, so it is held as if paused */
+        s->held++;
+        return;
+    }
     mix_gains(h->volume, s->balance, s->mute, &gl, &gr);
     if (!s->begun) {
         if (!have)
@@ -502,7 +511,7 @@ int mixer_open(struct app *a, u32 rate, u32 channels, u32 bytes, u32 *id, u32 *l
     s->frac = 0;
     s->begun = 0;
     s->frame_bytes = (u8)(channels * 2);
-    s->short_run = s->bursts = 0;
+    s->short_run = s->bursts = s->held = 0;
     s->balance = 0;
     s->mute = s->paused = s->want = 0;
     s->level[0] = s->level[1] = 0;
@@ -600,8 +609,8 @@ static void drop(struct strm *s)
     struct glos_audio_ring *h = s->h;
     u32 pages = s->pages;
     int sess = app_is_session(s->a);
-    kprintf("GLOS-AUDIO close app=%u stream=%u periods=%u underruns=%u%s%u\n", app_id(s->a), s->id, h->periods,
-            h->underruns, " short-at-close=", s->short_run);
+    kprintf("GLOS-AUDIO close app=%u stream=%u periods=%u underruns=%u%s%u held=%u\n", app_id(s->a), s->id, h->periods,
+            h->underruns, " short-at-close=", s->short_run, s->held);
     s->a = 0;
     irq_restore(f);
     mm_win_free(h, pages);                      /* (its mapping in the app: undone by the caller, or gone with it) */

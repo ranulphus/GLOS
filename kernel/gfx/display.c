@@ -682,8 +682,12 @@ u32 display_scanout_phys(void) { return d.on ? mga_scanout_phys() : 0; }
    whose engine GLOS drives. Nothing may be drawn on the screen while the card is in such a mode, or while a
    change is asked for. */
 static s32 app_x, app_y;
+static const void *volatile app_who;            /* (whose mode change it is: display_app_waits) */
+static volatile u8 app_changing;                /* (the VM thread is setting it: app_turn) */
 
-int display_app_mode(u32 w, u32 h, s32 x, s32 y, void (*done)(void))
+int display_app_waits(const void *app) { return app && app == app_who && (d.app_ask || app_changing); }
+
+int display_app_mode(u32 w, u32 h, s32 x, s32 y, void (*done)(void), const void *who)
 {
     u32 f;
     int r;
@@ -700,6 +704,8 @@ int display_app_mode(u32 w, u32 h, s32 x, s32 y, void (*done)(void))
         d.want_w = (u16)w, d.want_h = (u16)h;
         app_x = x, app_y = y;
         d.app_done = done;
+        if (who)                                /* (back to the desktop's mode: still the last app's change) */
+            app_who = who;
         d.app_ask = 1;
         vm_kick();
         r = 0;
@@ -740,6 +746,7 @@ static void app_turn(void)                      /* (the VM thread) */
             d.bad_w = (u16)w, d.bad_h = (u16)h;
             kprintf("GLOS-DISPLAY app error=no-mode want=%ux%ux%u\n", w, h, d.bpp);
         } else {
+            app_changing = 1;                   /* (the app's streams held until it is done: display_app_waits) */
             mga_mode_begin();
             dead = radeon_settle(0) == RADEON_DEAD;
             memset(&r, 0, sizeof r);
@@ -762,6 +769,7 @@ static void app_turn(void)                      /* (the VM thread) */
             }
             d.app_w = (u16)w, d.app_h = (u16)h;
             mga_mode_end(pitch, w ? app_x : 0, w ? app_y : 0);
+            app_changing = 0;
             if (w)
                 kprintf("GLOS-DISPLAY app mode=%x %ux%ux%u pitch=%u\n", mode, w, h, d.bpp, pitch);
             else

@@ -100,13 +100,13 @@ static int scan_turn(struct wm *m, const struct gfx_surface *fb, int viewers)
     if (own) {
         struct gfx_rect c;
         wm_client(m, w, &c);
-        r = display_app_mode((u32)w->ext.w, (u32)w->ext.h, c.x, c.y, desk_kick);
+        r = display_app_mode((u32)w->ext.w, (u32)w->ext.h, c.x, c.y, desk_kick, w->owner);
         if (r == 0)
             return scan_wait(m);                /* (asked for) */
         if (r < 0)
             w = 0, own = 0;                     /* (no such mode: composed in the middle, for good) */
     }
-    if (!own && (display_app_mode(0, 0, 0, 0, desk_kick) == 0 || display_app_busy()))
+    if (!own && (display_app_mode(0, 0, 0, 0, desk_kick, 0) == 0 || display_app_busy()))
         return scan_wait(m);                    /* (the desktop's mode is on its way back) */
     if (w && (own || w->ext.pitch == fb->pitch) && display_scanout(&w->ext)) {
         if (scan_id != w->id) {
