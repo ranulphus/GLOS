@@ -1243,6 +1243,16 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   evening before is likely the monitor: then one monitor moved between the two cards, so the G450 had none
   while its BIOS ran (a BIOS that finds no monitor by DDC may leave its outputs off); now each card had its own.
   Mode 3 by registers stays for a card whose BIOS leaves the syncs off.
+  **Bench C's BIOS's placings (2026-11-27, ten power-ons and a slot move):** it leaves a card behind a bridge
+  unplaced, half placed or placed, differently at each power-on; with the G450 in slot 1 once on one another (the
+  frame buffer at FC000000 for 32 MB, its registers at FD000000 inside it) with the bridge's prefetchable window
+  to FC8FFFFF only (GLOS's Matrox driver saw 9 MB of 16). pcicard.c: a window widened over a range placed outside
+  it; a named card behind a bridge whose VGA Enable is off (not the BIOS's display) with ranges on one another or
+  out of reach all placed again; the scan never past function 0 of a single-function device (bench C's G450
+  answers functions 1-7 as 0, its own ranges were taken for another device's). gfx/mga.c refuses a card whose
+  ranges are unplaced or on one another (GLOS's leave hung on both). A hosted GLOS gives DOS its INT 10h and VGA
+  back when it leaves (pcicard_leave). TEXCUBE (640x480x16, 900 frames) on the G450: 28.3 fps in its first slot,
+  28.4 in slot 1 with vsync (both at half the 60 Hz refresh), 36.4 in slot 1 with DGL_VSYNC=0.
 - **N4, the keyboard's layout (2026-11-25, native-dos; KEYB's work):** the system VM's INT 09h is an ARPL of GLOS's
   in front of the BIOS's handler (kernel/vm/vkeyb.c). A key pressed whose character on [region] layout (keymap.h:
   Shift, Caps Lock, Num Lock, AltGr from the BIOS's flags) differs from the US one, and the 102nd key, GLOS answers:
