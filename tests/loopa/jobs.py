@@ -8476,7 +8476,10 @@ def nboot_floppy_case(profile, card):
         "rm -f %s %s" % (fimg, blank), "truncate -s 1474560 %s" % fimg, "truncate -s %d %s" % (16 * 16 * 63 * 512, blank),
         "$t/mkvol %s 0 2880 GLOSFLOPPY 2 0" % fimg, "export MTOOLS_SKIP_CHECK=1",
         "mcopy -i %s build/ow/GLOSLDR.SYS ::GLOSLDR.SYS" % fimg, "mmd -i %s ::GLOS ::GLOS/KEYS" % fimg,
-        "mcopy -i %s build/kernel/GLOSK.BIN build/glos/COMMAND.COM %s ::GLOS/" % (fimg, cfg),
+        # (the packed kernel, as nfloppy.py's and every install's: the plain one and GLOSLDR.SYS outgrew 1.44 MB with
+        # C1's shell tools, gate 71, 2026-11-27)
+        "mcopy -i %s build/kernel/GLOSK.PAK ::GLOS/GLOSK.BIN" % fimg,
+        "mcopy -i %s build/glos/COMMAND.COM %s ::GLOS/" % (fimg, cfg),
         "mcopy -i %s tests/keys/hostkey ::GLOS/KEYS/HOSTKEY" % fimg,
         "mcopy -i %s tests/keys/AUTHKEYS ::GLOS/KEYS/AUTHKEYS" % fimg])
     mk = subprocess.run(["sh", "-c", script], cwd=ROOT, capture_output=True)
@@ -9218,7 +9221,10 @@ def nboot_dual_case(profile, card, msdos=False):
         # the floppy GLOS starts from
         "rm -f %s %s" % (fimg, disk), "truncate -s 1474560 %s" % fimg, "$t/mkvol %s 0 2880 GLOSFLOPPY 2 0" % fimg,
         "mcopy -i %s build/ow/GLOSLDR.SYS ::GLOSLDR.SYS" % fimg, "mmd -i %s ::GLOS ::GLOS/KEYS" % fimg,
-        "mcopy -i %s build/kernel/GLOSK.BIN build/glos/COMMAND.COM %s ::GLOS/" % (fimg, cfg),
+        # (the packed kernel, as nfloppy.py's and every install's: the plain one and GLOSLDR.SYS outgrew 1.44 MB with
+        # C1's shell tools, gate 71, 2026-11-27)
+        "mcopy -i %s build/kernel/GLOSK.PAK ::GLOS/GLOSK.BIN" % fimg,
+        "mcopy -i %s build/glos/COMMAND.COM %s ::GLOS/" % (fimg, cfg),
         "mcopy -i %s tests/keys/hostkey ::GLOS/KEYS/HOSTKEY" % fimg,
         "mcopy -i %s tests/keys/AUTHKEYS ::GLOS/KEYS/AUTHKEYS" % fimg,
         # the disk: FreeDOS on its first 32 MB; or MS-DOS 7.1's own, longer

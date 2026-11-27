@@ -782,7 +782,7 @@ loopa-api: all build/dj/APITEST.EXE build/dj/JOBTOOL.EXE build/dj/GDBME.EXE dosl
 # An app's own threads (phase B step 4): THRTEST through the agent.
 loopa-ndos: all dos-tests check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py ndos -j $(JOBS)
-loopa-nboot: all native-loader dos-tests build/dj/DOSCALLS.EXE check-deps
+loopa-nboot: all native-loader dos-tests build/dj/DOSCALLS.EXE build/kernel/GLOSK.PAK check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py nboot -j $(JOBS)
 # N4's CD-ROM (docs/v1/native-dos.md, C1-C7), native: a disc in 86Box's drive (RetroGPU's run.py --cdrom), its
 # audio, and images as drives (glos cdrom mount); CDTEST's MSCDEX checks, DISKRD's DJGPP read.
