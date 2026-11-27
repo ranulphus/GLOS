@@ -226,6 +226,13 @@ def hx_vecchk(text):
     return NATIVE or "HX-VECCHK ok" in text
 
 
+def hx_sbchk(text):
+    """The Sound Blaster's DMA stopped once GLOS had gone (SBCHK, after GLOS.EXE): natively nothing runs after GLOS,
+    so GLOS's own driver's stop at its leave says it (N7's survey, 2026-11-27: every audio case failed only this)."""
+    return re.search(r"HX-SBCHK dma=\d+ stopped", text) is not None or \
+        (NATIVE and re.search(r"GLOS-SB stop irqs=\d+", text) is not None)
+
+
 class HostedOnly(Exception):
     """A case the native variant can't run: why."""
 
@@ -5774,7 +5781,7 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True, share=False):
         + (["--tone", "1568", "--tone", "2093"] if profile == "bf6" else [])      # (... and its MP3's and its Ogg's)
         + (["--tone", "330", "--tone", "659"] if crystal or cmi else []),
         capture_output=True).returncode == 0
-    checks["sb-stopped"] = re.search(r"HX-SBCHK dma=\d+ stopped", text) is not None if not (cmi or es) \
+    checks["sb-stopped"] = hx_sbchk(text) if not (cmi or es) \
         else ("GLOS-CMI left" if cmi else "GLOS-ES left") in text     # (a PCI bus master stopped at glos exit)
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
     checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text) and hx_vecchk(text)
@@ -6344,7 +6351,7 @@ def sdlwin_case(profile, vcard, card, desk):
     checks["recorded"] = os.path.exists(wav) and wavcheck_run(
         [sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav_for_check(wav), "--tone", "440"],
         capture_output=True).returncode == 0
-    checks["sb-stopped"] = re.search(r"HX-SBCHK dma=\d+ stopped", text) is not None
+    checks["sb-stopped"] = hx_sbchk(text)
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
     checks["done"] = "GLOS-EXIT code=0" in text and hx_vecchk(text)
     bad = [k for k, v in checks.items() if not v]
@@ -6457,7 +6464,7 @@ def games_case(profile, vcard, card, desk):
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
     text = agent.wait()
-    checks["sb-stopped"] = re.search(r"HX-SBCHK dma=\d+ stopped", text) is not None
+    checks["sb-stopped"] = hx_sbchk(text)
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
     checks["done"] = "GLOS-EXIT code=0" in text and hx_vecchk(text)
     bad = [k for k, v in checks.items() if not v]
