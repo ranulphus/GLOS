@@ -1270,6 +1270,22 @@ Every suite today boots FreeDOS and starts `GLOS.EXE`; before hosted mode goes, 
 - **RetroGPU's `run.py`** boots them with `--hdd` (there today); the harness's programs (SERSAY, VECCHK, UTEXIT and
   the rest of `C:\HX`) run on GLOS's DOS; jobs.py's suites gain native boots; the gate runs on them.
 - **MS-DOS 7.1 in Loop A** also gives the conformance program its reference and the boot manager its tests.
+- **The first survey (2026-11-27, devserver):** `LOOPA_NATIVE=1 tools/merge-gate.sh remote` (merge-gate passes
+  the variable there), every suite but the four run on this PC, GLOS main d8d89a2 with RetroGPU 00cd264. 30 of 32
+  suites ran:
+  - green natively (19): nboot, gui, desk, api (8 skipped), sess (36 skipped), win, cdrom, display, gpu, sdlwin,
+    console, control, thr, time, netapp, ndos, joy, input, gdbprog.
+  - every case hosted-only (7): dpmi (32 cases), apps (5), glwin (3), games, cache, m5exit (2 each), config (1).
+    These are N7's coverage to win: what each needs of a DOS under GLOS (/RUN, a game's disk, HIMEM's XMS mode, the
+    DOS's COMMAND.COM) and how a native boot gives it.
+  - the harness's own (fixed on n7-native-gate): audio's ten cases failed only sb-stopped (SBCHK runs after
+    GLOS.EXE; natively GLOS's own "GLOS-SB stop" says it: hx_sbchk); floppy's dd-file-bytes read GLOS.EXE, which a
+    native disk hasn't; m1's loop let HostedOnly out as a traceback; native-a and -b's GUI runs ended at their time
+    limit an hour in and gui_case waited out every script left (four hours): it now stops at its run's end.
+  - open: ssh (8: idle's prompt and exit-again, shell's dir and a redirected CONIN line, batch's COMSPEC and a
+    timeout, ownshell's mode, AUTOEXEC and COMMAND.COM-as-DOS: natively COMSPEC is GLOS's own COMMAND.COM), the
+    ESS ES1688 case recording nothing, the native (apps') suite's runs natively over an hour (hosted 29-42 min) and
+    its Files shots differing (a native C: has other folders: goldens of its own, or the same layout).
 
 ## The order, and how each step shows it works
 
