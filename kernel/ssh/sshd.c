@@ -302,7 +302,13 @@ void sshd_net_poll(void)
         }
         if (s->pcb)
             tcp_output(s->pcb);
-        if (s->ssh_done && !ring_used(&s->tx)) {    /* the ssh thread has let go */
+        /* The ssh thread has let go, and its output is sent, or can't be: a connection lwIP has dropped (on_err:
+           the peer's reset, a client killed with `glos log --follow` still writing) leaves no pcb to drain the
+           ring by, and the slot was kept for ever: four such and every new connection refused, reason=busy
+           (bench C, 2026-11-27, found by ROSS). What is left in the ring goes with it. */
+        if (s->ssh_done && (!ring_used(&s->tx) || !s->pcb)) {
+            s->tx.head = s->tx.tail = 0;
+            s->rx.head = s->rx.tail = 0;
             if (s->pcb) {
                 tcp_arg(s->pcb, NULL);
                 tcp_recv(s->pcb, NULL);

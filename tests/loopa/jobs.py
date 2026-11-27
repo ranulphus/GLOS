@@ -2094,6 +2094,47 @@ def reboot_case(profile, card):
         not bad
 
 
+def killed_case(profile, card):
+    """Clients killed while GLOS writes to them (bench C, 2026-11-27, found by ROSS): each of five SSH clients
+    starts `glos log --follow` and is killed (SIGKILL) while the log streams, so the host's side resets the
+    connection with output still queued in GLOS's ring. GLOS's four connection slots must come free again
+    (kernel/ssh/sshd.c: a slot whose pcb lwIP dropped was kept for ever, and four such refused every connection,
+    "GLOS-SSH refuse reason=busy"): a sixth connection runs its command, and the log has no refusal. (86Box's
+    SLiRP doesn't hand the guest the host's reset as bench C's network did: unfixed, this passed too. It guards the
+    close path for killed clients; the reset itself is the code's: on_err, then a ring nothing can drain.)"""
+    import time
+    tag = "killed-%s-%s" % (profile, card)
+    big = os.path.join(ROOT, "out", tag + "-big.dat")   # (not in the run's own directory: run.py empties it)
+    os.makedirs(os.path.dirname(big), exist_ok=True)
+    with open(big, "wb") as f:
+        f.write(b"".join(b"line %07d of a file too big to be read at once by a client that stopped\r\n" % i
+                         for i in range(40000)))
+    agent = Agent("ssh-" + tag, profile, card, ["--file", big + "=/TEST/BIG.DAT", "--cmd", "SERSAY HX-START killed",
+                                                "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"],
+                  timeout=600)
+    checks = {"listen": agent.listening()}
+    try:
+        # A client that stops reading: its pipe and socket fill, then TCP's window, then GLOS's ring; killed then,
+        # the host's side resets the connection with output still in the ring (bench C's runner, killed hung).
+        for i in range(5):
+            cl = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "type C:\\TEST\\BIG.DAT"],
+                                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            time.sleep(8)
+            cl.kill()
+            cl.wait()
+        time.sleep(3)
+        rc, out, _ = agent.ssh("glos ver", timeout=60)
+        checks["sixth"] = rc == 0 and "GLOS" in out
+        checks["no-refusal"] = "refuse reason=busy" not in agent.log()
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text)
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % (tag, "PASS" if not bad else "FAIL", " failed: " + " ".join(bad) if bad else ""), not bad
+
+
 def idle_case(profile, card):
     """The prompt on the PC's own screen (GLOS with no desktop; kernel/shell/lcon.c, docs/v1/shell.md S2d), the
     screen read as text (glos shot --text) and typed at as at its keyboard (glos type): the start-up lines (how
@@ -14188,6 +14229,12 @@ def main():
                 print("    %s-%s XMSTEST: %s" % (p, b, "; ".join(l[11:] for l in r[2])))
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "ssh":
+        if os.environ.get("SSH_ONLY") == "batch":       # (SSH_ONLY=batch: the batch files' cases alone; SSH_PROFILE)
+            cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")]
+                     if not os.environ.get("SSH_PROFILE") or c[0] == os.environ["SSH_PROFILE"]]
+            return 0 if all(r[1] for r in matrix(batch_case, cases, a.jobs)) else 1
+        if os.environ.get("SSH_ONLY") == "killed":      # (SSH_ONLY=killed: the killed clients' case alone)
+            return 0 if all(r[1] for r in matrix(killed_case, [("bf6", "ne2kpci")], a.jobs)) else 1
         if os.environ.get("SSH_ONLY") == "devices":     # (SSH_ONLY=devices: the devices' cases alone)
             return 0 if all(r[1] for r in matrix(devices_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)) else 1
         res = matrix(ssh_case, SSH_CASES, a.jobs)
@@ -14196,6 +14243,7 @@ def main():
             res += matrix(restart_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
             res += matrix(devices_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
             res += matrix(idle_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
+            res += matrix(killed_case, [("bf6", "ne2kpci")], a.jobs)
             res += matrix(shell_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
             res += matrix(cable_case, [("bf6", "ne2kpci"), ("486dx2", "none"), ("bf6", "off")], a.jobs)
             res += matrix(batch_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
