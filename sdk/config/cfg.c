@@ -76,6 +76,9 @@ const struct cfg_key cfg_schema[] = {
     { "sound", "crystal", CFG_TEXT, CFG_RESTART, 1, 95, "line", "auto", "Cr&ystal chip",
       "A Crystal CS423x chip GLOS sets up when there is no SB16 (docs/crystal-audio.md): auto, off, or its resources "
       "(wss=534 sb=220 fm=388 irq=5 dma=1 cap=0 game=200 ctrl=120)" },
+    { "sound", "cdaudio", CFG_CHOICE, CFG_NOW, 0, 0, "auto|analog", "auto", "CD &audio",
+      "A music CD's sound: auto reads it through the mixer where the drive can (its volume the mixer's, played "
+      "with the rest), analog leaves it to the drive's own output to the card (its cable). Images: the mixer's" },
     /* [net] (M5) */
     { "net", "hostname", CFG_TEXT, CFG_RESTART, 1, 15, "host", "glos", "&Host name",
       "This machine's name on the network (NAME.local)" },

@@ -226,6 +226,13 @@ def hx_vecchk(text):
     return NATIVE or "HX-VECCHK ok" in text
 
 
+def hx_sbchk(text):
+    """The Sound Blaster's DMA stopped once GLOS had gone (SBCHK, after GLOS.EXE): natively nothing runs after GLOS,
+    so GLOS's own driver's stop at its leave says it (N7's survey, 2026-11-27: every audio case failed only this)."""
+    return re.search(r"HX-SBCHK dma=\d+ stopped", text) is not None or \
+        (NATIVE and re.search(r"GLOS-(SB|ESS) stop irqs=\d+", text) is not None)     # (an ESS AudioDrive: ess.c's)
+
+
 class HostedOnly(Exception):
     """A case the native variant can't run: why."""
 
@@ -2130,18 +2137,18 @@ def idle_case(profile, card):
         def typed(text):
             agent.ssh("glos type " + text)
 
-        out = until(lambda o: "GLOS shell 1.0" in o and rows(o)[-1:] == ["A:\\>"], 120)
+        out = until(lambda o: "GLOS shell 1.0" in o and rows(o)[-1:] == [home_prompt()], 120)
         checks["greeting"] = "GLOS is running on this PC" in out and out.count("GLOS shell 1.0") == 1
-        checks["prompt"] = rows(out)[-1:] == ["A:\\>"]
+        checks["prompt"] = rows(out)[-1:] == [home_prompt()]
         m = re.search(r"cursor=(\d+),(\d+)", out)
-        checks["cursor"] = bool(m) and int(m.group(1)) == 4 and int(m.group(2)) == len(rows(out)) - 1
+        checks["cursor"] = bool(m) and int(m.group(1)) == len(home_prompt()) and int(m.group(2)) == len(rows(out)) - 1
         out = until(lambda o: "glos.local, 10.0.2.15" in o)     # (in the start-up lines, or as a notice above the prompt)
-        checks["address"] = "glos.local, 10.0.2.15" in out and rows(out)[-1:] == ["A:\\>"]
+        checks["address"] = "glos.local, 10.0.2.15" in out and rows(out)[-1:] == [home_prompt()]
         if not all(checks.values()):
             info += " start: " + " | ".join(rows(out)[-6:])
         typed("ver\\n")
-        out = until(lambda o: o.count("GLOS shell 1.0") == 2 and rows(o)[-1:] == ["A:\\>"])
-        checks["ver"] = out.count("GLOS shell 1.0 (GLOS API %s)" % GLOS_API) >= 1 and "A:\\>ver" in out
+        out = until(lambda o: o.count("GLOS shell 1.0") == 2 and rows(o)[-1:] == [home_prompt()])
+        checks["ver"] = out.count("GLOS shell 1.0 (GLOS API %s)" % GLOS_API) >= 1 and home_prompt() + "ver" in out
         typed("c:\\n")
         typed("cd \\\\test\\n")
         out = until(lambda o: rows(o)[-1:] == ["C:\\TEST>"])
@@ -2184,9 +2191,11 @@ def idle_case(profile, card):
             info += " afar: " + " | ".join(rows(out)[-6:])
         # EXIT: a new session, its start-up lines again
         typed("exit\\n")
-        out = until(lambda o: rows(o)[-1:] == ["A:\\>"])
+        again = "C:\\>" if NATIVE else home_prompt()     # (natively a new session starts in the root: the first was
+                                                        # left in C:\\TEST by RUN.BAT's CD)
+        out = until(lambda o: rows(o)[-1:] == [again])
         r = rows(out)
-        checks["exit-again"] = r[-1:] == ["A:\\>"] and "C:\\TEST>exit" in r \
+        checks["exit-again"] = r[-1:] == [again] and "C:\\TEST>exit" in r \
             and any(l.startswith("GLOS is running on this PC") for l in r[r.index("C:\\TEST>exit"):]) \
             and any(l.startswith("GLOS shell 1.0") for l in r[r.index("C:\\TEST>exit"):])
         if not checks["exit-again"]:
@@ -2314,7 +2323,8 @@ def shell_case(profile, card):
         t.send("vex\x7fr\r")
         checks["edited"] = t.expect("GLOS shell 1.0 (GLOS API %s)\n" % GLOS_API)
         t.send("dir /w\r")
-        checks["dir"] = t.expect(" Directory of C:\\TEST\n") and t.expect("GLOS.EXE") and t.expect(" file(s)") \
+        checks["dir"] = t.expect(" Directory of C:\\TEST\n") and t.expect("GLOSK.BIN" if NATIVE else "GLOS.EXE") \
+            and t.expect(" file(s)") \
             and t.expect("C:\\TEST>")
         t.send("df\r")                            # (the drive's size and free space, by DOS's own figures)
         checks["df"] = t.expect("Drive  Volume") and t.expect("\nC:     ") and t.expect(" MB ") and t.expect("%\n") \
@@ -2677,13 +2687,15 @@ def batch_case(profile, card):
     try:
         import time
         m = None
-        for _ in range(60):                     # (the log's lines come a little after what they tell of: on the
+        for _ in range(0 if NATIVE else 60):    # (the log's lines come a little after what they tell of: on the
             m = re.search(r"GLOS-VM agent comspec=(\S+)", agent.log())     # 486 under a gate's load this one was
             if m:                               # not there yet at the first look, "COMMAND" was GLOS's own, and
                 break                           # every comparison had nothing of FreeDOS's: 2026-11-19)
             time.sleep(0.5)
-        checks["comspec"] = m is not None
+        checks["comspec"] = NATIVE or m is not None
         freedos = m.group(1) if m else "COMMAND"        # (FreeDOS's by its place: COMSPEC is GLOS's own now, S4c)
+        if NATIVE:                              # (no agent's line names it natively: the native disk has FreeDOS's
+            freedos = "C:\\FREEDOS\\BIN\\COMMAND.COM"      # programs in C:\FREEDOS\BIN, its COMMAND.COM among them)
         for n, args in (("T1", "one two three"), ("T2", "yes"), ("T2", "no"), ("T2", ""), ("T3", ""), ("T4", ""),
                         ("T5", ""), ("T6", "")):
             a = agent.ssh("%s /C C:\\TEST\\%s.BAT %s" % (freedos, n, args))
@@ -2797,13 +2809,16 @@ def ownshell_case(profile, card):
         while time.time() - t0 < 120 and "GLOS-SHELL autoexec done" not in agent.log():
             time.sleep(1)
         text = agent.log()
-        checks["mode"] = "GLOS-VM shell own autoexec=A:\\AUTOEXEC.BAT" in text and "GLOS-VM autoexec code=" not in text
-        checks["autoexec"] = "GLOS-SHELL autoexec=A:\\AUTOEXEC.BAT" in text and "GLOS-SHELL autoexec done code=0" in text \
+        boot = "C" if NATIVE else "A"           # (natively the disk GLOS started from: there is no boot floppy)
+        checks["mode"] = "GLOS-VM shell own autoexec=%s:\\AUTOEXEC.BAT" % boot in text \
+            and "GLOS-VM autoexec code=" not in text
+        checks["autoexec"] = "GLOS-SHELL autoexec=%s:\\AUTOEXEC.BAT" % boot in text \
+            and "GLOS-SHELL autoexec done code=0" in text \
             and "HX-SHELL autoexec comspec=C:\\TEST\\COMMAND.COM" in text and "UTEXIT" not in text
         rc, out, e = agent.ssh("C:\\TEST\\CONIN.EXE env GLOSVAR")
         rc2, out2, e2 = agent.ssh("C:\\TEST\\CONIN.EXE env PATH")
         checks["env-program"] = out.strip() == "ENV GLOSVAR=from-autoexec" and out2.startswith("ENV PATH=") \
-            and "A:\\FREEDOS\\BIN" in out2.upper() and "C:\\HX" in out2.upper()
+            and "%s:\\FREEDOS\\BIN" % boot in out2.upper() and "C:\\HX" in out2.upper()
         rc3, out3, e3 = agent.ssh("SET")
         checks["env-session"] = "GLOSVAR=from-autoexec" in out3 and "COMSPEC=C:\\TEST\\COMMAND.COM" in out3.upper()
         rc4, out4, e4 = agent.ssh("SERSAY HX-SHELL by-path")     # (found along AUTOEXEC.BAT's PATH)
@@ -2820,7 +2835,12 @@ def ownshell_case(profile, card):
     text = agent.wait()
     checks["clean"] = not re.search(r"GLOS-PANIC|GLOS-WARN|GLOS-CRASH", text)
     # [shell] command = dos: the DOS's COMMAND.COM under GLOS, which runs AUTOEXEC.BAT (M3's way), GLOS's own
-    # COMMAND.COM beside GLOS.EXE or not
+    # COMMAND.COM beside GLOS.EXE or not (natively there is no DOS under GLOS: not run)
+    if NATIVE:
+        bad = [k for k, v in checks.items() if not v]
+        return "  %-22s %s%s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL",
+                                 " (command = dos: hosted only)" if not bad else " failed: " + " ".join(bad),
+                                 info if bad else ""), not bad
     cfg = batfile("ssh-%s/GLOS.CFG" % tag, ["; jobs.py ssh, ownshell: the DOS's COMMAND.COM all the same", "[shell]",
                                             "command = dos"])
     st, serial = run("ssh-" + tag + "-dos", ["--machine", profile, "--boot-cfg", "glosshell"] + GLOS_FILES + [
@@ -5774,7 +5794,7 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True, share=False):
         + (["--tone", "1568", "--tone", "2093"] if profile == "bf6" else [])      # (... and its MP3's and its Ogg's)
         + (["--tone", "330", "--tone", "659"] if crystal or cmi else []),
         capture_output=True).returncode == 0
-    checks["sb-stopped"] = re.search(r"HX-SBCHK dma=\d+ stopped", text) is not None if not (cmi or es) \
+    checks["sb-stopped"] = hx_sbchk(text) if not (cmi or es) \
         else ("GLOS-CMI left" if cmi else "GLOS-ES left") in text     # (a PCI bus master stopped at glos exit)
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
     checks["done"] = "GLOS-EXIT code=0" in text and hx_done(text) and hx_vecchk(text)
@@ -6344,7 +6364,7 @@ def sdlwin_case(profile, vcard, card, desk):
     checks["recorded"] = os.path.exists(wav) and wavcheck_run(
         [sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav_for_check(wav), "--tone", "440"],
         capture_output=True).returncode == 0
-    checks["sb-stopped"] = re.search(r"HX-SBCHK dma=\d+ stopped", text) is not None
+    checks["sb-stopped"] = hx_sbchk(text)
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
     checks["done"] = "GLOS-EXIT code=0" in text and hx_vecchk(text)
     bad = [k for k, v in checks.items() if not v]
@@ -6457,7 +6477,7 @@ def games_case(profile, vcard, card, desk):
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
     text = agent.wait()
-    checks["sb-stopped"] = re.search(r"HX-SBCHK dma=\d+ stopped", text) is not None
+    checks["sb-stopped"] = hx_sbchk(text)
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
     checks["done"] = "GLOS-EXIT code=0" in text and hx_vecchk(text)
     bad = [k for k, v in checks.items() if not v]
@@ -8540,6 +8560,67 @@ def cdimage_case(profile, card):
         not bad
 
 
+def cdimage_audio_case(profile, card):
+    """N4's images' audio (C6 with C7): mkiso.py's mixed-mode disc (the data track, then two tone tracks each in
+    a BIN of its own after a PREGAP) as files on C:, mounted by glos cdrom mount with no CD-ROM drive (cue.c lays
+    the sheet out: three tracks); an SB16 for the mixer. CDTEST audio against it as against a drive: the TOC's
+    tracks, PLAY AUDIO busy, the Q channel moving, STOP, RESUME, STOP twice; the play digital (the image's own
+    files read by the reader), the card's output (--wav) with track 2's 440 Hz."""
+    tag = "cdimgaud-" + profile
+    d = os.path.join(ROOT, "out", tag + "-img")
+    src = os.path.join(d, "src")
+    subprocess.run(["rm", "-rf", d])
+    os.makedirs(src)
+    open(os.path.join(src, "README.TXT"), "wb").write(b"hello, an image with audio\r\n")
+    iso, cue = os.path.join(d, "TONES.ISO"), os.path.join(d, "TONES.CUE")
+    mk = subprocess.run([sys.executable, os.path.join(ROOT, "tools/ndos/mkiso.py"), iso, src, "--label", "TONES",
+                         "--cue", cue, "--tone", "8", "--tone", "4"], capture_output=True)
+    bins = sorted(f for f in os.listdir(d) if f.upper().endswith(".BIN"))
+    checks, info = {"image": mk.returncode == 0 and len(bins) == 2}, ""
+    if not checks["image"]:
+        return "  %-22s FAIL image=%r bins=%r" % (tag, mk.stderr.decode("latin-1")[-300:], bins), False
+    files = ["--file", iso + "=/TEST/TONES.ISO", "--file", cue + "=/TEST/TONES.CUE"]
+    for b in bins:
+        files += ["--file", os.path.join(d, b) + "=/TEST/" + b.upper()]
+    agent = Agent(tag + "-" + card, profile, card, files + ["--sound", "sb16", "--wav",
+                                                            "--file", "build/ow/dos/CDTEST.EXE=/TEST/CDTEST.EXE",
+                                                            "--cmd", "C:\\TEST\\GLOS.EXE"], timeout=900)
+    try:
+        checks["listen"] = agent.listening()
+        if checks["listen"]:
+            out = lambda c: (lambda r: (r[0], (r[1] + r[2]).replace("\r", "")))(agent.ssh(c))
+            rc, o = out("glos cdrom mount C:\\TEST\\TONES.CUE")
+            for _ in range(20):                 # (the serial line can come after the command's answer)
+                if "TONES.CUE bps=2048 tracks=3" in agent.log():
+                    break
+                time.sleep(0.5)
+            checks["mount"] = rc == 0 and "D: is C:\\TEST\\TONES.CUE" in o and "tracks=3" in agent.log()
+            if not checks["mount"]:
+                info += " rc=%d" % rc
+            if not checks["mount"]:
+                info += " mount=%r" % o[-200:]
+            rc, o = out("type D:\\README.TXT")
+            checks["data"] = rc == 0 and "an image with audio" in o
+            rc, o = out("C:\\TEST\\CDTEST.EXE audio")
+            checks["audio"] = rc == 0 and "CDTEST done failures=0" in o
+            info += " " + " ".join(l.split(" ", 1)[1] for l in o.split("\n") if l.startswith("CDTEST ") and "PASS" not in l)
+            agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    log = agent.wait()
+    checks["clean"] = "GLOS-PANIC" not in log and "GLOS-WARN" not in log
+    checks["digital"] = "GLOS-CDAUDIO play digital drive=0" in log
+    wav = os.path.join(ROOT, "out", agent.proc.run_name, "audio.wav")
+    res = wavcheck_run([sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav_for_check(wav), "--tone", "440"],
+                       capture_output=True, text=True) if os.path.exists(wav) else None
+    checks["tone"] = res is not None and res.returncode == 0
+    if not checks["tone"]:
+        info += " wav=%r" % ((res.stdout + res.stderr)[-200:] if res else "none")
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % (tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad) + info), \
+        not bad
+
+
 def xdisk_case(profile, card):
     """Disks that come and go (vdos.c's vdos_disk_attach, detach and gone: what the GLOS session's USB mass storage
     calls), natively, with glos testdisk's disk image on C: as the device: a stick of 16 MB (a partition table, one
@@ -8793,10 +8874,11 @@ def cdboot_case(profile, card, free=False):
 
 
 def cdrom_audio_case(profile, card):
-    """N4's CD audio by the drive's own output (C6's first part): a mixed-mode disc (mkiso.py --cue: the data
-    track and two tone tracks) in 86Box's drive, an SB16 beside it (86Box plays a disc's audio through the sound
-    card); CDTEST audio: the TOC's tracks through IOCTL input 10 and 11, PLAY AUDIO busy, the Q channel's time
-    moving, STOP pausing (the time held), RESUME, STOP twice. Skipped as cdrom_case is."""
+    """N4's CD audio (C6): a mixed-mode disc (mkiso.py --cue: the data track and two tone tracks) in 86Box's
+    drive, an SB16 beside it; CDTEST audio: the TOC's tracks through IOCTL input 10 and 11, PLAY AUDIO busy, the
+    Q channel's time moving, STOP pausing (the time held), RESUME, STOP twice. The drive reads CD-DA and the mixer
+    has the card, so the play is the digital way (cdrom.c's reader, cdda.c, the mixer): the log says so, and the
+    card's output (--wav) has track 2's 440 Hz. Skipped as cdrom_case is."""
     tag = "cdaudio-" + profile
     if not cdrom_runpy():
         return "  %-22s SKIP RetroGPU's run.py has no --cdrom (LOOPA_RUNPY)" % tag, True
@@ -8811,7 +8893,7 @@ def cdrom_audio_case(profile, card):
     checks, info = {"image": mk.returncode == 0}, ""
     if not checks["image"]:
         return "  %-22s FAIL image=%r" % (tag, mk.stderr.decode("latin-1")[-300:]), False
-    agent = Agent(tag + "-" + card, profile, card, ["--cdrom", cue, "--sound", "sb16",
+    agent = Agent(tag + "-" + card, profile, card, ["--cdrom", cue, "--sound", "sb16", "--wav",
                                                     "--file", "build/ow/dos/CDTEST.EXE=/TEST/CDTEST.EXE",
                                                     "--cmd", "C:\\TEST\\GLOS.EXE"], timeout=900)
     try:
@@ -8821,11 +8903,31 @@ def cdrom_audio_case(profile, card):
             o = (o + e).replace("\r", "")
             checks["audio"] = rc == 0 and "CDTEST done failures=0" in o
             info += " " + " ".join(l.split(" ", 1)[1] for l in o.split("\n") if l.startswith("CDTEST ") and "PASS" not in l)
+            # [sound] cdaudio = analog (at once): the same checks with the drive's own output, no play of GLOS's
+            set_line = 'GLOS-SSH exec="glos config set sound cdaudio analog"'
+            checks["set-analog"] = agent.ssh("glos config set sound cdaudio analog")[0] == 0
+            rc, o, e = agent.ssh("C:\\TEST\\CDTEST.EXE audio")
+            o = (o + e).replace("\r", "")
+            after = agent.log()
+            after = after[after.index(set_line):] if set_line in after else ""
+            checks["analog"] = rc == 0 and "CDTEST done failures=0" in o and bool(after) \
+                and "GLOS-CDAUDIO play digital" not in after
+            if not checks["analog"]:
+                info += " analog=%r" % [l for l in o.split("\n") if "FAIL" in l or "done" in l][:4]
             agent.ssh("glos exit")
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
     log = agent.wait()
     checks["clean"] = "GLOS-PANIC" not in log and "GLOS-WARN" not in log
+    # (C6: the drive reads CD-DA, the mixer has the SB16, so the play is GLOS's own, read digitally; the drive's
+    # own output stays silent, so track 2's 440 Hz in the card's output is the mixer's)
+    checks["digital"] = "GLOS-CDAUDIO drive=0 cdda=1" in log and "GLOS-CDAUDIO play digital drive=0" in log
+    wav = os.path.join(ROOT, "out", agent.proc.run_name, "audio.wav")
+    res = wavcheck_run([sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav_for_check(wav), "--tone", "440"],
+                       capture_output=True, text=True) if os.path.exists(wav) else None
+    checks["tone"] = res is not None and res.returncode == 0
+    if not checks["tone"]:
+        info += " wav=%r" % ((res.stdout + res.stderr)[-200:] if res else "none")
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s" % (tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad) + info), \
         not bad
@@ -11024,8 +11126,10 @@ def disk_case(profile, card, mb):
         checks["dd-shell"] = rc == 0 and named == start[63 * 512:127 * 512]
         rc, first, _ = raw("glos dd if=disk2:1 of=- count=1")
         checks["dd-partition"] = rc == 0 and first == start[63 * 512:64 * 512]
-        rc, exe, _ = raw("glos dd if=c:\\test\\glos.exe of=-")
-        checks["dd-file-bytes"] = rc == 0 and exe == open(os.path.join(ROOT, "build/ow/GLOS.EXE"), "rb").read()
+        # (a file's bytes: natively C:\\TEST has no GLOS.EXE, the loader is GLOSLDR.SYS; the kernel is on both)
+        name, built = ("glosk.bin", "build/kernel/GLOSK.BIN") if NATIVE else ("glos.exe", "build/ow/GLOS.EXE")
+        rc, exe, _ = raw("glos dd if=c:\\test\\%s of=-" % name)
+        checks["dd-file-bytes"] = rc == 0 and exe == open(os.path.join(ROOT, built), "rb").read()
         rc, out, err = agent.ssh("glos dd if=c:\\test\\d2.img of=disk2 seek=8000")
         checks["dd-asks"] = rc == 2 and "Nothing was done" in out and "WOULD BE LOST" in out
         rc, out, err = agent.ssh("glos dd if=c:\\test\\d2.img of=disk2 seek=8000 /y", timeout=300)
@@ -13992,8 +14096,15 @@ def gui_case(profile, vcard, card, bits, scripts=None, files=None, tag_prefix="g
         for script in scripts or sorted(f for f in os.listdir(os.path.join(ROOT, "tests", "gui"))
                                         if f.endswith(".txt") and open(os.path.join(ROOT, "tests", "gui", f)).readline()
                                         and "GUITEST" in open(os.path.join(ROOT, "tests", "gui", f)).read()):
-            g = GuiDriver(agent, out, bits, " dac=6" in line, appdir)
             name = os.path.splitext(os.path.basename(script))[0]
+            if agent.proc.poll() is not None:   # (its PC gone, at its time limit or a crash: the scripts left can only
+                                                # wait out every wait; N7's survey, 2026-11-27, waited 4 hours so)
+                st = os.path.join(ROOT, "out", agent.proc.run_name, "status")
+                checks["emulator"] = False
+                notes.append("the run ended (%s) before %s: the scripts from there not run"
+                             % (open(st).read().strip() if os.path.exists(st) else "?", name))
+                break
+            g = GuiDriver(agent, out, bits, " dac=6" in line, appdir)
             g.play(os.path.join("tests", "gui", os.path.basename(script)))
             with open(os.path.join(out, name + ".out"), "w") as f:
                 f.write(g.finish())
@@ -14379,6 +14490,7 @@ def main():
         res += matrix(xdisk_case, cases, a.jobs)                # (disks that come and go: USB storage's way in)
         res += matrix(ems_case, cases, a.jobs)                  # (EMS: GLOS's own LIM 4.0 manager)
         res += matrix(cdrom_audio_case, [c for c in cases if c[0] == "bf6"], a.jobs)    # (the 486's board: no sound)
+        res += matrix(cdimage_audio_case, [c for c in cases if c[0] == "bf6"], a.jobs)   # (an image's audio)
         res += matrix(cdboot_case, [c + (f,) for c in cases for f in (False, True) if c[0] == "bf6" or not f],
                       a.jobs)                   # (the boot CD: all the disk; on the bf6 beside a volume too)
         return 0 if all(r[1] for r in res) else 1
@@ -14405,7 +14517,10 @@ def main():
     ok = True
     for p in a.profile or PROFILES:
         for b in a.boot or BOOTS:
-            ok &= m1(p, b)
+            try:
+                ok &= m1(p, b)
+            except HostedOnly as why:           # (natively, as matrix says it: M1 is GLOS.EXE started from DOS)
+                print("  %-22s SKIP hosted only (%s)" % ("m1 %s-%s" % (p, b), why), flush=True)
     return 0 if ok else 1
 
 

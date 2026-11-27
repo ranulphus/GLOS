@@ -7,18 +7,26 @@
  * is mounted, so a program's reads don't each cost a packet more. Native only: a hosted GLOS leaves the drive to
  * DOS's own driver and MSCDEX.
  *
- * Images as drives (step C7): an ISO 9660 image, or a CUE sheet's first data track (MODE1/2048, or MODE1/2352
- * whose sectors' user data is read past their 16-byte headers), on one of GLOS's FAT volumes, mounted as a unit
- * of its own after the drives (cdrom_mount_image): read through kernel/fs/fsv.c, whose lock per volume lets the
- * VM's DOS calls and the command that mounted it share the file. An image has no audio yet (a CUE sheet's audio
- * tracks wait for the digital way, C6) and no tray: "eject" takes it away. */
+ * Images as drives (step C7): an ISO 9660 image, or a CUE sheet's disc (cue.c: its first track, a data one,
+ * MODE1/2048 or MODE1/2352 whose sectors' user data is read past their 16-byte headers, the volume DOS reads), on
+ * one of GLOS's FAT volumes, mounted as a unit of its own after the drives (cdrom_mount_image): read through
+ * kernel/fs/fsv.c, whose lock per volume lets the VM's DOS calls and the command that mounted it share the file.
+ * A sheet's audio tracks play the digital way (C6), from their files through a handle of the reader's own. An
+ * image has no tray: "eject" takes it away. */
 #include <string.h>
 
 #include "cdrom.h"
 #include "mm.h"
 #include "ide.h"
 #include "kprintf.h"
+#include "mixer.h"
+#include "sched.h"
+#include "session.h"
 #include "timer.h"
+#include "io.h"
+#include "cdda.h"
+#include "cue.h"
+#include "kcfg.h"
 
 #define CD_MAX 4
 
@@ -27,6 +35,11 @@ static struct cd {
     struct fsv_file *img;               /* an image's file */
     unsigned long img_off, img_bps;     /* where its data track begins, its sectors' bytes (2048, or 2352 raw) */
     char img_name[64];
+    struct cue *cue;                    /* an image's CUE sheet laid out (0: an ISO image, one data track) */
+    struct fsv_vol *vol;                /* the volume an image's files are on */
+    char dir[128];                      /* the sheet's folder, which its FILEs are named from */
+    struct fsv_file *afile;             /* the file the digital reader has open (audio, a handle of its own) */
+    int afile_no;                       /* ... which of the sheet's FILEs (-1: none) */
     int mounted;
     u32 checked_at;
     int changed;                        /* mounted afresh since MSCDEX's "media changed" was last asked */
@@ -194,6 +207,31 @@ int cdrom_toc(int i, unsigned char *buf, unsigned len, int msf)
 {
     unsigned char cdb[12] = { 0x43 };
     unsigned long got;
+    if (i >= 0 && i < ncd && cds[i].img && cds[i].cue) {   /* (a CUE sheet's image: its every track) */
+        const struct cue *cu = cds[i].cue;
+        unsigned char t[4 + 8 * (CUE_TRACKS + 1)];
+        unsigned n = 4, k;
+        memset(t, 0, sizeof t);
+        t[2] = (unsigned char)cu->t[0].number, t[3] = (unsigned char)cu->t[cu->ntracks - 1].number;
+        for (k = 0; k <= (unsigned)cu->ntracks; k++, n += 8) {
+            unsigned long at = k < (unsigned)cu->ntracks ? cu->t[k].start : cu->leadout;
+            t[n + 1] = k < (unsigned)cu->ntracks && cu->t[k].type == CUE_AUDIO ? 0x10 : 0x14;
+            t[n + 2] = k < (unsigned)cu->ntracks ? (unsigned char)cu->t[k].number : 0xAA;
+            if (msf) {
+                at += 150;
+                t[n + 5] = (unsigned char)(at / 4500), t[n + 6] = (unsigned char)(at / 75 % 60);
+                t[n + 7] = (unsigned char)(at % 75);
+            } else {
+                t[n + 4] = (unsigned char)(at >> 24), t[n + 5] = (unsigned char)(at >> 16);
+                t[n + 6] = (unsigned char)(at >> 8), t[n + 7] = (unsigned char)at;
+            }
+        }
+        t[0] = (unsigned char)((n - 2) >> 8), t[1] = (unsigned char)(n - 2);
+        if (len > n)
+            len = n;
+        memcpy(buf, t, len);
+        return (int)len;
+    }
     if (i >= 0 && i < ncd && cds[i].img) {      /* (an image: one data track, the lead-out at its end) */
         unsigned char t[20];
         unsigned long end = 0, k;
@@ -221,11 +259,190 @@ int cdrom_toc(int i, unsigned char *buf, unsigned len, int msf)
     return packet(&cds[i], cdb, buf, len, &got) == 0 ? (int)got : -1;
 }
 
+/* ---- audio played digitally (C6's digital way): READ CD's audio sectors into cdda.c's ring by a thread of its
+   own, the mixer playing them from the card's interrupt (cdaudio_mix). For a drive whose MODE SENSE page 2Ah
+   says it reads CD-DA, while the mixer has a card and no session drives the card itself (direct mode); else the
+   drive's own output, as before. One play at a time, one drive's. The reader's runs are short (CDA_RUN) because
+   a DOS call of the VM's waits for the packet under way (ata.c's hold); cdda_want, cdda_commit and the controls
+   are made with interrupts off against each other and the mixer. */
+#define CDA_RUN 4                       /* sectors a packet (53 ms of audio) */
+#define CDA_SECTORS 76                  /* the ring: a second, in whole runs (so its end never cuts one) */
+
+static struct cdda cda;
+static volatile int cda_unit = -1;      /* the unit cda's play is (-1: none) */
+static unsigned char *cda_ring;
+static struct waitq cda_wq;
+static struct thread *cda_thread;
+static signed char cda_can[CD_MAX];     /* 0: not asked yet; 1: the drive reads CD-DA; -1: it doesn't */
+static unsigned char cda_toc[804];      /* the disc's tracks, by LBA, taken at the play's start */
+static int cda_toc_len;
+static u32 cda_fails;
+static volatile int cda_busy = -1;      /* the unit the reader is reading now (-1: none) */
+
+/* An image's audio sectors from its tracks' files (silence where the disc has none: gaps, a data track). */
+/* A FILE of the sheet's as a path on its volume: its folder, then its name with '/' as GLOS's '\\'. */
+static void cue_path(char *out, unsigned room, const char *dir, const char *name)
+{
+    unsigned n;
+    ksnprintf(out, room, "%s%s", dir, name);
+    for (n = 0; out[n]; n++)
+        if (out[n] == '/')
+            out[n] = '\\';
+}
+
+static int img_cdda(struct cd *c, unsigned long lba, unsigned long n, unsigned char *buf)
+{
+    unsigned long k;
+    for (k = 0; k < n; k++, buf += CDDA_SECTOR) {
+        long fs;
+        int tr = c->cue ? cue_find(c->cue, lba + k, &fs) : -1;
+        if (tr < 0 || fs < 0 || c->cue->t[tr].type != CUE_AUDIO) {
+            memset(buf, 0, CDDA_SECTOR);
+            continue;
+        }
+        if (c->afile_no != c->cue->t[tr].file) {
+            char path[192];
+            if (c->afile_no >= 0)
+                fsv_close(c->afile);
+            c->afile_no = -1;
+            cue_path(path, sizeof path, c->dir, c->cue->file[c->cue->t[tr].file]);
+            if (fsv_open(c->vol, path, FSV_READ, FSV_DENY_WRITE, c->afile) != 0)
+                return -1;
+            c->afile_no = c->cue->t[tr].file;
+        }
+        if (fsv_seek(c->afile, (unsigned long)fs * CDDA_SECTOR) != 0
+            || fsv_read(c->afile, buf, CDDA_SECTOR) != (long)CDDA_SECTOR)
+            memset(buf, 0, CDDA_SECTOR);        /* (past its file's end: silence) */
+    }
+    return 0;
+}
+
+static int read_cdda(struct cd *c, unsigned long lba, unsigned long n, unsigned char *buf)
+{
+    unsigned char cdb[12] = { 0xBE, 0x04 };     /* READ CD: sectors of CD-DA */
+    unsigned long got;
+    cdb[2] = (unsigned char)(lba >> 24), cdb[3] = (unsigned char)(lba >> 16);
+    cdb[4] = (unsigned char)(lba >> 8), cdb[5] = (unsigned char)lba;
+    cdb[6] = (unsigned char)(n >> 16), cdb[7] = (unsigned char)(n >> 8), cdb[8] = (unsigned char)n;
+    cdb[9] = 0x10;                              /* (the user data: all of a CD-DA sector's 2,352 bytes) */
+    return packet(c, cdb, buf, n * CDDA_SECTOR, &got) == 0 && got == n * CDDA_SECTOR ? 0 : -1;
+}
+
+/* Whether drive i reads CD-DA (MODE SENSE(10), no block descriptors, page 2Ah: its byte 5 bit 0), asked once. */
+static int reads_cdda(int i)
+{
+    if (!cda_can[i]) {
+        unsigned char cdb[12] = { 0x5A, 0x08, 0x2A, 0, 0, 0, 0, 0, 40 }, b[40];
+        unsigned long got = 0;
+        unsigned bd;
+        memset(b, 0, sizeof b);
+        cda_can[i] = -1;
+        if (packet(&cds[i], cdb, b, sizeof b, &got) == 0 && got >= 8) {
+            bd = (unsigned)b[6] << 8 | b[7];
+            if (bd + 14 <= got && (b[8 + bd] & 0x3F) == 0x2A && (b[8 + bd + 5] & 1))
+                cda_can[i] = 1;
+        }
+        kprintf("GLOS-CDAUDIO drive=%d cdda=%d\n", i, cda_can[i] > 0);
+    }
+    return cda_can[i] > 0;
+}
+
+static void cda_reader(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        unsigned long lba = 0, gen = 0, n = 0;
+        unsigned char *into = 0;
+        int u = cda_unit, k;
+        u32 f = irq_save();
+        if (u >= 0) {
+            n = cdda_want(&cda, CDA_RUN, &lba, &gen, &into);
+            if (n && n < CDA_RUN && cda.count - cda.done > n)
+                n = 0;                          /* (room for a whole run first, but for the play's last sectors) */
+        }
+        irq_restore(f);
+        if (!n) {
+            thread_wait(&cda_wq, timer_ticks() + 16);       /* (the ring full, or nothing playing) */
+            continue;
+        }
+        cda_busy = u;
+        f = irq_save();
+        if (u != cda_unit) {                    /* (the play went while it asked: an image's eject waits for this) */
+            irq_restore(f);
+            cda_busy = -1;
+            continue;
+        }
+        irq_restore(f);
+        k = cds[u].d ? read_cdda(&cds[u], lba, n, into) : img_cdda(&cds[u], lba, n, into);
+        cda_busy = -1;
+        if (k != 0) {
+            if (cda_fails++ < 4)
+                kprintf("GLOS-CDAUDIO read failed drive=%d lba=%lu\n", u, lba);
+            f = irq_save();
+            if (gen == cda.gen)
+                cdda_stop(&cda);                /* (the play ends there: a damaged disc, or none) */
+            irq_restore(f);
+            continue;
+        }
+        f = irq_save();
+        cdda_commit(&cda, gen, n);
+        irq_restore(f);
+    }
+}
+
+static int digital(int i)
+{
+    char v[8] = "";
+    if (i < 0 || i >= ncd || !mixer_found() || session_direct())
+        return 0;
+    if (!cds[i].img && kcfg_get("sound", "cdaudio", v, sizeof v) >= 0 && !strcmp(v, "analog"))
+        return 0;                               /* ([sound] cdaudio = analog: the drive's own output; an image has none) */
+    if (cds[i].img ? !cds[i].cue || !cds[i].afile : !cds[i].d || !reads_cdda(i))
+        return 0;
+    if (!cda_ring) {
+        if (!(cda_ring = kmalloc(CDA_SECTORS * CDDA_SECTOR)))
+            return 0;
+        cdda_init(&cda, cda_ring, CDA_SECTORS * CDDA_SECTOR);
+    }
+    if (!cda_thread && !(cda_thread = thread_create("cdaudio", PRIO_URGENT, cda_reader, 0)))
+        return 0;
+    return 1;
+}
+
+/* The mixer's (mixer.c's fill, the card's interrupt); and whether it is to play now (card_want). */
+void cdaudio_mix(int *acc, unsigned long frames, unsigned long rate)
+{
+    if (cda_unit >= 0)
+        cdda_mix(&cda, acc, frames, rate);
+}
+
+int cdaudio_on(void) { return cda_unit >= 0 && cdda_state(&cda) == CDDA_PLAYING; }
+
+static void msf(unsigned long f, unsigned char *p)
+{
+    p[0] = (unsigned char)(f / 4500), p[1] = (unsigned char)(f / 75 % 60), p[2] = (unsigned char)(f % 75);
+}
+
 int cdrom_play(int i, unsigned long lba, unsigned long count)
 {
     unsigned char cdb[12] = { 0xA5 };           /* PLAY AUDIO(12) */
-    if (i < 0 || i >= ncd || !cds[i].d)
+    if (i < 0 || i >= ncd || (!cds[i].d && !cds[i].img))
         return -1;
+    if (digital(i)) {
+        int len = cdrom_toc(i, cda_toc, sizeof cda_toc, 0);
+        u32 f;
+        cda_toc_len = len > 0 ? len : 0;
+        f = irq_save();
+        cda_unit = i;
+        cdda_play(&cda, lba, count);
+        thread_wake(&cda_wq);
+        irq_restore(f);
+        mixer_refresh();
+        kprintf("GLOS-CDAUDIO play digital drive=%d lba=%lu sectors=%lu\n", i, lba, count);
+        return 0;
+    }
+    if (!cds[i].d)
+        return -1;                              /* (an image plays digitally or not at all) */
     cdb[2] = (unsigned char)(lba >> 24), cdb[3] = (unsigned char)(lba >> 16);
     cdb[4] = (unsigned char)(lba >> 8), cdb[5] = (unsigned char)lba;
     cdb[6] = (unsigned char)(count >> 24), cdb[7] = (unsigned char)(count >> 16);
@@ -236,13 +453,29 @@ int cdrom_play(int i, unsigned long lba, unsigned long count)
 int cdrom_stop(int i)
 {
     static const unsigned char cdb[12] = { 0x4E };     /* STOP PLAY/SCAN */
+    if (i >= 0 && i == cda_unit) {
+        u32 f = irq_save();
+        cdda_stop(&cda);
+        irq_restore(f);
+        mixer_refresh();
+        return 0;
+    }
     return i >= 0 && i < ncd && cds[i].d ? packet(&cds[i], cdb, 0, 0, 0) : -1;
 }
 
 int cdrom_pause(int i, int resume)
 {
     unsigned char cdb[12] = { 0x4B };           /* PAUSE/RESUME */
-    if (i < 0 || i >= ncd || !cds[i].d)
+    if (i < 0 || i >= ncd || (!cds[i].d && !cds[i].img))
+        return -1;
+    if (i == cda_unit && cdda_state(&cda) != CDDA_IDLE) {
+        u32 f = irq_save();
+        cdda_pause(&cda, resume);
+        irq_restore(f);
+        mixer_refresh();
+        return 0;
+    }
+    if (!cds[i].d)
         return -1;
     cdb[8] = resume ? 1 : 0;
     return packet(&cds[i], cdb, 0, 0, 0);
@@ -252,9 +485,46 @@ int cdrom_subq(int i, unsigned char *buf16)
 {
     unsigned char cdb[12] = { 0x42, 0x02, 0x40, 0x01, 0, 0, 0, 0, 16 };   /* READ SUB-CHANNEL: MSF, Q, position */
     unsigned long got;
-    if (i < 0 || i >= ncd || !cds[i].d)
+    if (i < 0 || i >= ncd || (!cds[i].d && !cds[i].img))
         return -1;
+    if (i == cda_unit && cdda_state(&cda) != CDDA_IDLE) {
+        /* (as the drive says it: the audio status, then the track that holds the position, its index 1, the
+           position on the disc and in the track) */
+        static const unsigned char status[] = { 0x15, 0x11, 0x12, 0x13 };      /* (IDLE, PLAYING, PAUSED, DONE) */
+        unsigned long at = cdda_position(&cda, 0), start = 0;
+        unsigned char control = 0x10, track = 1;
+        int k;
+        for (k = 4; k + 8 <= cda_toc_len; k += 8) {
+            unsigned long s = (unsigned long)cda_toc[k + 4] << 24 | (unsigned long)cda_toc[k + 5] << 16
+                | (unsigned long)cda_toc[k + 6] << 8 | cda_toc[k + 7];
+            if (cda_toc[k + 2] != 0xAA && s <= at)
+                track = cda_toc[k + 2], start = s, control = cda_toc[k + 1];
+        }
+        memset(buf16, 0, 16);
+        buf16[1] = status[cdda_state(&cda) & 3];
+        buf16[3] = 12, buf16[4] = 1, buf16[5] = control, buf16[6] = track, buf16[7] = 1;
+        msf(at + 150, buf16 + 9);
+        msf(at - start, buf16 + 13);
+        return 0;
+    }
+    if (!cds[i].d) {                            /* (an image not playing: no status) */
+        memset(buf16, 0, 16);
+        buf16[1] = 0x15, buf16[3] = 12, buf16[4] = 1;
+        return 0;
+    }
     return packet(&cds[i], cdb, buf16, 16, &got) == 0 && got >= 16 ? 0 : -1;
+}
+
+/* MSCDEX's audio channel control (IOCTL output 3): each output's volume, 0 to 255. A digital play's gain; the
+   drive's own output keeps its own (as before). */
+void cdrom_volume(int i, unsigned left, unsigned right)
+{
+    u32 f;
+    if (i < 0 || i >= ncd || (!cds[i].d && !cds[i].img) || !cda_ring)
+        return;
+    f = irq_save();
+    cdda_volume(&cda, left + (left >> 7), right + (right >> 7));
+    irq_restore(f);
 }
 
 int cdrom_tray(int i, int open)
@@ -262,6 +532,8 @@ int cdrom_tray(int i, int open)
     unsigned char cdb[12] = { 0x1B };           /* START STOP UNIT: 2 eject, 3 load */
     if (i < 0 || i >= ncd || !cds[i].d)
         return -1;
+    if (i == cda_unit)
+        cdrom_stop(i);
     cdb[4] = open ? 2 : 3;
     cds[i].mounted = 0;
     return packet(&cds[i], cdb, 0, 0, 0);
@@ -274,39 +546,33 @@ int cdrom_is_image(int i) { return i >= 0 && i < ncd && cds[i].img != 0; }
 const char *cdrom_image_name(int i) { return cdrom_is_image(i) ? cds[i].img_name : ""; }
 
 /* A CUE sheet's first track, if it is data: its file's name (beside the sheet), and its sectors' bytes. 0, or -1. */
-static int cue_data(struct fsv_file *f, char *file, unsigned room, unsigned long *bps)
-{
-    static char t[4096];
-    long n = fsv_read(f, t, sizeof t - 1);
-    char *p, *q;
-    unsigned k;
+/* (cue_parse's sizes: a FILE of the sheet's, named from its folder) */
+struct cue_ctx {
+    struct fsv_vol *v;
+    const char *dir;
+};
 
-    if (n <= 0)
+static long cue_size(void *ctx, const char *name)
+{
+    struct cue_ctx *x = ctx;
+    struct fsv_file f;
+    char path[192];
+    long n;
+    cue_path(path, sizeof path, x->dir, name);
+    if (fsv_open(x->v, path, FSV_READ, FSV_DENY_WRITE, &f) != 0)
         return -1;
-    t[n] = 0;
-    if (!(p = strstr(t, "FILE")) || !(p = strchr(p, '"')) || !(q = strchr(p + 1, '"')) || (unsigned)(q - p - 1) >= room)
-        return -1;
-    memcpy(file, p + 1, (unsigned)(q - p - 1));
-    file[q - p - 1] = 0;
-    if (!(p = strstr(q, "TRACK")))
-        return -1;
-    for (k = 0; p[k] && p[k] != '\n'; k++)
-        ;
-    if (strstr(p, "MODE1/2048") && strstr(p, "MODE1/2048") < p + k)
-        *bps = 2048;
-    else if (strstr(p, "MODE1/2352") && strstr(p, "MODE1/2352") < p + k)
-        *bps = 2352;
-    else
-        return -1;                              /* (an audio CD's sheet, or a mode GLOS doesn't read) */
-    return 0;
+    n = (long)fsv_size(&f);
+    fsv_close(&f);
+    return n;
 }
 
 int cdrom_mount_image(struct fsv_vol *v, const char *path, const char *shown)
 {
-    struct fsv_file *f;
-    unsigned long bps = ISO_SECTOR;
+    struct fsv_file *f, *af = 0;
+    struct cue *cu = 0;
+    unsigned long bps = ISO_SECTOR, off = 0;
     int i, n = (int)strlen(path);
-    char file[128];
+    char dir[128] = "";
 
     for (i = 0; i < CD_MAX && (cds[i].d || cds[i].img); i++)
         ;
@@ -319,28 +585,56 @@ int cdrom_mount_image(struct fsv_vol *v, const char *path, const char *shown)
         return -3;
     }
     if (n > 4 && (path[n - 4] == '.') && ((path[n - 3] | 32) == 'c') && ((path[n - 2] | 32) == 'u') && ((path[n - 1] | 32) == 'e')) {
-        char dir[128];
+        /* A CUE sheet: its disc laid out (cue.c); its first track, a data one, is the volume DOS reads, from its
+           file at its INDEX 01; its audio tracks the digital reader's. A sheet of audio alone mounts as an audio
+           CD does: not ready to DOS, its tracks to play. */
         const char *slash = strrchr(path, '\\');
         unsigned dl = slash ? (unsigned)(slash - path + 1) : 0;
-        if (cue_data(f, file, sizeof file - dl, &bps) != 0 || dl + strlen(file) >= sizeof dir) {
-            fsv_close(f);
-            kfree(f);
-            return -4;
+        char *text = kmalloc(16384);
+        const char *why = "memory";
+        struct cue_ctx x;
+        long got;
+        if (dl >= sizeof dir || !text || !(cu = kmalloc(sizeof *cu)) || !(af = kmalloc(sizeof *af))) {
+            got = -1;
+        } else {
+            memcpy(dir, path, dl);
+            dir[dl] = 0;
+            got = fsv_read(f, text, 16383);
         }
         fsv_close(f);
-        memcpy(dir, path, dl);
-        strcpy(dir + dl, file);
-        if (fsv_open(v, dir, FSV_READ, FSV_DENY_WRITE, f) != 0) {
+        if (got > 0) {
+            text[got] = 0;
+            x.v = v, x.dir = dir;
+            got = cue_parse(text, cue_size, &x, cu, &why) == 0 ? 1 : -1;
+        }
+        if (text)
+            kfree(text);
+        if (got > 0) {
+            char data[192];
+            bps = cu->t[0].type == CUE_AUDIO ? 2352 : cu->t[0].bps;
+            off = cu->t[0].type == CUE_AUDIO ? 0 : cu->t[0].off * bps;
+            cue_path(data, sizeof data, dir, cu->file[cu->t[0].file]);
+            if (fsv_open(v, data, FSV_READ, FSV_DENY_WRITE, f) != 0)
+                got = -3;
+        }
+        if (got <= 0) {
+            kprintf("GLOS-CD image refused file=%s why=%s\n", shown, got == -3 ? "data-file" : why);
+            if (cu)
+                kfree(cu);
+            if (af)
+                kfree(af);
             kfree(f);
-            return -3;
+            return got == -3 ? -3 : -4;
         }
     }
     memset(&cds[i], 0, sizeof cds[i]);
-    cds[i].img = f, cds[i].img_bps = bps, cds[i].img_off = 0;
+    cds[i].img = f, cds[i].img_bps = bps, cds[i].img_off = off;
+    cds[i].cue = cu, cds[i].vol = v, cds[i].afile = af, cds[i].afile_no = -1;
+    memcpy(cds[i].dir, dir, sizeof cds[i].dir);
     strncpy(cds[i].img_name, shown, sizeof cds[i].img_name - 1);
     if (i >= ncd)
         ncd = i + 1;
-    kprintf("GLOS-CD image=%d file=%s bps=%u\n", i, shown, (u32)bps);
+    kprintf("GLOS-CD image=%d file=%s bps=%u tracks=%d\n", i, shown, (u32)bps, cu ? cu->ntracks : 1);
     return i;
 }
 
@@ -348,6 +642,22 @@ void cdrom_unmount_image(int i)
 {
     if (!cdrom_is_image(i))
         return;
+    if (i == cda_unit) {                        /* (its play stopped, and the reader out of its files) */
+        u32 f;
+        cdrom_stop(i);
+        f = irq_save();
+        cda_unit = -1;
+        irq_restore(f);
+        while (cda_busy == i)
+            thread_sleep_until(timer_ticks() + 2);
+    }
+    if (cds[i].afile) {
+        if (cds[i].afile_no >= 0)
+            fsv_close(cds[i].afile);
+        kfree(cds[i].afile);
+    }
+    if (cds[i].cue)
+        kfree(cds[i].cue);
     fsv_close(cds[i].img);
     kfree(cds[i].img);
     memset(&cds[i], 0, sizeof cds[i]);

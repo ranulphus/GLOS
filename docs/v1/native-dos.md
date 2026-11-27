@@ -514,7 +514,11 @@ second V86 machine, the one N6 needs anyway. What it is:
     and writes nothing there; 56h renames an open file and 41h deletes one (its handles follow it, or keep its
     clusters until the last closes: `fsv.c`, safer than DOS's stale entries); 6Ch's bad action is 01h; 3Ah of
     the root is 05h; 60h of a bare device is `C:/NUL`, above the root is 03h (and so for every call: `path.c`);
-    4Eh with nothing matching is 12h; 47h leaves AX 0100h; NUL's device word is 80C4h; 29h as built. Open: the
+    4Eh with nothing matching is 12h; 47h leaves AX 0100h; NUL's device word is 80C4h; 29h as built; a device's
+    name after a folder (C:\TEST\NUL, COMMAND.COM's IF EXIST DIR\NUL; NUL.TXT and CON alike) is found by 4Eh as
+    itself, attribute 40h, and opened by 3Dh where the folder is, 03h for both where it isn't, and 02h from 43h
+    (2026-11-27, found by N7's survey: FreeDOS's COMMAND.COM on GLOS's DOS saw no folder; `dos21.c` dev_folder).
+    Open: the
     census's programs themselves (they need NS3's console and NS4's DPMI first); console input (NS3); 36h on a
     large FAT32 volume (DOSDIFF's disk is 128 MB).
   - **NS3, the console and the clock:** INT 16h and 10h's teletype, cooked input, Ctrl-C, INT 23h and 24h, the
@@ -535,6 +539,15 @@ second V86 machine, the one N6 needs anyway. What it is:
     or the program's EOI to port 20h; INT 29h. Loop A: CONTEST (`tests/dos/contest.c`) with what the test types:
     a line by 0Ah, a key by INT 16h, 08h, Ctrl-C into its own INT 23h and the call made again, ticks counted by
     INT 1Ch and the tick count; and Ctrl-C ending it with no handler of its own.
+    **Redirected (2026-11-27, found by N7's survey: `conin line < in.txt` hung natively):** 01h-0Ch read and
+    write through the program's handles 0 and 1 as DOS 2+ does, so COMMAND.COM's < and > give them a file or
+    another device (`dos21.c`: std_in, std_out, std_status; they went to the keyboard and the screen whatever the
+    handles were). DOSDIFF 4's redir lines are MS-DOS 7.1's answers and GLOS's: 0Bh FFh while the file has more,
+    00h at its end; 08h, 01h, 07h, 06h (FFh) its bytes as they are; 0Ah to its CR, which it keeps, an LF taken
+    silently (the one the last line left), a bell for each byte past its room; the echo of 01h and 0Ah to standard
+    output (to the file when that is redirected: `bxyz\r`); 02h, 09h and 06h to the file, AL 'Q' and 24h; AUX,
+    PRN and NUL take output nowhere. At the input's end MS-DOS 7.1 waits for ever (a probe of it never came back);
+    GLOS's DOS goes on from the keyboard there, where Ctrl+C ends it, and 06h (FFh) says none.
   - **NS4, programs that need more:** DPMI on a native machine (DJGPP programs), EMS and XMS, a VGA of its own.
   - **NS5, a suite:** `loopa-ndos` in the gate.
 
@@ -1091,25 +1104,28 @@ Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this sec
   drive's own output):** mkiso.py --cue --tone makes a mixed-mode disc (the image, then tone tracks as CUE/BIN);
   `jobs.py cdrom`'s cdaudio case (bf6, an SB16 beside the drive) with CDTEST audio: the TOC's tracks (IOCTL input
   10, 11), PLAY AUDIO busy, the Q channel's time moving, STOP pausing with the time held, RESUME, STOP twice:
-  PASS. Owed: the digital way (READ CD's audio frames into GLOS's mixer), the default where a drive gives them.
-  **C6's digital way, planned (2026-11-26):** cdrom.c answers cdrom_play, stop, pause and subq for a drive (or an
-  image) played digitally from a reader of its own, so mscdex.c is as it is. kernel/drv/cdaudio.c: a kernel thread
-  reads the audio frames (READ CD, BEh, CD-DA sectors of 2,352 bytes) a few at a time into a ring of about a
-  second (75 frames, 176,400 bytes); the mixer's interrupt mixes from the ring as it does the virtual Sound
-  Blaster (vsbdev_mix's way: 44.1 kHz to the mixer's rate) and keeps the card playing meanwhile (card_want, as for
-  vsbdev_on). The Q channel's position is what has been played, not read; PAUSE holds the reader and the mixing,
-  RESUME goes on, STOP ends. The IDE channel: the reader is the first user of the drive that isn't the VM's DOS
-  call (the DOS server waits for no program to run, so dos_call can't serve it), and ata.c's one call at a time
-  across threads (struct ata_io's hold, ide.c's k_hold, "Interrupts during a call" above) already keeps its
-  packets and the VM's calls apart: the VM's call waits at most for the reader's packet of a few frames, which
-  the reader keeps short for that. Images: a CUE sheet's audio
-  tracks in the image's TOC (today one data track) and their frames from the BIN through fsv the same way, so a
-  game's CUE/BIN plays its music with no drive. Digital where MODE SENSE's page 2Ah says the drive reads CD-DA
-  (an image always) and the mixer has a card; else the drive's own output, as now. [cdrom] audio = auto, digital
-  or analog. MSCDEX's audio channel control (IOCTL output 3): the drive's own volume (page 0Eh) the analog way, a
-  gain the digital. Test: `jobs.py cdrom`'s cdaudio case digitally (the stream in glos audio, the Q channel
-  moving with what's played, --wav's recording with track 1's 220 Hz then track 2's 440 Hz), and an image's
-  audio tracks. **C7 built:** `glos cdrom` (the shell's CDROM): the drives listed; `mount PATH`: an ISO 9660 image or a CUE
+  PASS. Then the digital way (READ CD's audio frames into GLOS's mixer), the default where a drive gives them:
+  **C6's digital way, built (2026-11-26):** cdrom.c answers cdrom_play, stop, pause and subq for a drive (or an
+  image) played digitally from a reader of its own, so mscdex.c is as it was. kernel/drv/cdda.c (host-tested,
+  tests/host/cdda_test.c): the ring between a kernel thread ("cdaudio", cdrom.c's reader) and the mixer's
+  interrupt, 76 sectors of 2,352 bytes (about a second); the reader asks where the next run goes (4 sectors a READ
+  CD, BEh, never across the ring's end) and commits it with the play's generation, so a read for a play since
+  changed is dropped; the mixer takes the 44.1 kHz frames to its rate by linear interpolation beside vsbdev_mix
+  (cdaudio_mix in mixer.c's fill) and keeps the card on while it plays (card_want). The Q channel's position is
+  what has been played, not read; a late reader means silence with the position held. PAUSE holds the reader and
+  the mixing, RESUME goes on, STOP ends. The IDE channel: ata.c's hold (k_hold) keeps the reader's packets and the
+  VM's calls apart; the VM's call waits at most for one packet of 4 sectors. Images: kernel/drv/cue.c
+  (host-tested, tests/host/cue_test.c) lays a CUE sheet's disc out (FILE, TRACK, INDEX 00/01, PREGAP, POSTGAP:
+  each track's start, its stretch of its file, the gaps silent); the image's TOC has every track, the audio read
+  from its files through a handle of the reader's own (an eject waits for the reader). Digital where MODE SENSE's
+  page 2Ah says the drive reads CD-DA (an image always) and the mixer has a card; else the drive's own output.
+  [sound] cdaudio = auto | analog (at once; the Sound page's CD audio): analog leaves a drive to its own output
+  (an image has none: still the mixer's). MSCDEX's audio channel control (IOCTL output 3, input 4): a gain on the
+  digital way. Tests in `jobs.py cdrom`: cdaudio (bf6, an SB16): CDTEST audio digitally (GLOS-CDAUDIO play
+  digital, the drive's own output silent) and --wav's recording with track 2's 440 Hz, then with cdaudio =
+  analog the same checks with no digital play; cdimgaud: an image's CUE with a data track and two tone tracks
+  in BINs of their own after a PREGAP, the same checks with no drive at all. PASS.
+  **C7 built:** `glos cdrom` (the shell's CDROM): the drives listed; `mount PATH`: an ISO 9660 image or a CUE
   sheet's first data track (MODE1/2048, or MODE1/2352's user data) on one of GLOS's FAT volumes as the next
   drive letter, read through fsv (its lock shares the file with the VM's calls), MSCDEX's units following
   (mscdex_units), a TOC of one data track made for it; `eject X:`: an image taken away (refused while a program
@@ -1270,6 +1286,27 @@ Every suite today boots FreeDOS and starts `GLOS.EXE`; before hosted mode goes, 
 - **RetroGPU's `run.py`** boots them with `--hdd` (there today); the harness's programs (SERSAY, VECCHK, UTEXIT and
   the rest of `C:\HX`) run on GLOS's DOS; jobs.py's suites gain native boots; the gate runs on them.
 - **MS-DOS 7.1 in Loop A** also gives the conformance program its reference and the boot manager its tests.
+- **The first survey (2026-11-27, devserver):** `LOOPA_NATIVE=1 tools/merge-gate.sh remote` (merge-gate passes
+  the variable there), every suite but the four run on this PC, GLOS main d8d89a2 with RetroGPU 00cd264. 30 of 32
+  suites ran:
+  - green natively (19): nboot, gui, desk, api (8 skipped), sess (36 skipped), win, cdrom, display, gpu, sdlwin,
+    console, control, thr, time, netapp, ndos, joy, input, gdbprog.
+  - every case hosted-only (7): dpmi (32 cases), apps (5), glwin (3), games, cache, m5exit (2 each), config (1).
+    These are N7's coverage to win: what each needs of a DOS under GLOS (/RUN, a game's disk, HIMEM's XMS mode, the
+    DOS's COMMAND.COM) and how a native boot gives it.
+  - the harness's own (fixed on n7-native-gate): audio's ten cases failed only sb-stopped (SBCHK runs after
+    GLOS.EXE; natively GLOS's own "GLOS-SB stop" says it: hx_sbchk); floppy's dd-file-bytes read GLOS.EXE, which a
+    native disk hasn't; m1's loop let HostedOnly out as a traceback; native-a and -b's GUI runs ended at their time
+    limit an hour in and gui_case waited out every script left (four hours): it now stops at its run's end.
+  - ssh's 8, settled 2026-11-27 (all four cases PASS natively on the bf6): two of GLOS's own DOS's, against
+    MS-DOS 7.1 by DOSDIFF 4: the console functions through handles 0 and 1 (`conin line < in.txt` hung; NS3's
+    "Redirected") and a device's name after a folder (IF EXIST C:\TEST\NUL; NS2's list); the rest the harness's
+    (the prompt and new session's folder natively C:\TEST and C:\, FreeDOS's COMMAND.COM at C:\FREEDOS\BIN, the boot
+    drive C:, [shell] command = dos hosted only).
+  - the ESS ES1688 case: the harness's too (its driver's stop line is GLOS-ESS's, not GLOS-SB's: hx_sbchk).
+  - open: the native (apps') suite's runs natively over an hour (hosted
+    29-42 min) and its Files shots differing (a native C: has other folders: goldens of its own, or the same
+    layout), the 7 suites with no native case.
 
 ## The order, and how each step shows it works
 
