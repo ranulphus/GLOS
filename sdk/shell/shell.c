@@ -1,7 +1,7 @@
 /* GLOS's shell (shell.h; docs/v1/shell.md; PRD D50): DOS's commands and syntax, modernised.
  *
  * Built in: CD (CHDIR), a drive's letter, DIR [/W] [/B], COPY, MOVE, XCOPY, REN (RENAME), DEL (ERASE), DELTREE, CHOICE,
- * MD (MKDIR), RD (RMDIR), TYPE, MORE, FIND, SORT, ECHO, SET, PATH, PROMPT, CLS, VER, EXIT, HISTORY, HELP, WHERE, START, and
+ * MD (MKDIR), RD (RMDIR), TYPE, MORE, FIND, SORT, FC, COMP, ECHO, SET, PATH, PROMPT, CLS, VER, EXIT, HISTORY, HELP, WHERE, START, and
  * what the host adds. A built-in's output goes to a file with > or >>.
  *
  * Anything else is a program: found here and along PATH (.COM, .EXE, .BAT) and run by the host, in this
@@ -1883,6 +1883,640 @@ done:
     return s->level = r;
 }
 
+/* ---- FC and COMP (2026-11-27, C1b of docs/v1/cli.md)
+ *
+ * FC as MS-DOS 7.1's FC.EXE (asked of the real one on the reference disk), where docs/v1/shell.md doesn't say
+ * otherwise; COMP as MS-DOS 6.22's was documented (7.1 has none). */
+
+/* v in hex, digits of it at least (capitals). */
+static void hex_text(char *b, unsigned room, unsigned long v, int digits)
+{
+    char t[16];
+    int n = 0;
+    do
+        t[n++] = "0123456789ABCDEF"[v & 15];
+    while ((v >>= 4) != 0 || n < digits);
+    for (room--; n && room; room--)
+        *b++ = t[--n];
+    *b = 0;
+}
+
+/* A pattern's part (a name's, an extension's) put over a name's: ? takes the character in its place, * the rest; -1
+   if a ? has none to take. */
+static int like_part(const char *pat, size_t pn, const char *src, size_t sn, char *out, size_t *k, size_t room)
+{
+    size_t i, at = 0;
+    for (i = 0; i < pn; i++, at++) {
+        if (pat[i] == '*') {
+            for (; at < sn && *k < room - 1; at++)
+                out[(*k)++] = src[at];
+            return 0;
+        }
+        if (pat[i] == '?' && at >= sn)
+            return -1;
+        if (*k < room - 1)
+            out[(*k)++] = pat[i] == '?' ? src[at] : pat[i];
+    }
+    return 0;
+}
+
+/* FC's and COMP's second name, a pattern, made to match the first's (as MS-DOS 7.1's FC: "*.BAK" with A.TXT is A.BAK,
+   "Z*.TXT" is Z.TXT, "*" alone the whole name, a pattern with no dot no extension): 0, or -1 if a ? has no character
+   of the name's to take ("Could not expand second filename so as to match first"). */
+static int name_like(const char *pat, const char *src, char *out, size_t room)
+{
+    const char *pd, *sd;
+    size_t k = 0;
+    if (!strcmp(pat, "*"))
+        pat = "*.*";
+    pd = strrchr(pat, '.'), sd = strrchr(src, '.');
+    if (like_part(pat, pd ? (size_t)(pd - pat) : strlen(pat), src, sd ? (size_t)(sd - src) : strlen(src), out, &k,
+                  room))
+        return -1;
+    if (pd && pd[1]) {
+        size_t dot = k;
+        out[k++] = '.';
+        if (like_part(pd + 1, strlen(pd + 1), sd ? sd + 1 : "", sd ? strlen(sd + 1) : 0, out, &k, room))
+            return -1;
+        if (k == dot + 1)
+            k = dot;
+    }
+    out[k] = 0;
+    return 0;
+}
+
+/* FC [/A] [/C] [/L] [/LBn] [/N] [/T] [/W] [/nnnn] name1 name2, FC /B name1 name2: as MS-DOS 7.1's FC.EXE.
+ *
+ * Text (but /B, or a first name ending .EXE .COM .SYS .OBJ .LIB or .BIN without /L: bytes): each file's lines are
+ * read into a buffer of /LB's lines (100). Where they differ, the buffers are moved on to the last line that was the
+ * same (none if that was the last of the buffer's, as MS-DOS's buffer has it), and the two are searched for /nnnn
+ * lines (2) the same again: pairs as far into either as one goes, (d, 1), (1, d), (d, 2), (2, d) ...; a match that
+ * runs past either buffer's end counts. Found: "****** NAME" and that file's lines from the buffer's first to the
+ * first of the match, the same of the other, "******" and an empty line; both go on from there. Not found: to the
+ * files' ends, or, if they don't end in the buffers, "Resync failed.  Files are too different" and the buffers.
+ * A line is read up to its LF or 127 bytes; tabs become spaces to every eighth column (not with /T), CRs go (/T keeps
+ * them), a NUL ends it, and what is past the 127th column is the next line. /C: case aside (code page 437's
+ * capitals, as FIND /I); /W: spaces and tabs at either end aside and a run of them as one, lines of nothing else
+ * passed over; /N: each line's number; /A: a block's first and last lines, "..." between. Bytes: "%08X: %02X %02X"
+ * for each that differs, "FC: NAME longer than NAME". The first name may be a pattern; the second a pattern made
+ * from each of the first's matches. Its messages are its output, as MS-DOS's are. Exit codes as MS-DOS 7.1's: 1 for
+ * too few or too many names and switches that don't go together, else 0 (differences too). */
+#define FC_COL 127
+#define FC_A 0x01
+#define FC_B 0x02
+#define FC_C 0x04
+#define FC_L 0x08
+#define FC_N 0x10
+#define FC_T 0x20
+#define FC_W 0x40
+#define FC_NUM 0x80                     /* /nnnn was given */
+
+struct fc_line {
+    unsigned long no;                   /* its number in its file */
+    int len;
+    unsigned char t[FC_COL + 1];        /* as it is shown (tabs made spaces, CRs gone: but /T) */
+};
+
+struct fc_file {
+    void *h;
+    int at, got, eof;
+    unsigned char in[512];
+    unsigned char raw[FC_COL];          /* the bytes read to make lines of, and how far they have been */
+    int rn, rat;
+    unsigned long no;
+    struct fc_line *b;                  /* the buffer, /LB lines */
+    int n;
+    char name[SH_PATH];                 /* as shown */
+};
+
+struct fc {
+    unsigned flags;
+    int lb, resync;
+    struct fc_file f[2];
+};
+
+static int fc_byte(struct sh *s, struct fc_file *f)
+{
+    if (f->at == f->got) {
+        f->got = s->h->read(s->h->ctx, f->h, f->in, (int)sizeof f->in);
+        f->at = 0;
+        if (f->got <= 0) {
+            f->got = 0;
+            return -1;
+        }
+    }
+    return f->in[f->at++];
+}
+
+static int fc_blank(const struct fc_line *l)
+{
+    int i;
+    for (i = 0; i < l->len; i++)
+        if (l->t[i] != ' ' && l->t[i] != '\t')
+            return 0;
+    return 1;
+}
+
+/* A file's next line into l: 1, or 0 at its end. */
+static int fc_read(struct sh *s, const struct fc *o, struct fc_file *f, struct fc_line *l)
+{
+    for (;;) {
+        int col = 0;
+        if (f->rat >= f->rn) {                  /* (the next bytes: to an LF, or 127) */
+            int c;
+            f->rn = f->rat = 0;
+            while (f->rn < FC_COL && (c = fc_byte(s, f)) >= 0)
+                if ((f->raw[f->rn++] = (unsigned char)c) == '\n')
+                    break;
+            if (!f->rn) {
+                f->eof = 1;
+                return 0;
+            }
+        }
+        while (f->rat < f->rn) {
+            int c = f->raw[f->rat];
+            if (!c) {                           /* (a NUL: the rest is no one's) */
+                f->rat = f->rn;
+                break;
+            }
+            if (c == '\n' || (c == '\r' && !(o->flags & FC_T))) {
+                f->rat++;
+                continue;
+            }
+            if (c == '\t' && !(o->flags & FC_T)) {
+                int to = (col / 8 + 1) * 8;
+                f->rat++;
+                if (to > FC_COL) {              /* (a tab past the 127th column ends the line there) */
+                    while (col < FC_COL)
+                        l->t[col++] = ' ';
+                    break;
+                }
+                while (col < to)
+                    l->t[col++] = ' ';
+                continue;
+            }
+            if (col == FC_COL)
+                break;                          /* (this character begins the next line) */
+            l->t[col++] = (unsigned char)c;
+            f->rat++;
+        }
+        l->t[col] = 0;
+        l->len = col;
+        l->no = ++f->no;
+        if (!(o->flags & FC_W) || !fc_blank(l))
+            return 1;
+    }
+}
+
+/* (/W: spaces and tabs at the ends gone, a run of them one space) */
+static int fc_squeeze(const struct fc_line *l, unsigned char *out)
+{
+    int i = 0, k = 0;
+    while (i < l->len && (l->t[i] == ' ' || l->t[i] == '\t'))
+        i++;
+    for (; i < l->len; i++) {
+        if (l->t[i] == ' ' || l->t[i] == '\t') {
+            if (k && out[k - 1] != ' ')
+                out[k++] = ' ';
+        } else {
+            out[k++] = l->t[i];
+        }
+    }
+    if (k && out[k - 1] == ' ')
+        k--;
+    return k;
+}
+
+static int fc_same(const struct fc *o, const struct fc_line *a, const struct fc_line *b)
+{
+    unsigned char x[FC_COL + 1], y[FC_COL + 1];
+    const unsigned char *p = a->t, *q = b->t;
+    int n = a->len, m = b->len, i;
+    if (o->flags & FC_W) {
+        n = fc_squeeze(a, x), m = fc_squeeze(b, y);
+        p = x, q = y;
+    }
+    if (n != m)
+        return 0;
+    for (i = 0; i < n; i++)
+        if (p[i] != q[i] && (!(o->flags & FC_C) || fold437(p[i]) != fold437(q[i])))
+            return 0;
+    return 1;
+}
+
+static void fc_fill(struct sh *s, const struct fc *o, struct fc_file *f)
+{
+    while (f->n < o->lb && !f->eof && fc_read(s, o, f, &f->b[f->n]))
+        f->n++;
+}
+
+static void fc_drop(struct fc_file *f, int k)
+{
+    memmove(f->b, f->b + k, (size_t)(f->n - k) * sizeof *f->b);
+    f->n -= k;
+}
+
+/* The lines of a block: its first count of a buffer's, under "****** NAME". */
+static void fc_lines(struct sh *s, const struct fc *o, const struct fc_file *f, int count)
+{
+    char t[SH_PATH + 16];
+    int i;
+    sh_fmt(t, sizeof t, "****** %s\r\n", f->name);
+    say(s, t);
+    for (i = 0; i < count; i++) {
+        if ((o->flags & FC_A) && count > 3 && i > 0 && i < count - 1) {
+            if (i == 1)
+                say(s, "...\r\n");
+            continue;
+        }
+        if (o->flags & FC_N) {
+            sh_fmt(t, sizeof t, "%6lu:  ", f->b[i].no);
+            say(s, t);
+        }
+        say_text(s, f->b[i].t, f->b[i].len);
+        say(s, "\r\n");
+    }
+}
+
+static int fc_try(const struct fc *o, int i1, int i2)
+{
+    const struct fc_file *a = &o->f[0], *b = &o->f[1];
+    int k;
+    if (i1 >= a->n || i2 >= b->n || !o->resync)
+        return 0;
+    for (k = 0; k < o->resync && i1 + k < a->n && i2 + k < b->n; k++)
+        if (!fc_same(o, &a->b[i1 + k], &b->b[i2 + k]))
+            return 0;
+    return 1;
+}
+
+/* Two files' lines compared: 1 if they differ. */
+static int fc_text(struct sh *s, struct fc *o)
+{
+    struct fc_file *a = &o->f[0], *b = &o->f[1];
+    int differ = 0;
+    for (;;) {
+        int m, d, j, r1 = -1, r2 = -1;
+        fc_fill(s, o, a);
+        fc_fill(s, o, b);
+        if (!a->n && !b->n)
+            break;
+        for (m = 0; m < a->n && m < b->n && fc_same(o, &a->b[m], &b->b[m]); m++)
+            ;
+        if (m == a->n && m == b->n) {
+            fc_drop(a, m);
+            fc_drop(b, m);
+            continue;
+        }
+        m = m == a->n || m == b->n ? m : m ? m - 1 : 0;     /* (the last line the same stays: but at an end) */
+        fc_drop(a, m);
+        fc_drop(b, m);
+        fc_fill(s, o, a);
+        fc_fill(s, o, b);
+        differ = 1;
+        for (d = 1; r1 < 0 && d < (a->n > b->n ? a->n : b->n); d++)
+            for (j = 1; r1 < 0 && j <= d; j++) {
+                if (fc_try(o, d, j))
+                    r1 = d, r2 = j;
+                else if (j != d && fc_try(o, j, d))
+                    r1 = j, r2 = d;
+            }
+        if (r1 < 0) {                           /* (to the end: the files', or the buffers' if they go on) */
+            if (!a->eof || !b->eof)
+                say(s, "Resync failed.  Files are too different\r\n");
+            fc_lines(s, o, a, a->n);
+            fc_lines(s, o, b, b->n);
+            say(s, "******\r\n\r\n");
+            break;
+        }
+        fc_lines(s, o, a, r1 + 1);
+        fc_lines(s, o, b, r2 + 1);
+        say(s, "******\r\n\r\n");
+        fc_drop(a, r1);
+        fc_drop(b, r2);
+    }
+    return differ;
+}
+
+/* Two files' bytes compared: 1 if they differ. */
+static int fc_bytes(struct sh *s, struct fc *o)
+{
+    char t[SH_PATH * 2 + 40], at[12], x[4], y[4];
+    unsigned long off = 0;
+    int a, b, differ = 0;
+    for (;; off++) {
+        a = fc_byte(s, &o->f[0]), b = fc_byte(s, &o->f[1]);
+        if (a < 0 || b < 0)
+            break;
+        if (a == b)
+            continue;
+        hex_text(at, sizeof at, off, 8);
+        hex_text(x, sizeof x, (unsigned long)a, 2);
+        hex_text(y, sizeof y, (unsigned long)b, 2);
+        sh_fmt(t, sizeof t, "%s: %s %s\r\n", at, x, y);
+        say(s, t);
+        differ = 1;
+    }
+    if (a >= 0 || b >= 0) {
+        sh_fmt(t, sizeof t, "FC: %s longer than %s\r\n", o->f[a < 0].name, o->f[a >= 0].name);
+        say(s, t);
+        differ = 1;
+    }
+    return differ;
+}
+
+/* The file whose name a FC or COMP was given, as it is shown: the folder as typed, the name as found. */
+static void typed_dir(char *out, size_t room, const char *word, const char *name)
+{
+    sh_fmt(out, (unsigned)room, "%.*s%s", (int)(path_name(word) - word), word, name);
+}
+
+static int cmd_fc(struct sh *s, int argc, char **argv)
+{
+    static const char *const bin[] = { ".EXE", ".OBJ", ".LIB", ".COM", ".BIN", ".SYS", 0 };
+    struct fc *o = s->h->alloc(s->h->ctx, sizeof *o);
+    char dir[SH_PATH], pat[64], full[SH_PATH], t[SH_PATH * 2 + 64];
+    const char *names[2] = { 0, 0 }, *ext;
+    struct sh_dirent *e;
+    size_t len;
+    int k, n = 0, i, found = 0, binary, isdir, r = 0;
+    if (!o) {
+        say(s, "FC: out of memory\r\n");
+        return s->level = 1;
+    }
+    memset(o, 0, sizeof *o);
+    o->lb = 100, o->resync = 2;
+    for (k = 1; k < argc; k++) {
+        const char *a = argv[k];
+        if (a[0] != '/') {
+            if (n < 2)
+                names[n] = a;
+            n++;
+            continue;
+        }
+        if (a[1] && !a[2] && strchr("ABCLNTW", upper((unsigned char)a[1]))) {
+            o->flags |= 1u << (strchr("ABCLNTW", upper((unsigned char)a[1])) - "ABCLNTW");
+        } else if (upper((unsigned char)a[1]) == 'L' && upper((unsigned char)a[2]) == 'B'
+                   && strspn(a + 3, "0123456789") == strlen(a + 3)) {
+            for (o->lb = a[3] ? 0 : 100, a += 3; *a && o->lb < 10000; a++)
+                o->lb = o->lb * 10 + (*a - '0');
+        } else if (a[1] && strspn(a + 1, "0123456789") == strlen(a + 1)) {
+            for (o->resync = 0, a++; *a && o->resync < 10000; a++)
+                o->resync = o->resync * 10 + (*a - '0');
+            o->flags |= FC_NUM;
+        } else {
+            say(s, "FC: Invalid switch\r\n\r\n");
+        }
+    }
+    if (n < 2 || n > 2) {
+        say(s, n < 2 ? "FC: Insufficient number of filespecs\r\n" : "FC: Too many filenames\r\n\r\n");
+        s->h->free(s->h->ctx, o);
+        return s->level = 1;
+    }
+    ext = strrchr(path_name(names[0]), '.');
+    for (binary = (o->flags & FC_B) != 0, i = 0; !binary && !(o->flags & FC_L) && ext && bin[i]; i++)
+        binary = same(ext, bin[i]);
+    if (binary && (o->flags & (FC_L | FC_N | FC_NUM))) {
+        say(s, "FC: Incompatible switches\r\n");
+        s->h->free(s->h->ctx, o);
+        return s->level = 1;
+    }
+    full_path(s, names[0], full, sizeof full);
+    sh_fmt(pat, sizeof pat, "%s", path_name(full));
+    sh_fmt(dir, sizeof dir, "%s", full);
+    path_up(dir);
+    if ((n = s->h->dir_read(s->h->ctx, dir, &e)) < 0)
+        n = 0, e = 0;
+    for (i = 0; i < n; i++) {
+        struct fc_file *a = &o->f[0], *b = &o->f[1];
+        char second[64], p[SH_PATH];
+        if (e[i].dir || (e[i].attr & 0x06) || !match(pat, e[i].name))
+            continue;
+        found = 1;
+        typed_dir(a->name, sizeof a->name, names[0], e[i].name);
+        if (!strpbrk(path_name(names[1]), "*?")) {
+            sh_fmt(b->name, sizeof b->name, "%s", names[1]);
+        } else if (name_like(path_name(names[1]), e[i].name, second, sizeof second) == 0) {
+            typed_dir(b->name, sizeof b->name, names[1], second);
+        } else {
+            sh_fmt(t, sizeof t, "%s     %s\r\nCould not expand second filename so as to match first\r\n", a->name,
+                   names[1]);
+            say(s, t);
+            continue;
+        }
+        sh_fmt(t, sizeof t, "Comparing files %s and %s\r\n", a->name, b->name);
+        say(s, t);
+        path_join(p, sizeof p, dir, e[i].name);
+        a->h = s->h->open(s->h->ctx, p, 'r');
+        full_path(s, b->name, p, sizeof p);
+        len = strlen(b->name);
+        isdir = s->h->is_dir(s->h->ctx, p) && b->name[len - 1] != '\\' && b->name[len - 1] != '/';
+        b->h = isdir || b->name[len - 1] == '\\' || b->name[len - 1] == '/' ? 0 : s->h->open(s->h->ctx, p, 'r');
+        for (k = 0; k < 2; k++) {
+            struct fc_file *f = &o->f[k];
+            f->at = f->got = f->eof = f->rn = f->rat = f->n = 0;
+            f->no = 0;
+        }
+        if (!a->h || !b->h) {
+            sh_fmt(t, sizeof t, "FC: cannot open %s - %s\r\n\r\n", a->h ? b->name : a->name,
+                   a->h && isdir ? "Permission denied" : "No such file or directory");
+            say(s, t);
+        } else if (binary) {
+            if (!fc_bytes(s, o))
+                say(s, "FC: no differences encountered\r\n");
+            say(s, "\r\n");
+        } else {
+            for (k = 0; k < 2; k++)
+                if (!o->f[k].b && !(o->f[k].b = s->h->alloc(s->h->ctx, (unsigned)(o->lb ? o->lb : 1)
+                                                                       * (unsigned)sizeof *o->f[k].b)))
+                    break;
+            if (k < 2) {
+                say(s, "FC: out of memory\r\n");
+                r = 1;
+            } else {
+                say(s, fc_text(s, o) ? "\r\n" : "FC: no differences encountered\r\n\r\n");
+            }
+        }
+        if (a->h)
+            s->h->close(s->h->ctx, a->h);
+        if (b->h)
+            s->h->close(s->h->ctx, b->h);
+        a->h = b->h = 0;
+    }
+    if (e)
+        s->h->dir_free(s->h->ctx, e);
+    if (!found) {
+        sh_fmt(t, sizeof t, "File(s) not found : %s\r\n", names[0]);
+        say(s, t);
+    }
+    for (k = 0; k < 2; k++)
+        if (o->f[k].b)
+            s->h->free(s->h->ctx, o->f[k].b);
+    s->h->free(s->h->ctx, o);
+    return s->level = r;
+}
+
+/* COMP [name1] [name2] [/D] [/A] [/L] [/N=n] [/C]: MS-DOS 6.22's, as it was documented (MS-DOS 7.1 has none, so
+   nothing was asked of a real one): the bytes compared, "Compare error at OFFSET n" (hex; /L: "at LINE n") with
+   "file1 = xx" and "file2 = yy" (hex; /D decimal, /A characters) for each that differs, ten at most ("10
+   Mismatches - ending compare"); "Files compare OK"; "Files are different sizes" (and nothing compared) unless /N=n,
+   which compares the first n lines alone; /C case aside. Patterns as FC's; a folder second: the same name in it. It
+   asks for nothing: not for names, and not "Compare more files (Y/N)?". The exit code: 0 the same, 1 different, 2
+   a file not found or what can't be run. */
+static int comp_pair(struct sh *s, const char *p1, const char *p2, const char *shown1, const char *shown2,
+                     unsigned flags, unsigned long lines)
+{
+    struct sh_dirent x, y;
+    char t[SH_PATH * 2 + 40], v1[8], v2[8], at[12];
+    void *f1, *f2;
+    unsigned char b1[512], b2[512];
+    unsigned long off = 0, line = 1;
+    int n1 = 0, n2 = 0, i1 = 0, i2 = 0, errors = 0;
+    int no1, no2;
+    sh_fmt(t, sizeof t, "Comparing %s and %s...\r\n", shown1, shown2);
+    say(s, t);
+    no1 = s->h->stat(s->h->ctx, p1, &x) != 0 || x.dir;
+    no2 = s->h->stat(s->h->ctx, p2, &y) != 0 || y.dir;
+    if (no1 || no2) {
+        sh_fmt(t, sizeof t, "Can't find/open file: %s\r\n\r\n", no1 ? shown1 : shown2);
+        say(s, t);
+        return 2;
+    }
+    if (!lines && x.size != y.size) {
+        say(s, "Files are different sizes\r\n\r\n");
+        return 1;
+    }
+    if (!(f1 = s->h->open(s->h->ctx, p1, 'r')) || !(f2 = s->h->open(s->h->ctx, p2, 'r'))) {
+        if (f1)
+            s->h->close(s->h->ctx, f1);
+        sh_fmt(t, sizeof t, "Can't find/open file: %s\r\n\r\n", f1 ? shown2 : shown1);
+        say(s, t);
+        return 2;
+    }
+    for (;; off++) {
+        int a, b;
+        if (i1 == n1) {
+            n1 = s->h->read(s->h->ctx, f1, b1, (int)sizeof b1);
+            i1 = 0;
+        }
+        if (i2 == n2) {
+            n2 = s->h->read(s->h->ctx, f2, b2, (int)sizeof b2);
+            i2 = 0;
+        }
+        if (n1 <= 0 || n2 <= 0 || (lines && line > lines))
+            break;
+        a = b1[i1++], b = b2[i2++];
+        if (a != b && (!(flags & 4) || fold437(a) != fold437(b))) {
+            if (flags & 8) {
+                sh_fmt(t, sizeof t, "Compare error at LINE %lu\r\n", line);
+            } else {
+                hex_text(at, sizeof at, off, 1);
+                sh_fmt(t, sizeof t, "Compare error at OFFSET %s\r\n", at);
+            }
+            say(s, t);
+            if (flags & 1) {
+                sh_fmt(v1, sizeof v1, "%u", (unsigned)a);
+                sh_fmt(v2, sizeof v2, "%u", (unsigned)b);
+            } else if (flags & 2) {
+                sh_fmt(v1, sizeof v1, "%c", a);
+                sh_fmt(v2, sizeof v2, "%c", b);
+            } else {
+                hex_text(v1, sizeof v1, (unsigned long)a, 2);
+                hex_text(v2, sizeof v2, (unsigned long)b, 2);
+            }
+            sh_fmt(t, sizeof t, "file1 = %s\r\nfile2 = %s\r\n", v1, v2);
+            say(s, t);
+            if (++errors == 10) {
+                say(s, "10 Mismatches - ending compare\r\n");
+                break;
+            }
+        }
+        if (a == '\n')
+            line++;
+    }
+    s->h->close(s->h->ctx, f1);
+    s->h->close(s->h->ctx, f2);
+    say(s, errors ? "\r\n" : "Files compare OK\r\n\r\n");
+    return errors ? 1 : 0;
+}
+
+static int cmd_comp(struct sh *s, int argc, char **argv)
+{
+    char dir[SH_PATH], pat[64], full[SH_PATH], p1[SH_PATH], p2[SH_PATH], shown1[SH_PATH], shown2[SH_PATH];
+    char t[SH_PATH + 40];
+    const char *names[2] = { 0, 0 };
+    struct sh_dirent *e;
+    unsigned flags = 0;
+    unsigned long lines = 0;
+    int k, n = 0, i, found = 0, r = 0;
+    for (k = 1; k < argc; k++) {
+        const char *a = argv[k];
+        if (a[0] != '/') {
+            if (n < 2)
+                names[n] = a;
+            n++;
+        } else if (a[1] && !a[2] && strchr("DACL", upper((unsigned char)a[1]))) {
+            flags |= 1u << (strchr("DACL", upper((unsigned char)a[1])) - "DACL");
+        } else if (upper((unsigned char)a[1]) == 'N' && a[2] == '=' && a[3]
+                   && strspn(a + 3, "0123456789") == strlen(a + 3)) {
+            for (lines = 0, a += 3; *a && lines < 100000000ul; a++)
+                lines = lines * 10 + (unsigned long)(*a - '0');
+        } else {
+            sh_fmt(t, sizeof t, "Invalid switch - %s\r\n", a);
+            err(s, t);
+            return s->level = 2;
+        }
+    }
+    if (n != 2) {
+        err(s, n < 2 ? "COMP name1 name2 [/D] [/A] [/L] [/N=n] [/C]: GLOS's COMP asks for no names\r\n"
+                     : "Too many parameters\r\n");
+        return s->level = 2;
+    }
+    full_path(s, names[0], full, sizeof full);
+    sh_fmt(pat, sizeof pat, "%s", path_name(full));
+    sh_fmt(dir, sizeof dir, "%s", full);
+    path_up(dir);
+    if ((n = s->h->dir_read(s->h->ctx, dir, &e)) < 0)
+        n = 0, e = 0;
+    for (i = 0; i < n; i++) {
+        char second[64];
+        int got;
+        if (e[i].dir || (e[i].attr & 0x06) || !match(pat, e[i].name))
+            continue;
+        found = 1;
+        path_join(p1, sizeof p1, dir, e[i].name);
+        typed_dir(shown1, sizeof shown1, names[0], e[i].name);
+        full_path(s, names[1], p2, sizeof p2);
+        if (!strpbrk(path_name(names[1]), "*?") && s->h->is_dir(s->h->ctx, p2)) {
+            size_t len = strlen(names[1]);      /* (a folder: the same name in it) */
+            path_join(p2, sizeof p2, p2, e[i].name);
+            sh_fmt(shown2, sizeof shown2, len && (names[1][len - 1] == '\\' || names[1][len - 1] == ':') ? "%s%s"
+                   : "%s\\%s", names[1], e[i].name);
+        } else if (!strpbrk(path_name(names[1]), "*?")) {
+            sh_fmt(shown2, sizeof shown2, "%s", names[1]);
+        } else if (name_like(path_name(names[1]), e[i].name, second, sizeof second) == 0) {
+            typed_dir(shown2, sizeof shown2, names[1], second);
+            full_path(s, shown2, p2, sizeof p2);
+        } else {
+            sh_fmt(t, sizeof t, "Can't find/open file: %s\r\n\r\n", names[1]);
+            say(s, t);
+            r = 2;
+            continue;
+        }
+        got = comp_pair(s, p1, p2, shown1, shown2, flags, lines);
+        if (got > r)
+            r = got;
+    }
+    if (e)
+        s->h->dir_free(s->h->ctx, e);
+    if (!found) {
+        sh_fmt(t, sizeof t, "Can't find/open file: %s\r\n", names[0]);
+        say(s, t);
+        r = 2;
+    }
+    return s->level = r;
+}
+
 static int cmd_cd(struct sh *s, int argc, char **argv)
 {
     char p[SH_PATH], line[300];
@@ -2133,7 +2767,8 @@ static int cmd_set(struct sh *s, int argc, char **argv, const char *raw)
 static const char *const builtins[] = { "CD", "CHDIR", "DIR", "COPY", "MOVE", "REN", "RENAME", "DEL", "ERASE", "MD",
     "MKDIR", "RD", "RMDIR", "TYPE", "ECHO", "SET", "PATH", "PROMPT", "CLS", "VER", "EXIT", "HISTORY", "HELP", "WHERE",
     "START", "DF", "DU", "CALL", "FOR", "GOTO", "IF", "PAUSE", "REM", "SHIFT", "VOL", "TRUENAME", "BREAK", "VERIFY",
-    "LH", "LOADHIGH", "CTTY", "ATTRIB", "XCOPY", "MORE", "DELTREE", "CHOICE", "FIND", "SORT", 0 };
+    "LH", "LOADHIGH", "CTTY", "ATTRIB", "XCOPY", "MORE", "DELTREE", "CHOICE", "FIND", "SORT",
+    "FC", "COMP", 0 };
 
 static const char *const helps[] = {
     "CD [path]           the folder (of a drive: CD X:); X: changes drive",
@@ -2147,6 +2782,8 @@ static const char *const helps[] = {
     "MORE [file]         a page at a time (also: command | MORE)",
     "FIND [/V] [/C] [/N] [/I] \"text\" [files]  the lines with the text (also: command | FIND \"text\")",
     "SORT [/R] [/+n] [files]  the lines in order (also: command | SORT)",
+    "FC [/A /C /L /LBn /N /T /W /nnnn] file1 file2, FC /B file1 file2  where two files differ",
+    "COMP file1 file2 [/D] [/A] [/L] [/N=n] [/C]  two files' bytes compared",
     "ATTRIB [+R|-R] [+A|-A] [+S|-S] [+H|-H] [path]  attributes changed, or listed",
     "MD path, RD path    a folder made, removed",
     "DF [drive: ...]     the drives: their size, what is used and free",
@@ -2938,6 +3575,10 @@ static int run_line(struct sh *s, char *line)
         r = cmd_find(s, line, source);
     } else if (same(argv[0], "SORT")) {
         r = cmd_sort(s, argc, argv, source);
+    } else if (same(argv[0], "FC")) {
+        r = cmd_fc(s, argc, argv);
+    } else if (same(argv[0], "COMP")) {
+        r = cmd_comp(s, argc, argv);
     } else if (same(argv[0], "DELTREE")) {
         r = cmd_deltree(s, argc, argv);
     } else if (same(argv[0], "CHOICE")) {

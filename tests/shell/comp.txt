@@ -1,0 +1,50 @@
+# COMP (sdk/shell, 2026-11-27): MS-DOS 6.22's COMP as it was documented (MS-DOS 7.1 has none to ask). It never
+# asks: not for the names, not "Compare more files (Y/N)?". Exit codes: 0 the same, 1 different, 2 no file.
+mkdir C:\W
+mkdir C:\V
+bytes C:\A.TXT abcdef\r\nline two\r\n
+bytes C:\B.TXT abcdef\r\nline two\r\n
+bytes C:\C.TXT abXdef\r\nline Two\r\n
+bytes C:\D.TXT ABCDEF\r\nLINE TWO\r\n
+bytes C:\E.TXT abcdef\r\n
+bytes C:\F.TXT abcdef\r\nline 2\r\nmore\r\n
+bytes C:\G.TXT 0123456789abcdef
+bytes C:\H.TXT ABCDEFGHIJKLMNOP
+line C:\W\A.TXT alpha
+line C:\W\B.TXT beta
+line C:\V\A.TXT alpha
+line C:\V\B.TXT BETA
+line C:\V\A.BAK alpha
+# the same; bytes that differ (hex, /D decimal, /A characters, /L lines); /C case aside
+> comp a.txt b.txt
+> echo %errorlevel%
+> comp a.txt c.txt
+> echo %errorlevel%
+> comp a.txt c.txt /d
+> comp a.txt c.txt /a
+> comp a.txt c.txt /l
+> comp a.txt d.txt /c
+> comp a.txt c.txt /c /a
+# ten at most
+> comp g.txt h.txt
+# sizes: not compared, but with /N=n (the first n lines)
+> comp a.txt e.txt
+> echo %errorlevel%
+> comp a.txt e.txt /n=1
+> comp a.txt f.txt /n=1
+> comp a.txt f.txt /n=2 /l
+# a folder second: the same name in it; patterns
+> comp w\a.txt v
+> comp w\*.txt v\
+> comp w\*.txt v\*.bak
+> comp w\*.txt v\a.txt
+# what isn't there, and what can't be run
+> comp a.txt nosuch.txt
+> echo %errorlevel%
+> comp nosuch*.txt a.txt
+> comp a.txt
+> echo %errorlevel%
+> comp
+> comp a.txt b.txt c.txt
+> comp /x a.txt b.txt
+> exit

@@ -1,0 +1,837 @@
+GLOS shell 1.0. HELP lists its commands.
+
+[[C:\>]]
+fc t1.txt t1c.txt
+Comparing files T1.TXT and t1c.txt
+FC: no differences encountered
+
+[[C:\>]]
+echo %errorlevel%
+0
+[[C:\>]]
+fc t1.txt t2.txt
+Comparing files T1.TXT and t2.txt
+****** T1.TXT
+{{four}}
+{{five}}
+{{six}}
+****** t2.txt
+{{four}}
+{{FIVE changed}}
+{{six}}
+******
+
+
+[[C:\>]]
+echo %errorlevel%
+0
+[[C:\>]]
+fc t1.txt t3.txt
+Comparing files T1.TXT and t3.txt
+****** T1.TXT
+{{one}}
+{{two}}
+****** t3.txt
+{{ONE changed}}
+{{two}}
+******
+
+
+[[C:\>]]
+fc t1.txt t4.txt
+Comparing files T1.TXT and t4.txt
+****** T1.TXT
+{{nine}}
+{{ten}}
+****** t4.txt
+{{nine}}
+{{TEN changed}}
+******
+
+
+[[C:\>]]
+fc t1.txt t5.txt
+Comparing files T1.TXT and t5.txt
+****** T1.TXT
+{{three}}
+{{four}}
+****** t5.txt
+{{three}}
+{{inserted}}
+{{four}}
+******
+
+
+[[C:\>]]
+fc t1.txt t6.txt
+Comparing files T1.TXT and t6.txt
+****** T1.TXT
+{{three}}
+{{four}}
+{{five}}
+****** t6.txt
+{{three}}
+{{five}}
+******
+
+
+[[C:\>]]
+fc t1.txt t7.txt
+Comparing files T1.TXT and t7.txt
+****** T1.TXT
+{{one}}
+{{two}}
+****** t7.txt
+{{new a}}
+{{new b}}
+{{one}}
+{{two}}
+******
+
+
+[[C:\>]]
+fc t1.txt t8.txt
+Comparing files T1.TXT and t8.txt
+****** T1.TXT
+****** t8.txt
+{{eleven}}
+{{twelve}}
+******
+
+
+[[C:\>]]
+fc t1.txt t9.txt
+Comparing files T1.TXT and t9.txt
+****** T1.TXT
+{{nine}}
+{{ten}}
+****** t9.txt
+******
+
+
+[[C:\>]]
+fc t1.txt t2.txt > f.txt
+[[C:\>]]
+(CAT C:\F.TXT: Comparing files T1.TXT and t2.txt\r\n****** T1.TXT\r\nfour\r\nfive\r\nsix\r\n****** t2.txt\r\nfour\r\nFIVE changed\r\nsix\r\n******\r\n\r\n\r\n)
+fc t1.txt t10.txt
+Comparing files T1.TXT and t10.txt
+****** T1.TXT
+{{one}}
+{{two}}
+{{three}}
+****** t10.txt
+{{one}}
+{{TWO x}}
+{{three}}
+******
+
+****** T1.TXT
+{{seven}}
+{{eight}}
+{{nine}}
+****** t10.txt
+{{seven}}
+{{EIGHT x}}
+{{nine}}
+******
+
+
+[[C:\>]]
+fc t1.txt t11.txt
+Comparing files T1.TXT and t11.txt
+****** T1.TXT
+{{three}}
+{{four}}
+{{five}}
+{{six}}
+****** t11.txt
+{{three}}
+{{FOUR x}}
+{{FIVE x}}
+{{six}}
+******
+
+
+[[C:\>]]
+fc t1.txt t12.txt
+Comparing files T1.TXT and t12.txt
+****** T1.TXT
+{{three}}
+{{four}}
+{{five}}
+{{six}}
+{{seven}}
+****** t12.txt
+{{three}}
+{{FOUR x}}
+{{five}}
+{{SIX x}}
+{{seven}}
+******
+
+
+[[C:\>]]
+fc t1.txt t13.txt
+Comparing files T1.TXT and t13.txt
+****** T1.TXT
+{{three}}
+{{four}}
+{{five}}
+****** t13.txt
+{{three}}
+{{FOUR x}}
+{{five}}
+******
+
+****** T1.TXT
+{{six}}
+{{seven}}
+{{eight}}
+****** t13.txt
+{{six}}
+{{SEVEN x}}
+{{eight}}
+******
+
+
+[[C:\>]]
+fc /1 t1.txt t12.txt
+Comparing files T1.TXT and t12.txt
+****** T1.TXT
+{{three}}
+{{four}}
+{{five}}
+****** t12.txt
+{{three}}
+{{FOUR x}}
+{{five}}
+******
+
+****** T1.TXT
+{{five}}
+{{six}}
+{{seven}}
+****** t12.txt
+{{five}}
+{{SIX x}}
+{{seven}}
+******
+
+
+[[C:\>]]
+fc /3 t1.txt t13.txt
+Comparing files T1.TXT and t13.txt
+****** T1.TXT
+{{three}}
+{{four}}
+{{five}}
+{{six}}
+{{seven}}
+{{eight}}
+****** t13.txt
+{{three}}
+{{FOUR x}}
+{{five}}
+{{six}}
+{{SEVEN x}}
+{{eight}}
+******
+
+
+[[C:\>]]
+fc /0 t1.txt t2.txt
+Comparing files T1.TXT and t2.txt
+****** T1.TXT
+{{four}}
+{{five}}
+{{six}}
+{{seven}}
+{{eight}}
+{{nine}}
+{{ten}}
+****** t2.txt
+{{four}}
+{{FIVE changed}}
+{{six}}
+{{seven}}
+{{eight}}
+{{nine}}
+{{ten}}
+******
+
+
+[[C:\>]]
+fc sa.txt sb.txt
+Comparing files SA.TXT and sb.txt
+****** SA.TXT
+{{ctx}}
+{{X}}
+{{p}}
+{{q}}
+{{r}}
+****** sb.txt
+{{ctx}}
+{{Y}}
+{{r}}
+******
+
+****** SA.TXT
+{{s}}
+{{end}}
+****** sb.txt
+{{s}}
+{{p}}
+{{q}}
+{{end}}
+******
+
+
+[[C:\>]]
+fc /1 va.txt vb.txt
+Comparing files VA.TXT and vb.txt
+****** VA.TXT
+{{ctx}}
+{{P}}
+****** vb.txt
+{{ctx}}
+{{y1}}
+{{Q}}
+{{P}}
+******
+
+****** VA.TXT
+{{x2}}
+{{Q}}
+****** vb.txt
+******
+
+
+[[C:\>]]
+fc /a t1.txt t11.txt
+Comparing files T1.TXT and t11.txt
+****** T1.TXT
+{{three}}
+...
+{{six}}
+****** t11.txt
+{{three}}
+...
+{{six}}
+******
+
+
+[[C:\>]]
+fc /a /n t1.txt t18.txt
+Comparing files T1.TXT and t18.txt
+****** T1.TXT
+     2:  {{two}}
+...
+     7:  {{seven}}
+****** t18.txt
+     2:  {{two}}
+...
+     7:  {{seven}}
+******
+
+
+[[C:\>]]
+fc t1.txt t5.txt /n
+Comparing files T1.TXT and t5.txt
+****** T1.TXT
+     3:  {{three}}
+     4:  {{four}}
+****** t5.txt
+     3:  {{three}}
+     4:  {{inserted}}
+     5:  {{four}}
+******
+
+
+[[C:\>]]
+fc t1.txt t14.txt
+Comparing files T1.TXT and t14.txt
+****** T1.TXT
+{{one}}
+{{two}}
+{{three}}
+{{four}}
+{{five}}
+{{six}}
+{{seven}}
+{{eight}}
+{{nine}}
+{{ten}}
+****** t14.txt
+{{ONE}}
+{{TWO}}
+{{THREE}}
+{{FOUR}}
+{{FIVE}}
+{{SIX}}
+{{SEVEN}}
+{{EIGHT}}
+{{NINE}}
+{{TEN}}
+******
+
+
+[[C:\>]]
+fc /c t1.txt t14.txt
+Comparing files T1.TXT and t14.txt
+FC: no differences encountered
+
+[[C:\>]]
+fc /c ca1.txt ca2.txt
+Comparing files CA1.TXT and ca2.txt
+FC: no differences encountered
+
+[[C:\>]]
+fc /c ca3.txt ca2.txt
+Comparing files CA3.TXT and ca2.txt
+****** CA3.TXT
+{{CAF}}
+****** ca2.txt
+{{CAFE}}
+******
+
+
+[[C:\>]]
+fc w1.txt w2.txt
+Comparing files W1.TXT and w2.txt
+****** W1.TXT
+{{a b c}}
+{{x  y}}
+{{        indent}}
+{{trail }}
+{{same}}
+****** w2.txt
+{{a  b   c}}
+{{x       y}}
+{{    indent}}
+{{trail}}
+{{same}}
+******
+
+
+[[C:\>]]
+fc /w w1.txt w2.txt
+Comparing files W1.TXT and w2.txt
+FC: no differences encountered
+
+[[C:\>]]
+fc /w wa1.txt wa2.txt
+Comparing files WA1.TXT and wa2.txt
+****** WA1.TXT
+{{ab}}
+{{x}}
+****** wa2.txt
+{{a b}}
+{{x}}
+******
+
+
+[[C:\>]]
+fc /n /w wi1.txt wi2.txt
+Comparing files WI1.TXT and wi2.txt
+****** WI1.TXT
+     1:  {{a}}
+     3:  {{X}}
+     5:  {{b}}
+****** wi2.txt
+     1:  {{a}}
+     2:  {{Y}}
+     5:  {{b}}
+******
+
+
+[[C:\>]]
+fc tab1.txt tab2.txt
+Comparing files TAB1.TXT and tab2.txt
+****** TAB1.TXT
+{{col     one}}
+{{x}}
+****** tab2.txt
+{{col     two}}
+{{x}}
+******
+
+
+[[C:\>]]
+fc /t tab1.txt tab2.txt > f.txt
+[[C:\>]]
+(CAT C:\F.TXT: Comparing files TAB1.TXT and tab2.txt\r\n****** TAB1.TXT\r\ncol	one\r\r\nx\r\r\n****** tab2.txt\r\ncol	two\r\r\nx\r\r\n******\r\n\r\n\r\n)
+fc /t lf1.txt crlf1.txt > f.txt
+[[C:\>]]
+(CAT C:\F.TXT: Comparing files LF1.TXT and crlf1.txt\r\n****** LF1.TXT\r\na\r\nb\r\nc\r\n****** crlf1.txt\r\na\r\r\nb\r\r\nc\r\r\n******\r\n\r\n\r\n)
+fc r1.txt r2.txt
+Comparing files R1.TXT and r2.txt
+****** R1.TXT
+{{line 4}}
+{{line 5}}
+{{line 6}}
+{{line 7}}
+{{line 8}}
+{{line 9}}
+{{line 10}}
+{{line 11}}
+{{line 12}}
+{{line 13}}
+{{line 14}}
+{{line 15}}
+****** r2.txt
+{{line 4}}
+{{other 5}}
+{{other 6}}
+{{other 7}}
+{{other 8}}
+{{other 9}}
+{{other 10}}
+{{other 11}}
+{{other 12}}
+{{other 13}}
+{{other 14}}
+{{line 15}}
+******
+
+
+[[C:\>]]
+fc /lb5 r1.txt r2.txt
+Comparing files R1.TXT and r2.txt
+Resync failed.  Files are too different
+****** R1.TXT
+{{line 4}}
+{{line 5}}
+{{line 6}}
+{{line 7}}
+{{line 8}}
+****** r2.txt
+{{line 4}}
+{{other 5}}
+{{other 6}}
+{{other 7}}
+{{other 8}}
+******
+
+
+[[C:\>]]
+fc /lb5 r1.txt r4.txt
+Comparing files R1.TXT and r4.txt
+****** R1.TXT
+{{line 6}}
+{{line 7}}
+****** r4.txt
+{{CHANGED 6}}
+{{line 7}}
+******
+
+
+[[C:\>]]
+fc /lb0 t1.txt t2.txt
+Comparing files T1.TXT and t2.txt
+FC: no differences encountered
+
+[[C:\>]]
+fc e0.txt e0.txt
+Comparing files E0.TXT and e0.txt
+FC: no differences encountered
+
+[[C:\>]]
+fc e0.txt t9.txt
+Comparing files E0.TXT and t9.txt
+****** E0.TXT
+****** t9.txt
+{{one}}
+{{two}}
+{{three}}
+{{four}}
+{{five}}
+{{six}}
+{{seven}}
+{{eight}}
+******
+
+
+[[C:\>]]
+fc t9.txt e0.txt
+Comparing files T9.TXT and e0.txt
+****** T9.TXT
+{{one}}
+{{two}}
+{{three}}
+{{four}}
+{{five}}
+{{six}}
+{{seven}}
+{{eight}}
+****** e0.txt
+******
+
+
+[[C:\>]]
+fc noeol1.txt noeol2.txt
+Comparing files NOEOL1.TXT and noeol2.txt
+FC: no differences encountered
+
+[[C:\>]]
+fc lf1.txt crlf1.txt
+Comparing files LF1.TXT and crlf1.txt
+FC: no differences encountered
+
+[[C:\>]]
+fc z1.txt crlf1.txt
+Comparing files Z1.TXT and crlf1.txt
+****** Z1.TXT
+{{b}}
+{{zzz}}
+****** crlf1.txt
+{{b}}
+{{c}}
+******
+
+
+[[C:\>]]
+fc nul1.txt nul2.txt
+Comparing files NUL1.TXT and nul2.txt
+FC: no differences encountered
+
+[[C:\>]]
+fc long1.txt long2.txt
+Comparing files LONG1.TXT and long2.txt
+****** LONG1.TXT
+{{xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}}
+{{xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx1}}
+{{same}}
+****** long2.txt
+{{xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}}
+{{xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx2}}
+{{same}}
+******
+
+
+[[C:\>]]
+fc tt1.txt tt2.txt
+Comparing files TT1.TXT and tt2.txt
+****** TT1.TXT
+{{                                                                                                                               }}
+{{                                x1}}
+{{same}}
+****** tt2.txt
+{{                                                                                                                               }}
+{{                                x2}}
+{{same}}
+******
+
+
+[[C:\>]]
+fc /b b1.bin b2.bin
+Comparing files B1.BIN and b2.bin
+00000010: 10 41
+00000011: 11 42
+0000002F: 2F FF
+
+[[C:\>]]
+fc /b b1.bin b3.bin
+Comparing files B1.BIN and b3.bin
+FC: B1.BIN longer than b3.bin
+
+[[C:\>]]
+fc b3.bin b1.bin
+Comparing files B3.BIN and b1.bin
+FC: b1.bin longer than B3.BIN
+
+[[C:\>]]
+fc b1.bin b1.bin
+Comparing files B1.BIN and b1.bin
+FC: no differences encountered
+
+[[C:\>]]
+fc x1.exe x2.exe
+Comparing files X1.EXE and x2.exe
+00000005: 74 54
+00000006: 77 57
+00000007: 6F 4F
+
+[[C:\>]]
+fc /l x1.exe x2.exe
+Comparing files X1.EXE and x2.exe
+****** X1.EXE
+{{one}}
+{{two}}
+{{three}}
+****** x2.exe
+{{one}}
+{{TWO}}
+{{three}}
+******
+
+
+[[C:\>]]
+fc x1.dat x2.exe
+Comparing files X1.DAT and x2.exe
+****** X1.DAT
+{{one}}
+{{two}}
+{{three}}
+****** x2.exe
+{{one}}
+{{TWO}}
+{{three}}
+******
+
+
+[[C:\>]]
+fc /b e0.txt e0.txt
+Comparing files E0.TXT and e0.txt
+FC: no differences encountered
+
+[[C:\>]]
+fc w\*.txt v\*.txt
+Comparing files w\A.TXT and v\A.txt
+FC: no differences encountered
+
+Comparing files w\B.TXT and v\B.txt
+****** w\B.TXT
+{{beta}}
+****** v\B.txt
+{{BETA}}
+******
+
+
+Comparing files w\C.TXT and v\C.txt
+FC: cannot open v\C.txt - No such file or directory
+
+[[C:\>]]
+fc w\*.txt v\*.bak
+Comparing files w\A.TXT and v\A.bak
+****** w\A.TXT
+{{alpha}}
+****** v\A.bak
+{{alpha bak}}
+******
+
+
+Comparing files w\B.TXT and v\B.bak
+FC: cannot open v\B.bak - No such file or directory
+
+Comparing files w\C.TXT and v\C.bak
+FC: cannot open v\C.bak - No such file or directory
+
+[[C:\>]]
+fc w\a.txt v\*
+Comparing files w\A.TXT and v\A.TXT
+FC: no differences encountered
+
+[[C:\>]]
+fc w\*.txt v\a.txt
+Comparing files w\A.TXT and v\a.txt
+FC: no differences encountered
+
+Comparing files w\B.TXT and v\a.txt
+****** w\B.TXT
+{{beta}}
+****** v\a.txt
+{{alpha}}
+******
+
+
+Comparing files w\C.TXT and v\a.txt
+****** w\C.TXT
+{{gamma}}
+****** v\a.txt
+{{alpha}}
+******
+
+
+[[C:\>]]
+fc w\a.txt v\z*.txt
+Comparing files w\A.TXT and v\z.txt
+FC: cannot open v\z.txt - No such file or directory
+
+[[C:\>]]
+fc t1.txt ????.txt
+T1.TXT     ????.txt
+Could not expand second filename so as to match first
+[[C:\>]]
+fc t1.txt nosuch.txt
+Comparing files T1.TXT and nosuch.txt
+FC: cannot open nosuch.txt - No such file or directory
+
+[[C:\>]]
+fc nosuch.txt t1.txt
+File(s) not found : nosuch.txt
+[[C:\>]]
+fc nosuch*.txt t1.txt
+File(s) not found : nosuch*.txt
+[[C:\>]]
+fc w t1.txt
+File(s) not found : w
+[[C:\>]]
+fc t1.txt w
+Comparing files T1.TXT and w
+FC: cannot open w - Permission denied
+
+[[C:\>]]
+fc t1.txt w\
+Comparing files T1.TXT and w\
+FC: cannot open w\ - No such file or directory
+
+[[C:\>]]
+echo %errorlevel%
+0
+[[C:\>]]
+fc
+FC: Insufficient number of filespecs
+[[C:\>]]
+echo %errorlevel%
+1
+[[C:\>]]
+fc t1.txt
+FC: Insufficient number of filespecs
+[[C:\>]]
+fc t1.txt t2.txt t3.txt
+FC: Too many filenames
+
+[[C:\>]]
+echo %errorlevel%
+1
+[[C:\>]]
+fc /b /n b1.bin b2.bin
+FC: Incompatible switches
+[[C:\>]]
+fc /l /b t1.txt t2.txt
+FC: Incompatible switches
+[[C:\>]]
+fc /3 x1.exe x2.exe
+FC: Incompatible switches
+[[C:\>]]
+echo %errorlevel%
+1
+[[C:\>]]
+fc /x t1.txt t2.txt
+FC: Invalid switch
+
+Comparing files T1.TXT and t2.txt
+****** T1.TXT
+{{four}}
+{{five}}
+{{six}}
+****** t2.txt
+{{four}}
+{{FIVE changed}}
+{{six}}
+******
+
+
+[[C:\>]]
+echo %errorlevel%
+0
+[[C:\>]]
+fc /q t1.txt
+FC: Invalid switch
+
+FC: Insufficient number of filespecs
+[[C:\>]]
+exit
+(QUIT 0)
+[[C:\>]]
+

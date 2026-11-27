@@ -1,0 +1,208 @@
+GLOS shell 1.0. HELP lists its commands.
+
+[[C:\>]]
+comp a.txt b.txt
+Comparing A.TXT and b.txt...
+Files compare OK
+
+[[C:\>]]
+echo %errorlevel%
+0
+[[C:\>]]
+comp a.txt c.txt
+Comparing A.TXT and c.txt...
+Compare error at OFFSET 2
+file1 = 63
+file2 = 58
+Compare error at OFFSET D
+file1 = 74
+file2 = 54
+
+[[C:\>]]
+echo %errorlevel%
+1
+[[C:\>]]
+comp a.txt c.txt /d
+Comparing A.TXT and c.txt...
+Compare error at OFFSET 2
+file1 = 99
+file2 = 88
+Compare error at OFFSET D
+file1 = 116
+file2 = 84
+
+[[C:\>]]
+comp a.txt c.txt /a
+Comparing A.TXT and c.txt...
+Compare error at OFFSET 2
+file1 = c
+file2 = X
+Compare error at OFFSET D
+file1 = t
+file2 = T
+
+[[C:\>]]
+comp a.txt c.txt /l
+Comparing A.TXT and c.txt...
+Compare error at LINE 1
+file1 = 63
+file2 = 58
+Compare error at LINE 2
+file1 = 74
+file2 = 54
+
+[[C:\>]]
+comp a.txt d.txt /c
+Comparing A.TXT and d.txt...
+Files compare OK
+
+[[C:\>]]
+comp a.txt c.txt /c /a
+Comparing A.TXT and c.txt...
+Compare error at OFFSET 2
+file1 = c
+file2 = X
+
+[[C:\>]]
+comp g.txt h.txt
+Comparing G.TXT and h.txt...
+Compare error at OFFSET 0
+file1 = 30
+file2 = 41
+Compare error at OFFSET 1
+file1 = 31
+file2 = 42
+Compare error at OFFSET 2
+file1 = 32
+file2 = 43
+Compare error at OFFSET 3
+file1 = 33
+file2 = 44
+Compare error at OFFSET 4
+file1 = 34
+file2 = 45
+Compare error at OFFSET 5
+file1 = 35
+file2 = 46
+Compare error at OFFSET 6
+file1 = 36
+file2 = 47
+Compare error at OFFSET 7
+file1 = 37
+file2 = 48
+Compare error at OFFSET 8
+file1 = 38
+file2 = 49
+Compare error at OFFSET 9
+file1 = 39
+file2 = 4A
+10 Mismatches - ending compare
+
+[[C:\>]]
+comp a.txt e.txt
+Comparing A.TXT and e.txt...
+Files are different sizes
+
+[[C:\>]]
+echo %errorlevel%
+1
+[[C:\>]]
+comp a.txt e.txt /n=1
+Comparing A.TXT and e.txt...
+Files compare OK
+
+[[C:\>]]
+comp a.txt f.txt /n=1
+Comparing A.TXT and f.txt...
+Files compare OK
+
+[[C:\>]]
+comp a.txt f.txt /n=2 /l
+Comparing A.TXT and f.txt...
+Compare error at LINE 2
+file1 = 74
+file2 = 32
+Compare error at LINE 2
+file1 = 77
+file2 = 0D
+Compare error at LINE 2
+file1 = 6F
+file2 = 0A
+Compare error at LINE 2
+file1 = 0D
+file2 = 6D
+Compare error at LINE 2
+file1 = 0A
+file2 = 6F
+
+[[C:\>]]
+comp w\a.txt v
+Comparing w\A.TXT and v\A.TXT...
+Files compare OK
+
+[[C:\>]]
+comp w\*.txt v\
+Comparing w\A.TXT and v\A.TXT...
+Files compare OK
+
+Comparing w\B.TXT and v\B.TXT...
+Compare error at OFFSET 0
+file1 = 62
+file2 = 42
+Compare error at OFFSET 1
+file1 = 65
+file2 = 45
+Compare error at OFFSET 2
+file1 = 74
+file2 = 54
+Compare error at OFFSET 3
+file1 = 61
+file2 = 41
+
+[[C:\>]]
+comp w\*.txt v\*.bak
+Comparing w\A.TXT and v\A.bak...
+Files compare OK
+
+Comparing w\B.TXT and v\B.bak...
+Can't find/open file: v\B.bak
+
+[[C:\>]]
+comp w\*.txt v\a.txt
+Comparing w\A.TXT and v\a.txt...
+Files compare OK
+
+Comparing w\B.TXT and v\a.txt...
+Files are different sizes
+
+[[C:\>]]
+comp a.txt nosuch.txt
+Comparing A.TXT and nosuch.txt...
+Can't find/open file: nosuch.txt
+
+[[C:\>]]
+echo %errorlevel%
+2
+[[C:\>]]
+comp nosuch*.txt a.txt
+Can't find/open file: nosuch*.txt
+[[C:\>]]
+comp a.txt
+<<COMP name1 name2 [/D] [/A] [/L] [/N=n] [/C]: GLOS's COMP asks for no names
+>>[[C:\>]]
+echo %errorlevel%
+2
+[[C:\>]]
+comp
+<<COMP name1 name2 [/D] [/A] [/L] [/N=n] [/C]: GLOS's COMP asks for no names
+>>[[C:\>]]
+comp a.txt b.txt c.txt
+<<Too many parameters
+>>[[C:\>]]
+comp /x a.txt b.txt
+<<Invalid switch - /x
+>>[[C:\>]]
+exit
+(QUIT 0)
+[[C:\>]]
+

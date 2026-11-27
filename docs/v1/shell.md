@@ -655,3 +655,50 @@ off its screen) and follows it where GLOS doesn't choose otherwise.
 
 Tests: `tests/shell/find.txt` and `tests/shell/sort.txt`, with the test host's new `bytes` (files with no line end,
 Ctrl+Z, NULs, long lines). A pipe into SORT is the shell's own now (`DIR | SORT` in `tests/shell/basic.txt`).
+
+## FC and COMP (2026-11-27)
+
+Built-ins for C1 ([cli.md](cli.md)). FC's output was asked of MS-DOS 7.1's FC.EXE on the reference disk (some 200
+cases in five rounds: changes, insertions and deletions at both ends, the resync depth and search, the buffer,
+long lines, tabs, binary files, lengths, names that aren't there, patterns), and GLOS's FC gives every one of them
+to the byte, exit codes too. MS-DOS 7.1 has no COMP (6.22 had), so GLOS's is modelled on 6.22's documentation.
+
+- **FC [/A] [/C] [/L] [/LBn] [/N] [/T] [/W] [/nnnn] name1 name2** compares text, and **FC /B name1 name2** bytes;
+  so does a first name ending `.EXE`, `.COM`, `.SYS`, `.OBJ`, `.LIB` or `.BIN` (the second's extension doesn't
+  count), unless `/L`. What it writes, as MS-DOS 7.1's, all of it its output (`> FILE` takes its messages too):
+  - `Comparing files NAME1 and NAME2`, the first as found (its folder as typed, its name in capitals), the second as
+    typed; each block of difference as `****** NAME1`, that file's lines, `****** NAME2`, the other's, `******` and
+    an empty line; an empty line at the end; or `FC: no differences encountered` and an empty line.
+  - A block runs from the last line the two had the same (none at a file's start, after one file has ended, or
+    where the buffer had begun anew: MS-DOS reads `/LBn` lines, 100, at a time and keeps no line from the last
+    lot) to the first of the `/nnnn` lines (2) that are the same again. Those are looked for as far into either
+    file as into the other, pairs (d,1), (1,d), (d,2), (2,d) ... at each depth d; lines the same up to either
+    buffer's end count as found. Not found: the files' lines to their ends, or, when they don't end within the
+    buffers, `Resync failed.  Files are too different` and the buffers, and the compare stops there.
+  - A line is read to its LF or for 127 bytes; tabs become spaces to every eighth column and CRs go (`/T` keeps
+    both); a NUL ends the line; past the 127th column is the next line (`/N` counts each). Ctrl+Z is a character.
+  - `/C` sets case aside by code page 437's capitals (é is E, as FIND /I); `/W` compares with spaces and tabs at
+    either end gone and a run of them as one, and passes over lines of nothing else; `/N` puts each line's number in the file before it
+    (six columns, a colon, two spaces); `/A` gives a block of more than three lines as its first, `...` and its last.
+  - Bytes: `XXXXXXXX: XX XX` for each that differs (all of them), then `FC: NAME longer than NAME` if one is.
+  - Patterns: the first name's matches (files, not hidden or system ones) each in turn; a second name with `*` or
+    `?` is made from each (`*.BAK` with A.TXT is A.BAK, `Z*.TXT` Z.TXT, `*` alone the whole name, a `?` with no
+    character to take: `NAME1     NAME2` and `Could not expand second filename so as to match first`).
+  - Messages: `File(s) not found : NAME` (the first: also a folder), `FC: cannot open NAME - No such file or
+    directory` (`- Permission denied` for a folder), `FC: Invalid switch` and an empty line (and FC goes on),
+    `FC: Insufficient number of filespecs`, `FC: Too many filenames`, `FC: Incompatible switches` (bytes, whether
+    by `/B` or an extension, with `/L`, `/N` or `/nnnn`), `FC: out of memory`.
+  - Exit codes as MS-DOS 7.1's: 1 for those last three (and too little memory), else 0, differences included
+    (Windows NT's FC gives 1 for them; DOS batch files that test it can't have relied on that).
+- **COMP name1 name2 [/D] [/A] [/L] [/N=n] [/C]**, as MS-DOS 6.22's was documented, nothing asked of a real one:
+  `Comparing NAME1 and NAME2...`, then for each byte that differs `Compare error at OFFSET n` (hex; `/L`: `at LINE
+  n`) with `file1 = xx` and `file2 = yy` (hex; `/D` decimal, `/A` the characters), ten at most and then `10
+  Mismatches - ending compare`; or `Files compare OK`; or `Files are different sizes` (nothing compared) but with
+  `/N=n`, which compares the first n lines alone; `/C` sets case aside; an empty line after each. Names as FC's
+  (patterns; a folder second: the same name in it); `Can't find/open file: NAME`.
+- **Where GLOS differs, on purpose:**
+  - *COMP asks for nothing.* MS-DOS's asked for names it wasn't given and `Compare more files (Y/N)?` after each
+    run; GLOS's says how to give the names (`COMP name1 name2 ...`) and ends. Its exit codes are GLOS's own: 0 the
+    same, 1 different, 2 a file not found or a command that can't be run.
+  - *A pattern's matches come in name order* (the host's listing), where MS-DOS's FC takes them in the folder's.
+  - *The code page:* `/C` is code page 437's, whatever the PC's (as FIND /I).

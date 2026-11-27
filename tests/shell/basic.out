@@ -226,6 +226,8 @@ DELTREE [/Y] path ...  a folder and all in it deleted (asked first)
 MORE [file]         a page at a time (also: command | MORE)
 FIND [/V] [/C] [/N] [/I] "text" [files]  the lines with the text (also: command | FIND "text")
 SORT [/R] [/+n] [files]  the lines in order (also: command | SORT)
+FC [/A /C /L /LBn /N /T /W /nnnn] file1 file2, FC /B file1 file2  where two files differ
+COMP file1 file2 [/D] [/A] [/L] [/N=n] [/C]  two files' bytes compared
 ATTRIB [+R|-R] [+A|-A] [+S|-S] [+H|-H] [path]  attributes changed, or listed
 MD path, RD path    a folder made, removed
 DF [drive: ...]     the drives: their size, what is used and free

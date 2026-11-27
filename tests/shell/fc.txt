@@ -1,0 +1,177 @@
+# FC (sdk/shell, 2026-11-27): as MS-DOS 7.1's FC.EXE, asked of the reference disk (some 200 cases, each of them
+# the same here to the byte, these among them). Its messages are its output; its exit code 0 but for 1 when it
+# can't be run.
+mkdir C:\W
+mkdir C:\V
+line C:\T1.TXT one
+line C:\T1.TXT two
+line C:\T1.TXT three
+line C:\T1.TXT four
+line C:\T1.TXT five
+line C:\T1.TXT six
+line C:\T1.TXT seven
+line C:\T1.TXT eight
+line C:\T1.TXT nine
+line C:\T1.TXT ten
+bytes C:\T1C.TXT one\r\ntwo\r\nthree\r\nfour\r\nfive\r\nsix\r\nseven\r\neight\r\nnine\r\nten\r\n
+bytes C:\T2.TXT one\r\ntwo\r\nthree\r\nfour\r\nFIVE changed\r\nsix\r\nseven\r\neight\r\nnine\r\nten\r\n
+bytes C:\T3.TXT ONE changed\r\ntwo\r\nthree\r\nfour\r\nfive\r\nsix\r\nseven\r\neight\r\nnine\r\nten\r\n
+bytes C:\T4.TXT one\r\ntwo\r\nthree\r\nfour\r\nfive\r\nsix\r\nseven\r\neight\r\nnine\r\nTEN changed\r\n
+bytes C:\T5.TXT one\r\ntwo\r\nthree\r\ninserted\r\nfour\r\nfive\r\nsix\r\nseven\r\neight\r\nnine\r\nten\r\n
+bytes C:\T6.TXT one\r\ntwo\r\nthree\r\nfive\r\nsix\r\nseven\r\neight\r\nnine\r\nten\r\n
+bytes C:\T7.TXT new a\r\nnew b\r\none\r\ntwo\r\nthree\r\nfour\r\nfive\r\nsix\r\nseven\r\neight\r\nnine\r\nten\r\n
+bytes C:\T8.TXT one\r\ntwo\r\nthree\r\nfour\r\nfive\r\nsix\r\nseven\r\neight\r\nnine\r\nten\r\neleven\r\ntwelve\r\n
+bytes C:\T9.TXT one\r\ntwo\r\nthree\r\nfour\r\nfive\r\nsix\r\nseven\r\neight\r\n
+bytes C:\T10.TXT one\r\nTWO x\r\nthree\r\nfour\r\nfive\r\nsix\r\nseven\r\nEIGHT x\r\nnine\r\nten\r\n
+bytes C:\T11.TXT one\r\ntwo\r\nthree\r\nFOUR x\r\nFIVE x\r\nsix\r\nseven\r\neight\r\nnine\r\nten\r\n
+bytes C:\T12.TXT one\r\ntwo\r\nthree\r\nFOUR x\r\nfive\r\nSIX x\r\nseven\r\neight\r\nnine\r\nten\r\n
+bytes C:\T13.TXT one\r\ntwo\r\nthree\r\nFOUR x\r\nfive\r\nsix\r\nSEVEN x\r\neight\r\nnine\r\nten\r\n
+bytes C:\T14.TXT ONE\r\nTWO\r\nTHREE\r\nFOUR\r\nFIVE\r\nSIX\r\nSEVEN\r\nEIGHT\r\nNINE\r\nTEN\r\n
+bytes C:\T18.TXT one\r\ntwo\r\n3x\r\n4x\r\n5x\r\n6x\r\nseven\r\neight\r\nnine\r\nten\r\n
+bytes C:\SA.TXT ctx\r\nX\r\np\r\nq\r\nr\r\ns\r\nend\r\n
+bytes C:\SB.TXT ctx\r\nY\r\nr\r\ns\r\np\r\nq\r\nend\r\n
+bytes C:\VA.TXT ctx\r\nP\r\nx2\r\nQ\r\n
+bytes C:\VB.TXT ctx\r\ny1\r\nQ\r\nP\r\n
+bytes C:\R1.TXT line 1\r\nline 2\r\nline 3\r\nline 4\r\nline 5\r\nline 6\r\nline 7\r\nline 8\r\nline 9\r\nline 10\r\n
+bytes C:\R1.TXT line 11\r\nline 12\r\nline 13\r\nline 14\r\nline 15\r\nline 16\r\nline 17\r\nline 18\r\nline 19\r\nline 20\r\n
+bytes C:\R2.TXT line 1\r\nline 2\r\nline 3\r\nline 4\r\nother 5\r\nother 6\r\nother 7\r\nother 8\r\nother 9\r\n
+bytes C:\R2.TXT other 10\r\nother 11\r\nother 12\r\nother 13\r\nother 14\r\nline 15\r\nline 16\r\nline 17\r\nline 18\r\n
+bytes C:\R2.TXT line 19\r\nline 20\r\n
+bytes C:\R4.TXT line 1\r\nline 2\r\nline 3\r\nline 4\r\nline 5\r\nCHANGED 6\r\nline 7\r\nline 8\r\nline 9\r\nline 10\r\n
+bytes C:\R4.TXT line 11\r\nline 12\r\nline 13\r\nline 14\r\nline 15\r\nline 16\r\nline 17\r\nline 18\r\nline 19\r\nline 20\r\n
+bytes C:\W1.TXT a b c\r\nx  y\r\n\tindent\r\ntrail \r\nsame\r\n\r\nend\r\n
+bytes C:\W2.TXT a  b   c\r\nx\ty\r\n    indent\r\ntrail\r\nsame\r\n\r\nend\r\n
+bytes C:\WA1.TXT ab\r\nx\r\n
+bytes C:\WA2.TXT a b\r\nx\r\n
+bytes C:\WI1.TXT a\r\n\r\nX\r\n\r\nb\r\nc\r\n
+bytes C:\WI2.TXT a\r\nY\r\n\r\n\r\nb\r\nc\r\n
+bytes C:\TAB1.TXT col\tone\r\nx\r\n
+bytes C:\TAB2.TXT col\ttwo\r\nx\r\n
+bytes C:\CA1.TXT caf\x82\r\n
+bytes C:\CA2.TXT CAFE\r\n
+bytes C:\CA3.TXT CAF\x90\r\n
+bytes C:\E0.TXT
+bytes C:\NOEOL1.TXT a\r\nb
+bytes C:\NOEOL2.TXT a\r\nb\r\n
+bytes C:\LF1.TXT a\nb\nc\n
+bytes C:\CRLF1.TXT a\r\nb\r\nc\r\n
+bytes C:\Z1.TXT a\r\nb\r\n\x1azzz\r\n
+bytes C:\NUL1.TXT a\x00b\r\nsame\r\n
+bytes C:\NUL2.TXT a\x00c\r\nsame\r\n
+bytes C:\LONG1.TXT \*200x1\r\nsame\r\n
+bytes C:\LONG2.TXT \*200x2\r\nsame\r\n
+bytes C:\TT1.TXT \t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tx1\r\nsame\r\n
+bytes C:\TT2.TXT \t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tx2\r\nsame\r\n
+bytes C:\B1.BIN \x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17
+bytes C:\B1.BIN \x18\x19\x1a\x1b\x1c\x1d\x1e\x1f !"#$%&'()*+,-./0123456789:;<=>?
+bytes C:\B2.BIN \x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0fAB\x12\x13\x14\x15\x16\x17
+bytes C:\B2.BIN \x18\x19\x1a\x1b\x1c\x1d\x1e\x1f !"#$%&'()*+,-.\xff0123456789:;<=>?
+bytes C:\B3.BIN \x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17
+bytes C:\B3.BIN \x18\x19\x1a\x1b\x1c\x1d\x1e\x1f !"#$%&'
+bytes C:\X1.EXE one\r\ntwo\r\nthree\r\n
+bytes C:\X2.EXE one\r\nTWO\r\nthree\r\n
+bytes C:\X1.DAT one\r\ntwo\r\nthree\r\n
+bytes C:\X2.DAT one\r\nTWO\r\nthree\r\n
+line C:\W\A.TXT alpha
+line C:\W\B.TXT beta
+line C:\W\C.TXT gamma
+line C:\V\A.TXT alpha
+line C:\V\B.TXT BETA
+line C:\V\A.BAK alpha bak
+# the same; one line changed: in the middle, the first, the last; one put in, one taken out, two at the start;
+# lines added, and taken, at the end
+> fc t1.txt t1c.txt
+> echo %errorlevel%
+> fc t1.txt t2.txt
+> echo %errorlevel%
+> fc t1.txt t3.txt
+> fc t1.txt t4.txt
+> fc t1.txt t5.txt
+> fc t1.txt t6.txt
+> fc t1.txt t7.txt
+> fc t1.txt t8.txt
+> fc t1.txt t9.txt
+> fc t1.txt t2.txt > f.txt
+cat C:\F.TXT
+# two blocks; two lines together; one line the same between (one block, /2) or two (two blocks); /nnnn
+> fc t1.txt t10.txt
+> fc t1.txt t11.txt
+> fc t1.txt t12.txt
+> fc t1.txt t13.txt
+> fc /1 t1.txt t12.txt
+> fc /3 t1.txt t13.txt
+> fc /0 t1.txt t2.txt
+# the search for lines the same again: as far into either file as into the other, (d,1) (1,d) (d,2) (2,d) ...
+> fc sa.txt sb.txt
+> fc /1 va.txt vb.txt
+# /A, /N; switches after the names
+> fc /a t1.txt t11.txt
+> fc /a /n t1.txt t18.txt
+> fc t1.txt t5.txt /n
+# /C (code page 437's capitals, as FIND /I: e acute is E), /W (blank lines passed over), tabs, /T
+> fc t1.txt t14.txt
+> fc /c t1.txt t14.txt
+> fc /c ca1.txt ca2.txt
+> fc /c ca3.txt ca2.txt
+> fc w1.txt w2.txt
+> fc /w w1.txt w2.txt
+> fc /w wa1.txt wa2.txt
+> fc /n /w wi1.txt wi2.txt
+> fc tab1.txt tab2.txt
+> fc /t tab1.txt tab2.txt > f.txt
+cat C:\F.TXT
+> fc /t lf1.txt crlf1.txt > f.txt
+cat C:\F.TXT
+# /LBn lines in the buffer: not enough to find the same again; where the buffer begins anew there is no line before
+> fc r1.txt r2.txt
+> fc /lb5 r1.txt r2.txt
+> fc /lb5 r1.txt r4.txt
+> fc /lb0 t1.txt t2.txt
+# ends: nothing, no line end, LF alone, Ctrl+Z (a character in text), NUL (ends a line), 127 characters, tabs
+> fc e0.txt e0.txt
+> fc e0.txt t9.txt
+> fc t9.txt e0.txt
+> fc noeol1.txt noeol2.txt
+> fc lf1.txt crlf1.txt
+> fc z1.txt crlf1.txt
+> fc nul1.txt nul2.txt
+> fc long1.txt long2.txt
+> fc tt1.txt tt2.txt
+# bytes: /B, or the first name's extension (.EXE .COM .SYS .OBJ .LIB .BIN) without /L
+> fc /b b1.bin b2.bin
+> fc /b b1.bin b3.bin
+> fc b3.bin b1.bin
+> fc b1.bin b1.bin
+> fc x1.exe x2.exe
+> fc /l x1.exe x2.exe
+> fc x1.dat x2.exe
+> fc /b e0.txt e0.txt
+# patterns: each of the first's matches, the second made from it
+> fc w\*.txt v\*.txt
+> fc w\*.txt v\*.bak
+> fc w\a.txt v\*
+> fc w\*.txt v\a.txt
+> fc w\a.txt v\z*.txt
+> fc t1.txt ????.txt
+# what isn't there, or is a folder
+> fc t1.txt nosuch.txt
+> fc nosuch.txt t1.txt
+> fc nosuch*.txt t1.txt
+> fc w t1.txt
+> fc t1.txt w
+> fc t1.txt w\
+> echo %errorlevel%
+# what can't be run (1), and an unknown switch (said, and the compare goes on)
+> fc
+> echo %errorlevel%
+> fc t1.txt
+> fc t1.txt t2.txt t3.txt
+> echo %errorlevel%
+> fc /b /n b1.bin b2.bin
+> fc /l /b t1.txt t2.txt
+> fc /3 x1.exe x2.exe
+> echo %errorlevel%
+> fc /x t1.txt t2.txt
+> echo %errorlevel%
+> fc /q t1.txt
+> exit
