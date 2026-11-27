@@ -8046,8 +8046,8 @@ def nboot_install_case(profile, card, bios=False):
     text = agent.log()
     checks["clean-1"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
     checks["from-bios"] = ("step=c dl=80 disk=bios" in text) == bios
-    # The second disk alone.
-    scratch = os.path.join(ROOT, "out", tag + "-" + card, "vm", "scratch.img")
+    # The second disk alone (in the run's own folder: LOOPA_SUFFIX's name, when a rerun has one).
+    scratch = os.path.join(ROOT, "out", agent.proc.run_name, "vm", "scratch.img")
     disk2 = os.path.join(ROOT, "out", tag + "-img", "installed.img")
     checks["disk"] = os.path.exists(scratch)
     if checks["disk"] and checks.get("again"):
