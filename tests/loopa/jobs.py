@@ -2137,18 +2137,18 @@ def idle_case(profile, card):
         def typed(text):
             agent.ssh("glos type " + text)
 
-        out = until(lambda o: "GLOS shell 1.0" in o and rows(o)[-1:] == ["A:\\>"], 120)
+        out = until(lambda o: "GLOS shell 1.0" in o and rows(o)[-1:] == [home_prompt()], 120)
         checks["greeting"] = "GLOS is running on this PC" in out and out.count("GLOS shell 1.0") == 1
-        checks["prompt"] = rows(out)[-1:] == ["A:\\>"]
+        checks["prompt"] = rows(out)[-1:] == [home_prompt()]
         m = re.search(r"cursor=(\d+),(\d+)", out)
-        checks["cursor"] = bool(m) and int(m.group(1)) == 4 and int(m.group(2)) == len(rows(out)) - 1
+        checks["cursor"] = bool(m) and int(m.group(1)) == len(home_prompt()) and int(m.group(2)) == len(rows(out)) - 1
         out = until(lambda o: "glos.local, 10.0.2.15" in o)     # (in the start-up lines, or as a notice above the prompt)
-        checks["address"] = "glos.local, 10.0.2.15" in out and rows(out)[-1:] == ["A:\\>"]
+        checks["address"] = "glos.local, 10.0.2.15" in out and rows(out)[-1:] == [home_prompt()]
         if not all(checks.values()):
             info += " start: " + " | ".join(rows(out)[-6:])
         typed("ver\\n")
-        out = until(lambda o: o.count("GLOS shell 1.0") == 2 and rows(o)[-1:] == ["A:\\>"])
-        checks["ver"] = out.count("GLOS shell 1.0 (GLOS API %s)" % GLOS_API) >= 1 and "A:\\>ver" in out
+        out = until(lambda o: o.count("GLOS shell 1.0") == 2 and rows(o)[-1:] == [home_prompt()])
+        checks["ver"] = out.count("GLOS shell 1.0 (GLOS API %s)" % GLOS_API) >= 1 and home_prompt() + "ver" in out
         typed("c:\\n")
         typed("cd \\\\test\\n")
         out = until(lambda o: rows(o)[-1:] == ["C:\\TEST>"])
@@ -2191,9 +2191,11 @@ def idle_case(profile, card):
             info += " afar: " + " | ".join(rows(out)[-6:])
         # EXIT: a new session, its start-up lines again
         typed("exit\\n")
-        out = until(lambda o: rows(o)[-1:] == ["A:\\>"])
+        again = "C:\\>" if NATIVE else home_prompt()     # (natively a new session starts in the root: the first was
+                                                        # left in C:\\TEST by RUN.BAT's CD)
+        out = until(lambda o: rows(o)[-1:] == [again])
         r = rows(out)
-        checks["exit-again"] = r[-1:] == ["A:\\>"] and "C:\\TEST>exit" in r \
+        checks["exit-again"] = r[-1:] == [again] and "C:\\TEST>exit" in r \
             and any(l.startswith("GLOS is running on this PC") for l in r[r.index("C:\\TEST>exit"):]) \
             and any(l.startswith("GLOS shell 1.0") for l in r[r.index("C:\\TEST>exit"):])
         if not checks["exit-again"]:
@@ -2685,13 +2687,15 @@ def batch_case(profile, card):
     try:
         import time
         m = None
-        for _ in range(60):                     # (the log's lines come a little after what they tell of: on the
+        for _ in range(0 if NATIVE else 60):    # (the log's lines come a little after what they tell of: on the
             m = re.search(r"GLOS-VM agent comspec=(\S+)", agent.log())     # 486 under a gate's load this one was
             if m:                               # not there yet at the first look, "COMMAND" was GLOS's own, and
                 break                           # every comparison had nothing of FreeDOS's: 2026-11-19)
             time.sleep(0.5)
-        checks["comspec"] = m is not None
+        checks["comspec"] = NATIVE or m is not None
         freedos = m.group(1) if m else "COMMAND"        # (FreeDOS's by its place: COMSPEC is GLOS's own now, S4c)
+        if NATIVE:                              # (no agent's line names it natively: the native disk has FreeDOS's
+            freedos = "C:\\FREEDOS\\BIN\\COMMAND.COM"      # programs in C:\FREEDOS\BIN, its COMMAND.COM among them)
         for n, args in (("T1", "one two three"), ("T2", "yes"), ("T2", "no"), ("T2", ""), ("T3", ""), ("T4", ""),
                         ("T5", ""), ("T6", "")):
             a = agent.ssh("%s /C C:\\TEST\\%s.BAT %s" % (freedos, n, args))
@@ -2805,13 +2809,16 @@ def ownshell_case(profile, card):
         while time.time() - t0 < 120 and "GLOS-SHELL autoexec done" not in agent.log():
             time.sleep(1)
         text = agent.log()
-        checks["mode"] = "GLOS-VM shell own autoexec=A:\\AUTOEXEC.BAT" in text and "GLOS-VM autoexec code=" not in text
-        checks["autoexec"] = "GLOS-SHELL autoexec=A:\\AUTOEXEC.BAT" in text and "GLOS-SHELL autoexec done code=0" in text \
+        boot = "C" if NATIVE else "A"           # (natively the disk GLOS started from: there is no boot floppy)
+        checks["mode"] = "GLOS-VM shell own autoexec=%s:\\AUTOEXEC.BAT" % boot in text \
+            and "GLOS-VM autoexec code=" not in text
+        checks["autoexec"] = "GLOS-SHELL autoexec=%s:\\AUTOEXEC.BAT" % boot in text \
+            and "GLOS-SHELL autoexec done code=0" in text \
             and "HX-SHELL autoexec comspec=C:\\TEST\\COMMAND.COM" in text and "UTEXIT" not in text
         rc, out, e = agent.ssh("C:\\TEST\\CONIN.EXE env GLOSVAR")
         rc2, out2, e2 = agent.ssh("C:\\TEST\\CONIN.EXE env PATH")
         checks["env-program"] = out.strip() == "ENV GLOSVAR=from-autoexec" and out2.startswith("ENV PATH=") \
-            and "A:\\FREEDOS\\BIN" in out2.upper() and "C:\\HX" in out2.upper()
+            and "%s:\\FREEDOS\\BIN" % boot in out2.upper() and "C:\\HX" in out2.upper()
         rc3, out3, e3 = agent.ssh("SET")
         checks["env-session"] = "GLOSVAR=from-autoexec" in out3 and "COMSPEC=C:\\TEST\\COMMAND.COM" in out3.upper()
         rc4, out4, e4 = agent.ssh("SERSAY HX-SHELL by-path")     # (found along AUTOEXEC.BAT's PATH)
@@ -2828,7 +2835,12 @@ def ownshell_case(profile, card):
     text = agent.wait()
     checks["clean"] = not re.search(r"GLOS-PANIC|GLOS-WARN|GLOS-CRASH", text)
     # [shell] command = dos: the DOS's COMMAND.COM under GLOS, which runs AUTOEXEC.BAT (M3's way), GLOS's own
-    # COMMAND.COM beside GLOS.EXE or not
+    # COMMAND.COM beside GLOS.EXE or not (natively there is no DOS under GLOS: not run)
+    if NATIVE:
+        bad = [k for k, v in checks.items() if not v]
+        return "  %-22s %s%s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL",
+                                 " (command = dos: hosted only)" if not bad else " failed: " + " ".join(bad),
+                                 info if bad else ""), not bad
     cfg = batfile("ssh-%s/GLOS.CFG" % tag, ["; jobs.py ssh, ownshell: the DOS's COMMAND.COM all the same", "[shell]",
                                             "command = dos"])
     st, serial = run("ssh-" + tag + "-dos", ["--machine", profile, "--boot-cfg", "glosshell"] + GLOS_FILES + [

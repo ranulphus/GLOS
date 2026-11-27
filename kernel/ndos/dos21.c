@@ -1110,6 +1110,33 @@ static int ioctl(struct dos_m *m, struct dos_regs86 *r, unsigned al)
     return DOS21_UNANSWERED;
 }
 
+/* A device's name with a folder before it (C:\TEST\NUL: COMMAND.COM's IF EXIST DIR\NUL): the device only where
+   the folder is, 03h where it isn't, as MS-DOS 7.1 answers (DOSDIFF's dev lines; N7's survey, 2026-11-27: FreeDOS's
+   COMMAND.COM on GLOS's DOS found no C:\TEST\NUL). The folder's there if a search of it finds anything or nothing
+   (12h): only 03h says it isn't. 0, or the error. */
+static int dev_folder(struct dos_m *m, const char *p)
+{
+    char dir[128], path[128];
+    unsigned char t[DOS_DTA_FIND];
+    struct fsv_vol *v;
+    struct iso_vol *cv;
+    const char *last = p;
+    int drive, k, e;
+
+    for (k = 0; p[k]; k++)
+        if (p[k] == '\\' || p[k] == '/' || (p[k] == ':' && k == 1))
+            last = p + k + 1;
+    if (last == p || (last == p + 2 && p[1] == ':') || (unsigned long)(last - p) >= sizeof dir)
+        return 0;                               /* (no folder: the current one's) */
+    memcpy(dir, p, (unsigned long)(last - p));
+    dir[last - p] = 0;
+    if ((e = resolve_any(m, dir, &v, &cv, &drive, path)) != 0)
+        return e == 0x02 ? 0x03 : e;
+    e = cv ? dos_findfirst_cd(cv, (unsigned)drive, path, "*.*", 0x16, m->cp, t)
+           : dos_findfirst(v, (unsigned)drive, path, "*.*", 0x16, m->cp, t);
+    return e == 0x03 ? 0x03 : 0;
+}
+
 static int find(struct dos_m *m, struct dos_regs86 *r, unsigned ah)
 {
     unsigned long dl = lin(dta_seg(m), dta_off(m));
@@ -1146,6 +1173,19 @@ static int find(struct dos_m *m, struct dos_regs86 *r, unsigned ah)
         e = resolve_any(m, dir, &v, &cv, &drive, path);
         if (e)
             return err(m, r, e == 0x02 ? 0x03 : (unsigned)e);
+        if (dev_name(last) && !strpbrk(last, "*?")) {   /* (a device's name: found as itself where the folder is,
+                                                   named as the device, attribute 40h, and nothing after it: 4Fh
+                                                   says 12h; as MS-DOS 7.1 finds C:\TEST\NUL) */
+            if ((e = dev_folder(m, spec)) != 0)
+                return err(m, r, (unsigned)e);
+            memset(dta, 0, DOS_DTA_FIND);
+            dta[0] = (unsigned char)drive;
+            dta[0x0D] = dta[0x0E] = 0xFF;
+            dta[0x15] = 0x40;
+            for (k = 0; k < 8 && last[k] && last[k] != '.'; k++)
+                dta[0x1E + k] = (unsigned char)(last[k] >= 'a' && last[k] <= 'z' ? last[k] - 32 : last[k]);
+            return ok(r);
+        }
         if (cv)
             return done(m, r, dos_findfirst_cd(cv, (unsigned)drive, path, *last ? last : "*.*", r->cx & 0xFF, m->cp, dta));
     }
@@ -1230,7 +1270,7 @@ static int ext_open(struct dos_m *m, struct dos_regs86 *r)
     if (str_in(m, r->ds, r->si, p, sizeof p) != 0)
         return err(m, r, 0x03);
     if ((d = dev_name(p)) != 0) {
-        if ((e = dos_open(&m->files, cur_psp(m), 0, 0, "", d, mode, &h)) != 0)
+        if ((e = dev_folder(m, p)) != 0 || (e = dos_open(&m->files, cur_psp(m), 0, 0, "", d, mode, &h)) != 0)
             return err(m, r, (unsigned)e);
         r->ax = h, r->cx = 1;
         return ok(r);
@@ -1929,7 +1969,7 @@ static int lfn(struct dos_m *m, struct dos_regs86 *r, unsigned al)
         if (str_in(m, r->ds, r->si, m->lfn_in, sizeof m->lfn_in) != 0)
             return err(m, r, 0x03);
         if ((d = dev_name(m->lfn_in)) != 0) {
-            if ((e = dos_open(&m->files, cur_psp(m), 0, 0, "", d, mode, &h)) != 0)
+            if ((e = dev_folder(m, m->lfn_in)) != 0 || (e = dos_open(&m->files, cur_psp(m), 0, 0, "", d, mode, &h)) != 0)
                 return err(m, r, (unsigned)e);
             r->ax = h, r->cx = 1;
             return ok(r);
@@ -2805,8 +2845,10 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
     case 0x3D:
         if (str_in(m, r->ds, r->dx, path2, sizeof path2) != 0)
             return err(m, r, 0x03);
-        if ((d = dev_name(path2)) != 0)
-            e = dos_open(&m->files, cur_psp(m), 0, 0, "", d, ah == 0x3D ? al : 2, &h);
+        if ((d = dev_name(path2)) != 0) {
+            if ((e = dev_folder(m, path2)) == 0)        /* (C:\NODIR\NUL: 03h) */
+                e = dos_open(&m->files, cur_psp(m), 0, 0, "", d, ah == 0x3D ? al : 2, &h);
+        }
         else if (ah == 0x3D && dos_resolve(&m->cds, m->cp, path2, &drive, path, 128) == 0
                  && (m->cdrives >> drive & 1)) {        /* (a CD's file: opened to be read) */
             unsigned ce;

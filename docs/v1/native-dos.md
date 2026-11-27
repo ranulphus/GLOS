@@ -514,7 +514,11 @@ second V86 machine, the one N6 needs anyway. What it is:
     and writes nothing there; 56h renames an open file and 41h deletes one (its handles follow it, or keep its
     clusters until the last closes: `fsv.c`, safer than DOS's stale entries); 6Ch's bad action is 01h; 3Ah of
     the root is 05h; 60h of a bare device is `C:/NUL`, above the root is 03h (and so for every call: `path.c`);
-    4Eh with nothing matching is 12h; 47h leaves AX 0100h; NUL's device word is 80C4h; 29h as built. Open: the
+    4Eh with nothing matching is 12h; 47h leaves AX 0100h; NUL's device word is 80C4h; 29h as built; a device's
+    name after a folder (C:\TEST\NUL, COMMAND.COM's IF EXIST DIR\NUL; NUL.TXT and CON alike) is found by 4Eh as
+    itself, attribute 40h, and opened by 3Dh where the folder is, 03h for both where it isn't, and 02h from 43h
+    (2026-11-27, found by N7's survey: FreeDOS's COMMAND.COM on GLOS's DOS saw no folder; `dos21.c` dev_folder).
+    Open: the
     census's programs themselves (they need NS3's console and NS4's DPMI first); console input (NS3); 36h on a
     large FAT32 volume (DOSDIFF's disk is 128 MB).
   - **NS3, the console and the clock:** INT 16h and 10h's teletype, cooked input, Ctrl-C, INT 23h and 24h, the
@@ -1291,10 +1295,14 @@ Every suite today boots FreeDOS and starts `GLOS.EXE`; before hosted mode goes, 
     GLOS.EXE; natively GLOS's own "GLOS-SB stop" says it: hx_sbchk); floppy's dd-file-bytes read GLOS.EXE, which a
     native disk hasn't; m1's loop let HostedOnly out as a traceback; native-a and -b's GUI runs ended at their time
     limit an hour in and gui_case waited out every script left (four hours): it now stops at its run's end.
-  - open: ssh (8: idle's prompt and exit-again, shell's dir and a redirected CONIN line, batch's COMSPEC and a
-    timeout, ownshell's mode, AUTOEXEC and COMMAND.COM-as-DOS: natively COMSPEC is GLOS's own COMMAND.COM), the
-    ESS ES1688 case recording nothing, the native (apps') suite's runs natively over an hour (hosted 29-42 min) and
-    its Files shots differing (a native C: has other folders: goldens of its own, or the same layout).
+  - ssh's 8, settled 2026-11-27 (all four cases PASS natively on the bf6): two of GLOS's own DOS's, against
+    MS-DOS 7.1 by DOSDIFF 4: the console functions through handles 0 and 1 (`conin line < in.txt` hung; NS3's
+    "Redirected") and a device's name after a folder (IF EXIST C:\TEST\NUL; NS2's list); the rest the harness's
+    (the prompt and new session's folder natively C:\TEST and C:\, FreeDOS's COMMAND.COM at C:\FREEDOS\BIN, the boot
+    drive C:, [shell] command = dos hosted only).
+  - open: the ESS ES1688 case recording nothing, the native (apps') suite's runs natively over an hour (hosted
+    29-42 min) and its Files shots differing (a native C: has other folders: goldens of its own, or the same
+    layout), the 7 suites with no native case.
 
 ## The order, and how each step shows it works
 

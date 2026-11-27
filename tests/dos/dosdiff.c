@@ -705,6 +705,34 @@ static unsigned char ch(unsigned ax)
     return r.h.al;
 }
 
+/* A device's name after a folder's: COMMAND.COM's IF EXIST DIR\NUL (the folder is there), through 4Eh, 43h and
+   3Dh (N7's survey, 2026-11-27: FreeDOS's COMMAND.COM on GLOS's own DOS found no C:\TEST\NUL). */
+static void devpaths(void)
+{
+    static const char *const p[] = { "C:\\DDIFF\\NUL", "C:\\NODIR\\NUL", "C:\\DDIFF\\NUL.TXT", "\\DDIFF\\CON", "NUL" };
+    static unsigned char d[64];
+    unsigned i, cf;
+
+    ds_es();
+    r.x.ax = 0x1A00, r.x.dx = (unsigned)d;
+    dos();
+    for (i = 0; i < 5; i++) {
+        memset(d, 0, sizeof d);
+        call_dx(0x4E00, p[i], 0);
+        cf = r.x.cflag != 0;
+        printf("dev 4Eh %-16s cf=%u ax=%04X name=%s attr=%02X\n", p[i], cf, cf ? r.x.ax : 0,
+               cf ? "" : (char *)d + 0x1E, cf ? 0 : d[0x15]);     /* (its size: what DOS leaves, 201 for NUL) */
+        call_dx(0x4300, p[i], 0);
+        cf = r.x.cflag != 0;
+        printf("dev 43h %-16s cf=%u ax=%04X cx=%04X\n", p[i], cf, cf ? r.x.ax : 0, cf ? 0 : r.x.cx);
+        call_dx(0x3D00, p[i], 0);
+        cf = r.x.cflag != 0;
+        printf("dev 3Dh %-16s cf=%u ax=%04X\n", p[i], cf, cf ? r.x.ax : 0);
+        if (!cf)
+            close_(r.x.ax);
+    }
+}
+
 /* A file's first bytes as one line, CR, LF and BEL written \r, \n, \a (the echo of the reads below, kept in a file
    of its own: where a program's console output goes over a network shell isn't DOS's to say). */
 static void show(const char *label, const char *name)
@@ -1074,6 +1102,7 @@ int main(int argc, char **argv)
     printf("4Dh at the start ax=%04X\n", r.x.ax);
     h2 = spawnl(P_WAIT, "C:\\NONE.EXE", "C:\\NONE.EXE", NULL);
     printf("spawn none=%d\n", (int)h2);
+    devpaths();
     redirection();
     call_dx(0x3B00, "\\", 0);
     call_dx(0x3A00, "C:\\DDIFF", 0);
