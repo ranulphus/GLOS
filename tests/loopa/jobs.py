@@ -14499,6 +14499,8 @@ def main():
         if os.environ.get("SHOT_ONLY"):         # e.g. SHOT_ONLY=SHOTTEST-bf6-vbe
             cases = [c for c in cases if "%s-%s-%s" % (c[3], c[0], c[1]) in os.environ["SHOT_ONLY"].split(",")]
         return 0 if all(r[1] for r in matrix(shot_case, cases, a.jobs)) else 1
+    if a.suite == "sess" and os.environ.get("SESS_ONLY") == "direct":   # (the direct-mode cases alone)
+        return 0 if all(r[1] for r in matrix(sess_direct, combos, a.jobs)) else 1
     if a.suite == "sess":
         res = matrix(sess, [(p, b, h) for p, b in combos for h in ("base", "run", "shell")], a.jobs)
         res += matrix(sess_prof, combos, a.jobs)

@@ -792,6 +792,16 @@ static int aux_byte(void)
     return -1;
 }
 
+/* Is there a mouse for GLOS's AUX side to find? The BIOS looks for a PS/2 mouse at the PC's start and says so in its
+   equipment word (0040:0010, bit 2: a pointing device). Without that (or a driver that turned the port on, below)
+   GLOS gives the controller no AUX command at all, the desktop's and INT 33h's turning it on included: on bench C's
+   AT-class 486 controller a byte sent to the AUX device (D4h then F3h, the knock's first; or F2h, F4h) when there is
+   none broke its link to the keyboard until the next power-on (2026-11-27: the keyboard worked in the BIOS and at
+   DOS's prompt, and gave nothing once GLOS had started, not even to a program's F2h; ROSS's bisect with the owner:
+   A7h and A8h alone were harmless, any D4h after them killed it; A9h answered 00h, so the controller's own "test the
+   AUX interface" can't tell). */
+static int bios_mouse(void) { return (vm_rd16(0x410) & 0x0004) != 0; }
+
 void vkbc_init(void)
 {
     u32 n = 0;
@@ -805,7 +815,9 @@ void vkbc_init(void)
        know whether it is a wheel mouse by now (its ID is 3 or 4 then). */
     aux_on = (cmd & 0x22) == 0x02;
     aux_port = aux_on;
-    if (!aux_on) {                              /* is there an AUX port? Its clock's bit follows A7h and A8h then */
+    if (!aux_on && !bios_mouse())
+        kprintf("GLOS-KBC aux none why=no-bios-mouse\n");
+    if (!aux_on && bios_mouse()) {              /* is there an AUX port? Its clock's bit follows A7h and A8h then */
         u8 off, on;
         chip_cmd(0xA7);
         chip_cmd(0x20);
