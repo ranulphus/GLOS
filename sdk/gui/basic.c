@@ -1117,7 +1117,8 @@ static void tabs_draw(struct gui_widget *w, struct gfx_surface *s)
         gui_draw_field(s, &l, 1);
         if (t->sb.r.w)
             gui_sb_draw(s, &t->sb, 1);
-        gfx_fill(s, l.x + l.w, w->r.y, GUI_GAP, w->r.h, GUI_FACE);
+        gfx_fill(s, w->r.x + room, w->r.y, GUI_GAP, w->r.h, GUI_FACE);     /* (the gap past the list and its scroll
+                                                   bar: from the field's edge, it painted over the bar's left half) */
         gfx_frame(s, px, w->r.y, w->r.w - (px - w->r.x), w->r.h, GUI_LINE);
         for (c = w->first; c && i < TABS_MAX; c = c->next, i++) {
             int on = i == t->at;
