@@ -1041,6 +1041,7 @@ static int file_io(struct dos_m *m, struct dos_regs86 *r, unsigned ah)
 }
 
 static int serial(struct dos_m *m, struct dos_regs86 *r);
+static int set_serial(struct dos_m *m, struct dos_regs86 *r);
 
 static int ioctl(struct dos_m *m, struct dos_regs86 *r, unsigned al)
 {
@@ -1079,11 +1080,14 @@ static int ioctl(struct dos_m *m, struct dos_regs86 *r, unsigned al)
     case 0x10:
     case 0x11:                                  /* (generic requests: none supported) */
         return err(m, r, 0x01);
-    case 0x0D:                                  /* a drive's generic requests: 66h alone, the volume's serial
-                                                   number, label and file system at DS:DX (BL the drive), which is
-                                                   6900h's answer; category 08h, or FAT32's 48h */
+    case 0x0D:                                  /* a drive's generic requests: 66h, the volume's serial number,
+                                                   label and file system at DS:DX (BL the drive), which is 6900h's
+                                                   answer, and 46h setting them (6901h's); category 08h, or
+                                                   FAT32's 48h */
         if ((r->cx & 0xFF) == 0x66 && ((r->cx >> 8) == 0x08 || (r->cx >> 8) == 0x48))
             return serial(m, r);
+        if ((r->cx & 0xFF) == 0x46 && ((r->cx >> 8) == 0x08 || (r->cx >> 8) == 0x48))
+            return set_serial(m, r);            /* (set media ID) */
         return err(m, r, 0x01);
     case 0x08:
     case 0x09:
@@ -1381,6 +1385,28 @@ static int serial(struct dos_m *m, struct dos_regs86 *r)
         wr8(m, b + 0x11 + i, (unsigned char)(v->fat.fat == 32 ? "FAT32   " : v->fat.fat == 16 ? "FAT16   "
                                                                                                : "FAT12   ")[i]);
     return ok(r);
+}
+
+/* 440Dh 0846h and 6901h: BL's drive's serial number, label and file system's name from DS:DX (6900h's layout)
+   into its boot sector; the root folder's label entry stays as it is, as MS-DOS 7.1 leaves it (fat.h). */
+static int set_serial(struct dos_m *m, struct dos_regs86 *r)
+{
+    unsigned long b = lin(r->ds, r->dx);
+    int d = (r->bx & 0xFF) ? (int)(r->bx & 0xFF) - 1 : m->cds.current, e;
+    struct fsv_vol *v;
+    unsigned char label[11], fstype[8];
+    unsigned i;
+
+    if (d < 0 || d >= DOS_DRIVES || !(v = vol_of(m, d)))
+        return err(m, r, 0x0F);
+    for (i = 0; i < 11; i++)
+        label[i] = (unsigned char)rd8(m, b + 6 + i);
+    for (i = 0; i < 8; i++)
+        fstype[i] = (unsigned char)rd8(m, b + 0x11 + i);
+    e = fsv_set_media(v, rd16(m, b + 2) | (unsigned long)rd16(m, b + 4) << 16, label, fstype);
+    if (e == FAT_EROFS)
+        return err(m, r, 0x13);                 /* (write-protected) */
+    return e ? err(m, r, 0x1F) : ok(r);         /* (no extended boot signature, or the disk said no) */
 }
 
 /* 7302h: DL's drive's extended DPB at ES:DI (CX bytes, 3Fh at least), as MS-DOS 7.1 gives it for any FAT drive:
@@ -2352,13 +2378,7 @@ static int fcb_find(struct dos_m *m, struct dos_regs86 *r, int first)
     if (e)
         return DOS21_DONE;
     memset(ent, 0, sizeof ent);
-    if (dta[0x15] & FAT_A_LABEL) {              /* (eleven characters, no dot) */
-        memset(ent, ' ', 11);
-        for (k = 0; k < 11 && dta[0x1E + k]; k++)
-            ent[k] = dta[0x1E + k];
-    } else {
-        dos_name11((const char *)dta + 0x1E, ent);
-    }
+    dos_name11((const char *)dta + 0x1E, ent);  /* (a label's too: find.c gives it a file's dot) */
     ent[11] = dta[0x15];
     memcpy(ent + 22, dta + 0x16, 4);            /* (the time, the date) */
     memcpy(ent + 28, dta + 0x1A, 4);            /* (the size) */
@@ -2380,6 +2400,94 @@ static int fcb_find(struct dos_m *m, struct dos_regs86 *r, int first)
         wr8(m, out + 1 + k, ent[k]);
     set_al(r, 0);
     return DOS21_DONE;
+}
+
+/* The volume's label through an extended FCB with attribute 08h, DOS 2's way, which MS-DOS 7.1 keeps
+   (tests/dos/dosdiff.c's L lines, its answers on a FAT12 floppy): 16h makes it in the root (FFh if there is one),
+   13h deletes it, 17h renames it, from any folder; making and deleting set the boot sector's copy too, renaming
+   doesn't (fat.h). The FCB's 11 bytes are taken as MS-DOS 7.1 takes them: packed as a file's name and parted
+   again at its first dot ("DD.IFF" in them is the name DD and the extension IFF), in the code page's capitals; a
+   '?' (but in 13h's and 17h's pattern) or a blank name: FFh. */
+static int fcb_label11(struct dos_m *m, unsigned long at, unsigned char n11[11])
+{
+    unsigned char raw[11];
+    char packed[16];
+    const char *p;
+    int i, k;
+
+    for (i = 0; i < 11; i++)
+        if ((raw[i] = (unsigned char)rd8(m, at + i)) == '?')
+            return 0;
+    if (!fcb_str(0, raw, packed))
+        return 0;
+    memset(n11, ' ', 11);
+    for (p = packed + 2, k = 0; *p && *p != '.'; p++)
+        if (k < 8)
+            n11[k++] = dos_upper(m->cp, (unsigned char)*p);
+    if (*p == '.')
+        for (p++, k = 8; *p && k < 11; p++)
+            n11[k++] = dos_upper(m->cp, (unsigned char)*p);
+    return 1;
+}
+
+/* The drive an FCB at f names (its first byte: 0 the current one), and its FAT volume, or 0. */
+static struct fsv_vol *fcb_vol(struct dos_m *m, unsigned long f, int *drive)
+{
+    unsigned d = rd8(m, f);
+
+    if (d > DOS_DRIVES)
+        return 0;
+    *drive = d ? (int)d - 1 : m->cds.current;
+    return vol_of(m, *drive);
+}
+
+/* The label's 11 bytes, if the FCB's pattern (its '?' any character, capitals or not) is them: 1. */
+static int fcb_label_is(struct dos_m *m, unsigned long at, const unsigned char lab[11])
+{
+    unsigned i, c;
+
+    for (i = 0; i < 11; i++)
+        if ((c = rd8(m, at + i)) != '?' && dos_upper(m->cp, (unsigned char)c) != lab[i])
+            return 0;
+    return 1;
+}
+
+/* 16h, 13h, 17h and 10h for an extended FCB whose attribute asks for the label: AL. */
+static unsigned fcb_label(struct dos_m *m, unsigned long f, unsigned ah)
+{
+    unsigned char lab[11], n11[11];
+    int drive, have;
+    struct fsv_vol *v = fcb_vol(m, f, &drive);
+
+    m->last_error = 0x02;
+    if (!v || (have = fsv_label_get(v, lab, 0)) < 0)
+        return 0xFF;
+    switch (ah) {
+    case 0x16:
+        if (!fcb_label11(m, f + 1, n11) || fsv_label_make(v, n11) != 0)
+            return 0xFF;
+        wr8(m, f, (unsigned)drive + 1);         /* (the FCB as an opened file's: nothing to read) */
+        wr16(m, f + F_BLOCK, 0);
+        wr16(m, f + F_RECSIZE, 0x80);
+        wr32(m, f + F_SIZE, 0);
+        return 0;
+    case 0x13:
+        return have && fcb_label_is(m, f + 1, lab) && fsv_label_delete(v) == 0 ? 0 : 0xFF;
+    case 0x17: {
+        unsigned i, c;
+        unsigned char raw[11];
+
+        if (!have || !fcb_label_is(m, f + 1, lab))
+            return 0xFF;
+        for (i = 0; i < 11; i++)                /* (a '?' keeps the old label's character) */
+            raw[i] = (unsigned char)((c = rd8(m, f + 0x11 + i)) == '?' ? lab[i] : c);
+        for (i = 0; i < 11; i++)
+            wr8(m, f + 0x11 + i, raw[i]);
+        return fcb_label11(m, f + 0x11, n11) && fsv_label_rename(v, n11) == 0 ? 0 : 0xFF;
+    }
+    default:                                    /* (10h: closed, if there is one) */
+        return have ? 0 : 0xFF;
+    }
 }
 
 /* 13h (the files the FCB's name matches deleted: 00h if one was) and 17h (each renamed to the name at the
@@ -2439,6 +2547,13 @@ static int fcb(struct dos_m *m, struct dos_regs86 *r, unsigned ah)
     struct fsv_vol *v;
     struct fat_ent fe;
 
+    /* (16h: any attribute with 08h makes a label, as DOS's create does; 10h, 13h, 17h: 08h alone, so that a file
+       opened with 3Fh is closed as a file) */
+    if (ext && (ah == 0x16 ? (attr & FAT_A_LABEL) != 0
+                           : (ah == 0x10 || ah == 0x13 || ah == 0x17) && (attr & 0xFF) == FAT_A_LABEL)) {
+        set_al(r, fcb_label(m, f, ah));
+        return DOS21_DONE;
+    }
     switch (ah) {
     case 0x0F:
     case 0x16:
@@ -3071,6 +3186,8 @@ static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
     case 0x69:
         if (al == 0x00)
             return serial(m, r);
+        if (al == 0x01)
+            return set_serial(m, r);
         break;
     case 0x6C:
         if (al == 0)

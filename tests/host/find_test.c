@@ -109,9 +109,10 @@ int main(void)
         fails++;
     }
 
-    /* The label: 08h alone, in the root. */
+    /* The label: 08h alone, in the root: the root folder's entry (the formatter's, attribute 08h), named as MS-DOS
+       7.1 names it, a dot after the eighth character. */
     r = dos_findfirst(&vol, 2, "\\", "*.*", 0x08, 437, a);
-    if (r || a[0x15] != 0x08 || strcmp((char *)a + 0x1E, "FINDLABEL") || dos_findnext(&vol, a) != 0x12) {
+    if (r || a[0x15] != 0x08 || strcmp((char *)a + 0x1E, "FINDLABE.L") || dos_findnext(&vol, a) != 0x12) {
         printf("FAIL the label: %d %02x \"%s\"\n", r, a[0x15], a + 0x1E);
         fails++;
     }

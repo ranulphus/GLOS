@@ -2022,4 +2022,175 @@ int fat_settime(struct fat_vol *v, const char *path, unsigned short date, unsign
     return change_entry(v, path, 1, date, time);
 }
 
+/* ---- the volume's label, as MS-DOS 7.1 keeps it (tests/dos/dosdiff.c's L lines, its answers on a FAT12 floppy):
+   an entry of the root folder, attribute 28h (a label, archive), its written time alone set; and the boot
+   sector's copy, which making and deleting the entry set too ("NO NAME    " for none) and renaming doesn't.
+   (Here with the writing half: GLOS's own loader has no use for labels.) */
+
+/* The root folder's first label entry (not a long name's part, not deleted): its index and 32 bytes; FAT_ENOENT. */
+static int label_slot(struct fat_vol *v, unsigned long *index, unsigned char ent[32])
+{
+    struct fat_dir d;
+    unsigned long i;
+    unsigned char *p;
+    int err = 0;
+
+    memset(&d, 0, sizeof d);
+    d.v = v;
+    for (i = 0; i < 65536UL && (p = dir_entry(&d, i, &err)) != 0; i++) {
+        if (!p[0])
+            break;
+        if (p[0] == 0xE5 || (p[11] & 0x3F) == FAT_A_LFN || !(p[11] & FAT_A_LABEL))
+            continue;
+        *index = i;
+        memcpy(ent, p, 32);
+        return FAT_OK;
+    }
+    return err ? err : FAT_ENOENT;
+}
+
+int fat_label_get(struct fat_vol *v, unsigned char out[11], unsigned char entry[32])
+{
+    unsigned long i;
+    unsigned char ent[32];
+    int r = label_slot(v, &i, ent);
+
+    if (r)
+        return r == FAT_ENOENT ? 0 : r;
+    if (entry)
+        memcpy(entry, ent, 32);
+    memcpy(out, ent, 11);
+    if (out[0] == 0x05)
+        out[0] = 0xE5;                          /* (a first byte E5h is kept as 05h: E5h marks a deleted entry) */
+    return 1;
+}
+
+/* 11 bytes a label may be: none below 20h, no '?', not all blank. */
+static int label_ok(const unsigned char n[11])
+{
+    int i, blank = 1;
+
+    for (i = 0; i < 11; i++) {
+        if (n[i] < 0x20 || n[i] == '?')
+            return 0;
+        if (n[i] != ' ')
+            blank = 0;
+    }
+    return !blank;
+}
+
+/* The boot sector's serial number, label and file system's name (those given; 0: left), where its extended
+   boot signature (29h) is: FAT_ENOTSUP where it isn't. FAT32's backup boot sector the same, where it is one (so
+   that fsck.fat finds the two alike). */
+static int boot_set(struct fat_vol *v, const unsigned long *serial, const unsigned char label[11],
+                    const unsigned char fstype[8])
+{
+    unsigned off = v->fat == 32 ? 64 : 36;      /* (the drive number's byte; the signature 2 on, the serial 3,
+                                                   the label 7, the file system's name 18) */
+    unsigned long at[2], bk = 0;
+    unsigned char *b;
+    int err = 0, n = 1, k, r;
+
+    at[0] = 0;
+    if (v->fat == 32 && (b = sector(v, 0, &err)) != 0 && (bk = rd16(b + 50)) != 0 && bk < v->fat0
+        && bk != v->fsinfo)
+        at[n++] = bk;
+    for (k = 0; k < n; k++) {
+        b = sector(v, at[k], &err);
+        if (!b)
+            return err;
+        if (b[off + 2] != 0x29) {
+            if (!k)
+                return FAT_ENOTSUP;
+            continue;                           /* (a backup that isn't one) */
+        }
+        if (serial)
+            wr32(b + off + 3, *serial);
+        if (label)
+            memcpy(b + off + 7, label, 11);
+        if (fstype)
+            memcpy(b + off + 18, fstype, 8);
+        if ((r = put_sector(v, at[k], b)) != 0)
+            return r;
+    }
+    if (serial)
+        v->serial = *serial;
+    if (label)
+        copy_label(v->label, label);
+    return FAT_OK;
+}
+
+int fat_label_make(struct fat_vol *v, const unsigned char name11[11])
+{
+    unsigned long i, now = now_of(v);
+    unsigned char ent[32];
+    int r = begin_write(v);
+
+    if (r)
+        return r;
+    if (!label_ok(name11))
+        return FAT_EINVAL;
+    r = label_slot(v, &i, ent);
+    if (r != FAT_ENOENT)
+        return r ? r : FAT_EEXIST;
+    if ((r = find_slots(v, 0, 1, &i)) != 0)
+        return r;
+    memset(ent, 0, 32);
+    memcpy(ent, name11, 11);
+    if (ent[0] == 0xE5)
+        ent[0] = 0x05;
+    ent[11] = FAT_A_LABEL | FAT_A_ARCHIVE;
+    wr16(ent + 22, now & 0xFFFF);               /* (written, alone: MS-DOS 7.1 leaves created and accessed 0) */
+    wr16(ent + 24, now >> 16);
+    if ((r = put_slot(v, 0, i, ent)) != 0)
+        return r;
+    r = boot_set(v, 0, name11, 0);
+    return r == FAT_ENOTSUP ? FAT_OK : r;
+}
+
+int fat_label_rename(struct fat_vol *v, const unsigned char name11[11])
+{
+    unsigned long i;
+    unsigned char ent[32];
+    int r = begin_write(v);
+
+    if (!r && !label_ok(name11))
+        r = FAT_EINVAL;
+    if (!r)
+        r = label_slot(v, &i, ent);
+    if (r)
+        return r;
+    memcpy(ent, name11, 11);
+    if (ent[0] == 0xE5)
+        ent[0] = 0x05;
+    return put_slot(v, 0, i, ent);
+}
+
+int fat_label_delete(struct fat_vol *v)
+{
+    unsigned long i;
+    unsigned char ent[32];
+    int r = begin_write(v), n = 0;
+
+    while (!r && (r = label_slot(v, &i, ent)) == FAT_OK) {
+        ent[0] = 0xE5;
+        r = put_slot(v, 0, i, ent);
+        n++;                                    /* (every one: a volume with two has the first's twin) */
+    }
+    if (r != FAT_ENOENT)
+        return r;
+    if (!n)
+        return FAT_ENOENT;
+    r = boot_set(v, 0, (const unsigned char *)"NO NAME    ", 0);
+    return r == FAT_ENOTSUP ? FAT_OK : r;
+}
+
+int fat_set_media(struct fat_vol *v, unsigned long serial, const unsigned char label[11],
+                  const unsigned char fstype[8])
+{
+    int r = begin_write(v);
+
+    return r ? r : boot_set(v, &serial, label, fstype);
+}
+
 #endif /* FAT_READ_ONLY */

@@ -26,5 +26,8 @@ int dos_findnext_cd(struct iso_vol *cv, unsigned char *dta);
 
 /* An entry's short name ("NAME.EXT", "." and "..") as its 11 bytes in a folder. */
 void dos_name11(const char *s, unsigned char out[11]);
+/* A label's 11 bytes as a search gives its name: the first eight without their trailing blanks, then a dot and the
+   last three without theirs, if any are left ("DDIFF LA.BEL", "DD.IFF"). */
+void dos_label_name(const unsigned char n11[11], char out[13]);
 
 #endif

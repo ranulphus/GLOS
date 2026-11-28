@@ -178,6 +178,23 @@ int fat_settime(struct fat_vol *v, const char *path, unsigned short date, unsign
    code page's. 0 and *lfn whether the name needs long-name entries; an error. */
 int fat_short_name(struct fat_vol *v, unsigned long dir, const char *name, unsigned char out[11], int *lfn);
 
+/* The volume's label, as MS-DOS 7.1 keeps it: an entry of the root folder (attribute 28h, its written time
+   alone set) and the boot sector's copy (offset 2Bh, FAT32's 47h, where the extended boot signature 29h is).
+   Making and deleting the entry set the boot sector's copy too ("NO NAME    " for none), as MS-DOS 7.1's FCB calls
+   (16h, 13h) do; renaming it (17h) doesn't; 440Dh 0846h sets the boot sector's alone. Labels are 11 bytes in the
+   code page, blank-filled, none below 20h, no '?', not all blank (FAT_EINVAL); callers make them upper case.
+   Not in a FAT_READ_ONLY build. */
+/* The root folder's label into out (and its whole entry into entry, unless 0): 1, 0 if it has none, or an error. */
+int fat_label_get(struct fat_vol *v, unsigned char out[11], unsigned char entry[32]);
+/* Made (FAT_EEXIST if there is one), renamed (FAT_ENOENT if there is none), deleted (every one; FAT_ENOENT). */
+int fat_label_make(struct fat_vol *v, const unsigned char name11[11]);
+int fat_label_rename(struct fat_vol *v, const unsigned char name11[11]);
+int fat_label_delete(struct fat_vol *v);
+/* The boot sector's serial number, label and file system's name (FAT32's backup boot sector's too): 440Dh 0846h.
+   FAT_ENOTSUP without the extended boot signature. */
+int fat_set_media(struct fat_vol *v, unsigned long serial, const unsigned char label[11],
+                  const unsigned char fstype[8]);
+
 /* Free clusters, counted in the FAT (FSInfo's count is a hint, which Windows doesn't always keep). */
 int fat_free(struct fat_vol *v, unsigned long *clusters);
 

@@ -190,6 +190,150 @@ static void fcb_list(const char *what, int ext)
     printf("\n");
 }
 
+/* ---- the volume's label (L lines): an extended FCB with attribute 08h makes (16h), renames (17h) and deletes
+   (13h) it, DOS 2's way, which MS-DOS 7.1's LABEL.EXE still takes; 440Dh 0846h sets the boot sector's copy (0866h
+   reads it). What each does to the root folder's entry and to the boot sector's copy, from a known start (no label
+   in the root, the boot sector's DDIFF INIT, its serial number kept); the disk's own label, never printed, is put
+   back at the end. */
+static unsigned char mid[0x20];
+
+/* 440Dh 08xxh on the FCB drive, DS:DX mid (minor 66h gets, 46h sets): CF. */
+static unsigned media(unsigned minor)
+{
+    ds_es();
+    r.x.ax = 0x440D;
+    r.x.bx = fdrive + 1;
+    r.x.cx = 0x0800 | minor;
+    r.x.dx = (unsigned)mid;
+    dos();
+    return r.x.cflag ? 1 : 0;
+}
+
+/* The label as 11h finds it in the root (an extended FCB's search) and the boot sector's, by 0866h. */
+static void lab_state(const char *what)
+{
+    unsigned al;
+    char root[16], boot[16];
+
+    fcb_make("???????????", 0x08);
+    al = fcall(0x11, 0);
+    if (al == 0)
+        sprintf(root, "\"%.11s\"%02X", (char *)fdta + 8, fdta[7 + 12]);
+    else
+        sprintf(root, "none");
+    memset(mid, 0, sizeof mid);
+    if (media(0x66))
+        sprintf(boot, "cf=1 ax=%04X", r.x.ax);
+    else
+        sprintf(boot, "\"%.11s\"", (char *)mid + 6);
+    call_dx(0x4E00, "\\*.*", 0x08);            /* (4Eh's name for it: DOS's dot after the eighth character) */
+    printf("L %-12s al=%02X root=%s boot=%s 4Eh=%s%s%s\n", what, al, root, boot, r.x.cflag ? "none" : "\"",
+           r.x.cflag ? "" : (char *)fdta + 0x1E, r.x.cflag ? "" : "\"");
+}
+
+/* Any label in the root deleted (an extended FCB's 13h): AL. */
+static unsigned lab_delete(void)
+{
+    fcb_make("???????????", 0x08);
+    return fcall(0x13, 0);
+}
+
+/* A label made (16h, then 10h): "AL/AL" ("FF/-" when 16h refuses). */
+static void lab_make(const char *what, const char *n11)
+{
+    unsigned al, a2;
+
+    fcb_make(n11, 0x08);
+    al = fcall(0x16, 0);
+    if (al == 0) {
+        a2 = fcall(0x10, 0);
+        printf("L 16h %-8s al=%02X close=%02X\n", what, al, a2);
+    } else {
+        printf("L 16h %-8s al=%02X\n", what, al);
+    }
+}
+
+static void labels(void)
+{
+    unsigned char was_root[11], was_boot[11];
+    int had_root, had_boot;
+    unsigned al;
+
+    call_dx(0x3B00, "\\", 0);
+    fcb_make("???????????", 0x08);
+    had_root = fcall(0x11, 0) == 0;
+    if (had_root)
+        memcpy(was_root, fdta + 8, 11);
+    memset(mid, 0, sizeof mid);
+    had_boot = media(0x66) == 0;
+    memcpy(was_boot, mid + 6, 11);
+    lab_delete();
+    if (had_boot) {
+        memcpy(mid + 6, "DDIFF INIT ", 11);
+        printf("L 0846h init cf=%u\n", media(0x46));
+    } else {
+        printf("L 0866h cf=1 ax=%04X\n", r.x.ax);
+    }
+    lab_state("start");
+    printf("L 13h none al=%02X\n", lab_delete());
+    lab_make("make", "DDIFF LABEL");
+    lab_state("made");
+    fcb_make("???????????", 0x08);              /* (the entry 11h found: which of its fields DOS fills) */
+    if (fcall(0x11, 0) == 0) {
+        unsigned char *e = fdta + 8;
+#define SET(o) (*(unsigned *)(e + (o)) ? "set" : "0")
+        printf("L made entry res=%02X c10=%s ctime=%s cdate=%s adate=%s hi=%04X wtime=%s wdate=%s cl=%04X size=%lu\n",
+               e[12], e[13] ? "set" : "0", SET(14), SET(16), SET(18), *(unsigned *)(e + 20), SET(22), SET(24),
+               *(unsigned *)(e + 26), *(unsigned long *)(e + 28));
+#undef SET
+    }
+    call_dx(0x4E00, "\\*.*", 0x08);
+    printf("L 4Eh label cf=%u name=\"%s\" attr=%02X\n", r.x.cflag ? 1 : 0, r.x.cflag ? "" : (char *)fdta + 0x1E,
+           r.x.cflag ? 0 : fdta[0x15]);
+    lab_make("another", "DDIFF TWO  ");
+    lab_state("another");
+    fcb_make("???????????", 0x08);
+    memcpy(fcb + 7 + 0x11, "DDIFF REN  ", 11);
+    printf("L 17h rename al=%02X\n", fcall(0x17, 0));
+    lab_state("renamed");
+    printf("L 13h delete al=%02X\n", lab_delete());
+    lab_state("deleted");
+    lab_make("lower", "ddiff lower");
+    lab_state("lower");
+    lab_delete();
+    lab_make("wild", "DDIFF?Q    ");
+    lab_state("wild");
+    lab_delete();
+    lab_make("dot", "DD.IFF     ");
+    lab_state("dot");
+    lab_delete();
+    lab_make("blank", "           ");
+    lab_state("blank");
+    lab_delete();
+    lab_make("root", "DDIFF ROOT ");
+    memset(mid, 0, sizeof mid);
+    if (media(0x66) == 0) {
+        memcpy(mid + 6, "DDIFF SET  ", 11);
+        al = media(0x46);
+        printf("L 0846h set cf=%u\n", al);
+    }
+    lab_state("set");
+    printf("L 13h last al=%02X\n", lab_delete());
+    lab_state("last");
+    /* the disk's own label back (not printed) */
+    if (had_root) {
+        fcb_make("           ", 0x08);
+        memcpy(fcb + 8, was_root, 11);
+        if (fcall(0x16, 0) == 0)
+            fcall(0x10, 0);
+    }
+    if (had_boot && media(0x66) == 0) {
+        memcpy(mid + 6, was_boot, 11);
+        media(0x46);
+    }
+    call_dx(0x3B00, "\\DDIFF", 0);
+}
+
 static void fcbs(unsigned cur)
 {
     unsigned char *f;
@@ -406,6 +550,7 @@ static void fcbs(unsigned cur)
     call_dx(0x4100, "FCBN.DAT", 0);
     call_dx(0x4100, "FCBX1.BAK", 0);
     call_dx(0x4100, "FCBT1.DAT", 0);
+    labels();
     if (fdrive != cur) {
         call_dx(0x3B00, "\\", 0);
         call_dx(0x3A00, "\\DDIFF", 0);
@@ -837,7 +982,7 @@ int main(int argc, char **argv)
     unsigned h, h2, seg, cur;
     unsigned char dta[64];
 
-    printf("DOSDIFF 4\n");
+    printf("DOSDIFF 5\n");
     /* the version */
     r.x.ax = 0x3000;
     r.x.bx = 0x1234, r.x.cx = 0x5678;

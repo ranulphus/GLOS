@@ -12,6 +12,23 @@ static void wr16(unsigned char *p, unsigned v)
     p[1] = (unsigned char)(v >> 8);
 }
 
+void dos_label_name(const unsigned char n11[11], char out[13])
+{
+    int n, k = 0, i;
+
+    for (n = 8; n && n11[n - 1] == ' '; n--)
+        ;
+    for (i = 0; i < n; i++)
+        out[k++] = (char)n11[i];
+    for (n = 3; n && n11[8 + n - 1] == ' '; n--)
+        ;
+    if (n)
+        out[k++] = '.';
+    for (i = 0; i < n; i++)
+        out[k++] = (char)n11[8 + i];
+    out[k] = 0;
+}
+
 void dos_name11(const char *s, unsigned char out[11])
 {
     int k = 0;
@@ -78,13 +95,19 @@ int dos_findfirst(struct fsv_vol *v, unsigned drive, const char *dir, const char
     dta[0x0C] = (unsigned char)attr;
     wr16(dta + 0x0F, (unsigned)(e.cluster & 0xFFFF));
     wr16(dta + 0x11, (unsigned)(e.cluster >> 16));
-    /* The volume's label: 08h alone looks for it, in the root. */
+    /* The volume's label: 08h alone looks for it, in the root: the root folder's label entry, as MS-DOS 7.1 finds it
+       (not the boot sector's copy: tests/dos/dosdiff.c's L lines), its name as a file's, a dot after the eighth
+       character ("DDIFF LA.BEL"), its attribute (28h) and times the entry's. */
     if ((attr & 0xFF) == FAT_A_LABEL) {
-        if (e.cluster || !v->fat.label[0])
+        unsigned char n11[11], ent[32];
+
+        if (e.cluster || fsv_label_get(v, n11, ent) != 1)
             return 0x12;
-        dta[0x15] = FAT_A_LABEL;
+        dta[0x15] = ent[11];
+        memcpy(dta + 0x16, ent + 22, 4);        /* (the time, the date) */
+        memset(dta + 0x1A, 0, 4);
         memset(dta + 0x1E, 0, 13);
-        strncpy((char *)dta + 0x1E, v->fat.label, 12);
+        dos_label_name(n11, (char *)dta + 0x1E);
         wr16(dta + 0x0D, 0xFFFF);               /* (the search is over) */
         return 0;
     }

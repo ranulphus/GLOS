@@ -184,5 +184,50 @@ wvol wfat32 40960 "-F 32 -s 1" - 100
 wvol wglos12 1440 "glos 12" "GLOS N1A" 40
 wvol wglos16 65536 "glos 16" "GLOS N1A" 40
 wvol wglos32 204800 "glos 32" "GLOS N1A" 30
+
+# lvol NAME KB HOW: a new volume's label made, renamed, set (440Dh 0846h's way) and deleted by `fat_test label`,
+# which leaves GLOS LABEL in the root folder and the boot sector, serial number 1234-ABCD: fsck.fat finds nothing to
+# mend (FAT32's two boot sectors alike), mtools reads the label, and the boot sector's copy is it.
+lvol() {
+    name=$1 kb=$2 how=$3 img=$dir/$1.img
+    case "$how" in
+        glos*) "$bin" format "$img" $((kb * 2)) "${how#glos }" > "$dir/$name.format" || { echo "FAIL $name: format"; fails=$((fails + 1)); return; } ;;
+        *) mkfs.fat $how -C "$img" "$kb" > "$dir/$name.mkfs" 2>&1 || { echo "FAIL $name: mkfs.fat"; fails=$((fails + 1)); return; } ;;
+    esac
+    if ! "$bin" label "$img" > "$dir/$name.out" 2>&1; then
+        echo "FAIL $name: label"; head -20 "$dir/$name.out"; fails=$((fails + 1)); return
+    fi
+    if ! fsck.fat -n "$img" > "$dir/$name.fsck" 2>&1; then
+        echo "FAIL $name: fsck.fat"; head -12 "$dir/$name.fsck"; fails=$((fails + 1))
+    fi
+    got=$(mlabel -s -i "$img" :: 2>&1)
+    case "$got" in
+        *"Volume label is GLOS LABEL"*) ;;
+        *) echo "FAIL $name: mlabel says: $got"; fails=$((fails + 1)) ;;
+    esac
+    boot=$(python3 - "$img" <<'PY'
+import struct, sys
+b = open(sys.argv[1], "rb").read(512 * 16)
+big = struct.unpack_from("<H", b, 22)[0] == 0             # (FAT32: no 16-bit FAT size)
+o = 64 if big else 36
+s = "%s:%08X" % (b[o + 7:o + 18].decode("latin-1"), struct.unpack_from("<I", b, o + 3)[0])
+if big:
+    bk = struct.unpack_from("<H", b, 50)[0]
+    s += " backup=" + ("same" if b[bk * 512:bk * 512 + 512] == b[:512] else "differs")
+print(s)
+PY
+)
+    case "$boot" in
+        "GLOS LABEL :1234ABCD"|"GLOS LABEL :1234ABCD backup=same") ;;
+        *) echo "FAIL $name: the boot sector's label and serial: $boot"; fails=$((fails + 1)) ;;
+    esac
+    echo "$name: label made, renamed, set and deleted ($(sed -n 's/^LABEL //p' "$dir/$name.out"); $boot)"
+    rm -f "$img"
+}
+lvol lfloppy 1440 "-n N1BFLOPPY"
+lvol lfat16 32768 "-F 16"
+lvol lfat32 40960 "-F 32 -s 1 -n N1LFAT32"
+lvol lglos12 1440 "glos 12"
+lvol lglos32 204800 "glos 32"
 echo "fat_test.sh: $fails failures"
 [ "$fails" = 0 ]
